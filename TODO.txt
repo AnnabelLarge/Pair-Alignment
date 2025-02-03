@@ -1,0 +1,177 @@
+Changes to note:
+=================
+- valid tasks: train, resume_train, eval
+
+- valid pred_model_type: feedfroward, neural_pairhmm, pairhmm
+
+- changed order for categorical encoding of states: new order is 
+  > pad: 0
+  > M: 1
+  > I: 2
+  > D: 3
+  > start: 4
+  > end: 5
+
+- don't allow weight tying in neural_pairhmm
+
+- don't allow eos_as_match in either pairhmm models (will create 5x5 transition matrices instead)
+
+- remove debug_flag option from pairhmm (specific to evolpairhmmore codebase)
+
+- default tokens (that I won't change) are:
+  > seq_padding_idx: 0
+  > align_padding_idx: -9
+  > base_alphabet_size: 23
+  > full_alphabet_size: 44
+
+- have some things in the training script that are used at debug time; mark them in comments with "DEBUG-ONLY"
+
+- changed "OUT_PROJ.pkl" to "FINAL_PRED.pkl"
+
+- sometimes I need a 3x3 transition matrix, sometimes I need 4x4; remade inputs to reflect this
+  > by default, read 5x5 input and transform to 4x4 (should remake, but I'm busy)
+  > if you want 3x3 input, recalculate this in CountsDset.py
+
+- training and eval functions have a little bit of
+  flexibility in how they're defined, but at training
+  and eval time, the trace should be the same for all:
+    - train_one_batch
+      >> batch
+      >> training_rngkey
+      >> all_trainstates
+      >> max_seq_len (None for using precalculated counts)
+      >> max_align_len (None for using precalculated counts)
+      
+    - eval_one_batch
+      >> batch
+      >> all_trainstates
+      >> max_seq_len (None for using precalculated counts)
+      >> max_align_len (None for using precalculated counts)
+
+  - updated the following about neural tkf
+    - added joint transition and emission models
+    - expanded to 4x4 matrices
+    - updated scoring function for 4x4 matrices
+    - split into global/local lam_mu module, and global/local TKF92 r extension prob
+      > if running some variant of TKF91, then don't calculate an r extension prob
+
+
+REFACTOR LIST:
+==============
+[X] all dataloaders
+[ip] train CLI (skeleton done)
+
+[ip] utils
+  [X] edit_argparse
+  [X] setup_training_dir
+  [X] sequence_length_helpers
+  [X] tensorboard_recording_utils (kept as-is for all models, may need to update for pairhmm models?)
+
+[ip] train_eval_fns
+  [X] build_optimizer
+
+[X] models (update all blocks, hard-code some defaults, update script that generates config file)
+  [X] feedforward_predict
+    [X] initializer
+
+  [X] model_utils
+  
+  [X] sequence_embedders
+    [X] cnn
+    [X] lstm
+    [X] transformer
+    [X] mamba
+    [X] other infrastructure
+  
+  [ip] neural_hmm_predict
+    [X] initializer
+    [X] concat_feats_to_params
+    [X] pairHMM_emissions_blocks
+    [X] pairHMM_transitions_blocks
+    [X] scoring_fns
+
+
+when done with train CLI:
+-------------------------
+[ ] eval CLI
+[ ] resume_train CLI
+[ ] tabulate_model
+
+
+
+
+
+
+
+
+
+Dogshow Evolpair Prediction head variants:
+============================================
+
+controls:
+----------
+
+1. reduction to EvolPairHMMore calculation (all global TKF91)
+2. reduction to EvolPairHMMore calculation (all global TKF92)
+
+
+using per-position embeddings (of any kind):
+--------------------------------------------
+- embeddings -> some combination of local+global params (already implemented)
+  1.  LOCAL exch, global pi, global tkf92
+  2. global exch,  LOCAL pi, global tkf92
+  3. global exch, global pi,  LOCAL tkf92
+  4. global exch,  LOCAL pi,  LOCAL tkf92
+  5. all LOCAL: exch, pi, tkf92
+
+- direct collaries to method with different site classes
+  1. global exch, LOCAL pi, global lambda and mu, LOCAL r
+
+
+Things that should be adjustable:
+- number of repeats, reduction size per layer
+- whether or not to average pool
+
+
+
+Things to hold constant:
+- dropout (when appropriate)
+- norm type
+- activations
+- if average pooling: window size
+- don't take these options away from the base class, but overwrite them
+
+
+
+
+Counts-based calculations in DogShow:
+-------------------------------------
+  1. ignore sequence embedders entirely
+  2. load counts matrices from data (I already precomputed these)
+  3. potentially might need to update training loop, since you don't have a length dimension anymore?
+
+
+
+frequencies-based controls:
+----------------------------
+- load data, get descendant-only and anc-desc frequencies
+- score all sequences
+- return parameter matrices
+
+
+
+
+Unit test suite (after combining):
+----------------------------------
+- (counts-based): after loading appropriate paramters, my model calculates the same likelihood as Ian's implementation
+- (counts-based): TKF91 reduces to TKF92
+- (counts-based): pairHMM that ignores transitions and loads appropriate emission probability matrices should match likelihood of frequencies-based controls
+
+- (over length, TKF): per-position calculation matches counts-based implementation, when loading parameters
+- (over length, TKF): per-position calculation can optimize to same TKF indel parameters
+- (over length, feedforward): recover frequencies-based controls
+- (over length, general): sequence embedders are causal
+- (over length, general): scan version of likelihood functions match whole-sequence version
+
+- (ALL): joint probability = conditional x marginal 
+

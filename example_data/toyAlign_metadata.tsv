@@ -1,0 +1,2 @@
+	original_idx	pairID	ancestor	descendant	TREEDIST_anc-to-root	TREEDIST_desc-to-root	TREEDIST_stem-to-Root	TREEDIST_anc-to-desc	perc_seq_id	pfam	pfam_Nseqs	type	clan	anc_seq_len	desc_seq_len	alignment_len	num_matches	num_ins	num_del
+1	1	pair1	anc	desc	1	1	1	1	1	PF0000	1	none	none	2	2	3	1	1	1

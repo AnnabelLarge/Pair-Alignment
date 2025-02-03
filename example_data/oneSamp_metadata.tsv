@@ -1,0 +1,2 @@
+	original_idx	pairID	ancestor	descendant	TREEDIST_anc-to-root	TREEDIST_desc-to-root	TREEDIST_stem-to-Root	TREEDIST_anc-to-desc	perc_seq_id	pfam	pfam_Nseqs	type	clan	anc_seq_len	desc_seq_len	alignment_len	num_matches	num_ins	num_del
+0	272451	FW_PT6_PID009072	D3BK91_POLPP/340-1218	F4QDG7_CAVFA/342-1220	1.52464	1.54495	1.40855	0.25249	0.7929465301478953	PF05994	24	Family	CL0715	879	879	882	876	3	3

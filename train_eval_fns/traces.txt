@@ -1,0 +1,164 @@
+All possible named arguments:
+=============================
+provided once by partial:
+-------------------------
+all_model_instances
+loss_type
+norm_loss_by
+interms_for_tboard
+num_site_classes (not used yet)
+length_for_scan
+seq_padding_idx
+align_idx_padding
+
+used every train/eval loop:
+---------------------------
+batch
+training_rngkey
+all_trainstates
+max_seq_len (optional)
+max_align_len (optional)
+
+remove:
+-------
+which_alignment_states_to_encode (encoding already provided in batch)
+have_time_values? might not be able to remove...
+
+
+
+counts-based trace (training):
+==============================
+
+rename/remove these:
+---------------------
+                  all_counts   ->   batch
+                     t_array   ->   (REMOVE; provided in batch)
+                     pairHMM   ->   all_model_instances
+ (params_dict, hparams_dict)   ->   all_trainstates
+             training_rngkey   ->   training_rngkey (same)
+     loss_type='conditional'   ->   loss_type (same, but remove default)
+     norm_loss_by='desc_len'   ->   norm_loss_by (same, but remove default)
+           DEBUG_FLAG=False)   ->   (REMOVE)
+
+add these:
+----------
+interms_for_tboard
+num_site_classes (set to 1 for now; expand to independent sums over substitution site classes later)
+
+
+NEW trace:
+----------
+@ = parted at beginning
+
+batch
+training_rngkey
+all_model_instances
+all_trainstates
+@ loss_type 
+@ norm_loss_by 
+@ num_site_classes
+@ interms_for_tboard 
+
+(plus **kwargs)
+
+
+
+full alignment + seq embedders trace (training):
+=================================================
+
+remove these:
+-------------
+which_alignment_states_to_encode
+
+
+add these:
+----------
+loss_type
+
+
+NEW trace:
+----------
+@ = parted at beginning
+
+batch 
+training_rngkey
+all_model_instances
+all_trainstates
+max_seq_len
+max_align_len
+@ loss_type
+@ norm_loss_by
+@ interms_for_tboard
+@ seq_padding_idx
+@ align_idx_padding
+
+(plus **kwargs)
+
+
+WITH JAX.LAX.SCAN 
+full alignment + seq embedders trace (training):
+=================================================
+
+remove these:
+-------------
+which_alignment_states_to_encode
+have_time_values (if possible?)
+
+
+add these:
+----------
+loss_type
+
+
+NEW trace:
+----------
+@ = parted at beginning
+
+batch
+training_rngkey
+all_model_instances
+all_trainstates
+max_seq_len
+max_align_len
+@ length_for_scan
+@ loss_type
+@ norm_loss_by
+@ interms_for_tboard
+@ seq_padding_idx
+@ align_idx_padding
+
+(plus **kwargs)
+
+
+
+edits to eval functions:
+========================
+- remove extra_args_for_eval; only used this to have the option of saving transformer attention maps... which I never do
+- won't have training_rngkey (obviously)
+
+
+
+
+
+
+
+(FUTURE) markovian site classes trace (training):
+=================================================
+@ = parted at beginning
+
+batch 
+training_rngkey
+all_model_instances
+all_trainstates
+max_seq_len
+max_align_len
+@ loss_type
+@ norm_loss_by
+@ num_site_classes
+@ interms_for_tboard
+@ seq_padding_idx
+@ align_idx_padding
+
+(plus **kwargs)
+
+

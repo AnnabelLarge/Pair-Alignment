@@ -1,0 +1,33 @@
+	file	size	dtype
+25	fortySamp_AAcounts.npy	(20,)	int32
+6	fortySamp_AAcounts_subsOnly.npy	(20,)	int32
+28	fortySamp_aligned_mats.npy	(40, 2326, 4)	int16
+29	fortySamp_delCounts.npy	(40, 20)	int16
+31	fortySamp_insCounts.npy	(40, 20)	int16
+14	fortySamp_seqs_unaligned.npy	(40, 2326, 2)	uint8
+9	fortySamp_subCounts.npy	(40, 20, 20)	int16
+16	fortySamp_transCounts.npy	(40, 3, 3)	int16
+21	oneSamp_AAcounts.npy	(20,)	int32
+11	oneSamp_AAcounts_subsOnly.npy	(20,)	int32
+20	oneSamp_aligned_mats.npy	(1, 2326, 4)	int16
+23	oneSamp_delCounts.npy	(1, 20)	int16
+19	oneSamp_insCounts.npy	(1, 20)	int16
+22	oneSamp_seqs_unaligned.npy	(1, 2326, 2)	uint8
+7	oneSamp_subCounts.npy	(1, 20, 20)	int16
+26	oneSamp_transCounts.npy	(1, 3, 3)	int16
+0	sevenSamp_AAcounts.npy	(20,)	int32
+10	sevenSamp_AAcounts_subsOnly.npy	(20,)	int32
+30	sevenSamp_aligned_mats.npy	(7, 2326, 4)	int16
+5	sevenSamp_delCounts.npy	(7, 20)	int16
+2	sevenSamp_insCounts.npy	(7, 20)	int16
+15	sevenSamp_seqs_unaligned.npy	(7, 2326, 2)	uint8
+24	sevenSamp_subCounts.npy	(7, 20, 20)	int16
+1	sevenSamp_transCounts.npy	(7, 3, 3)	int16
+8	twoSamp_AAcounts.npy	(20,)	int32
+3	twoSamp_AAcounts_subsOnly.npy	(20,)	int32
+17	twoSamp_aligned_mats.npy	(2, 2326, 4)	int16
+12	twoSamp_delCounts.npy	(2, 20)	int16
+18	twoSamp_insCounts.npy	(2, 20)	int16
+13	twoSamp_seqs_unaligned.npy	(2, 2326, 2)	uint8
+27	twoSamp_subCounts.npy	(2, 20, 20)	int16
+4	twoSamp_transCounts.npy	(2, 3, 3)	int16

@@ -1,0 +1,44 @@
+for pred_model_type = 'feedforward':
+======================================
+top-level config contains:
+  - use_scan_fns: bool
+  - chunk_length: int
+  - add_prev_alignment_info: bool
+
+pred_config sub-dictionary contains:
+
+
+
+
+for pred_model_type = 'neural_pairhmm':
+======================================
+top-level config contains:
+  - use_scan_fns: bool
+  - chunk_length: int
+
+pred_config sub-dictionary contains:
+- indels_config: dict
+- equilibr_config: dict
+
+indel_config sub-sub-dictionary contains:
+- safe_grads: bool
+- tkf_err: float
+
+equilibr_config sub-sub-dictionary contains:
+- (ADDED AUTOMATICALLY): training_dset_aa_counts
+
+
+
+for pred_model_type = 'pairhmm':
+======================================
+top-level config contains:
+  - bos_eos_as_match: bool
+
+pred_config sub-dictionary contains:
+- indels_config: dict
+
+indel_config sub-sub-dictionary contains:
+- safe_grads: bool
+- tkf_err: float
+
+
