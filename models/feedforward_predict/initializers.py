@@ -20,8 +20,7 @@ import importlib
 import jax
 import jax.numpy as jnp
 from flax import linen as nn
-from flax.training import train_state
-from train_state import TrainState
+from flax.training.train_state import TrainState
 
 # # additional key entry for trainstate object (do I need this?)
 # class TrainState(train_state.TrainState):
@@ -260,7 +259,8 @@ def feedforward_params_instance( input_shapes,
                                  tx, 
                                  model_init_rngkey, 
                                  tabulate_file_loc,
-                                 model_config: dict = dict() ):
+                                 model_config: dict = dict(),
+                                 **kwargs ):
     #############
     ### imports #
     #############
@@ -381,4 +381,8 @@ def create_all_tstates(seq_shapes,
                      descendant_instance, 
                      finalpred_instance)
     
-    return all_trainstates, all_instances
+    
+    ### always use extract_embs concatenation function
+    from models.sequence_embedders.concatenation_fns import extract_embs as concat_fn
+    
+    return all_trainstates, all_instances, concat_fn

@@ -1,0 +1,3 @@
+training_wkdir	RESULTS_tkf91_load_params
+base_alphabet_size	23
+seq_padding_idx	0

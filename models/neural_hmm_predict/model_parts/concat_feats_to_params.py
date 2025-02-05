@@ -15,16 +15,19 @@ Take (potentially post-processed) concatenated outputs from both sequence
 classes available:
 ==================
 
-from file:
+misc:
 ----------
+Placeholder
 EvoparamsFromFile
 
 Global (one parameter set for all positions, all samples):
 -----------------------------------------------------------
 GlobalExchMat
 GlobalEqulVec
-GlobalTKF91Params
-GlobalTKF92Params
+GlobalEqulVecFromCounts
+GlobalEqulVecFromFile
+GlobalTKFLamMuRates
+GlobalTKF92ExtProb
 
 Local (unique params for each position, each sample):
 -----------------------------------------------------
@@ -32,7 +35,8 @@ Local (unique params for each position, each sample):
  across length of sequence)
 LocalExchMat
 LocalEqulVec
-LocalTKF92Params
+LocalTKFLamMuRates
+LocalTKF92ExtProb
 
 """
 # jumping jax and leaping flax
@@ -48,9 +52,21 @@ def bounded_sigmoid(x, min_val, max_val):
 
 
 ###############################################################################
-### FROM FILE   ###############################################################
+### MISC   ####################################################################
 ###############################################################################
-# for all
+class Placeholder(ModuleBase):
+    """
+    to ignore parameter set entirely
+    """
+    config: None
+    name: str
+    
+    @nn.compact
+    def __call__(self, 
+                 *args,
+                 **kwargs):
+        return None
+    
 class EvoparamsFromFile(ModuleBase):
     """
     load parameter set from file, and apply it to all samples, 
@@ -67,13 +83,12 @@ class EvoparamsFromFile(ModuleBase):
         with open(load_from_file, 'rb') as f:
             self.mat = jnp.load(f)
         
-        if len(self.mat.shape) < 3:
-            self.mat = self.mat[None, None, ...]
+        # give B and L dimensions
+        self.mat = self.mat[None, None, ...]
     
     def __call__(self, 
-             datamat = None, 
-             sow_intermediates = None, 
-             training = None):
+             *args,
+             **kwargs):
         
         return self.mat
     
@@ -97,7 +112,7 @@ class GlobalExchMat(ModuleBase):
     def setup(self):
         emission_alphabet_size = self.config['emission_alphabet_size']
         manual_init = self.config['manual_init']
-        self.min_val, self.max_val = self.config.get( 'exchange range',
+        self.min_val, self.max_val = self.config.get( 'exchange_range',
                                                       (1e-4, 10) )
         filename = self.config.get('load_from_file', None)
         
@@ -190,7 +205,34 @@ class GlobalEqulVec(ModuleBase):
         return nn.log_softmax( self.logits )
 
 
-class GlobalLamMuRates(ModuleBase):
+class GlobalEqulVecFromCounts(ModuleBase):
+    """
+    construct logprobs from the aa counts in the training set
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        # (alph,)
+        training_dset_aa_counts = self.config['training_dset_aa_counts']
+        
+        prob_equilibr = training_dset_aa_counts/training_dset_aa_counts.sum()
+        logprob_equilibr = jnp.log( jnp.where( prob_equilibr != 0,
+                                              prob_equilibr,
+                                              jnp.finfo('float32').smallest_normal
+                                              )
+                                   )
+        
+        # expand to to (B=1, L=1, alph)
+        self.logprob_equilibr = logprob_equilibr[None, None, :]
+        
+    def __call__(self,
+                 *args,
+                 **kwargs):
+        return self.logprob_equilibr
+
+
+class GlobalTKFLamMuRates(ModuleBase):
     """
     lambda (first param) range: (min_val, max_val); canonically (0, inf)
     offset (second param) range: (min_val, max_val); canonically (0,1)
@@ -203,20 +245,19 @@ class GlobalLamMuRates(ModuleBase):
     def setup(self):
         ### unpack config
         manual_init = self.config['manual_init']
-        self.tkf_err = self.config.get('tkf_err', 1e-4)
-        self.lam_min_val, self.lam_max_val = self.config.get( 'lambda range', 
-                                                               [self.tkf_err, 3] )
-        self.offs_min_val, self.offs_max_val = self.config.get( 'offset range', 
-                                                                [self.tkf_err, 0.333] )
         filename = self.config.get('load_from_file', None)
+        self.tkf_err = self.config.get('tkf_err', 1e-4)
+        self.lam_min_val, self.lam_max_val = self.config.get( 'lambda_range', 
+                                                               [self.tkf_err, 3] )
+        self.offs_min_val, self.offs_max_val = self.config.get( 'offset_range', 
+                                                                [self.tkf_err, 0.333] )
 
 
         ### decide initialization
         # manually init from file of initial guesses
         if manual_init:
             with open(filename, 'rb') as f:
-                mat = jnp.load(f)
-            
+                mat = jnp.load(f)[:2]
             init_func = lambda key, shape, dtype: mat
         
         # init from xavier uniform
@@ -240,7 +281,7 @@ class GlobalLamMuRates(ModuleBase):
                                         label=f'{self.name}/lambda_insertion_rate', 
                                         which='scalars')
             
-            self.sow_histograms_scalars(mat=lam_mu[...1], 
+            self.sow_histograms_scalars(mat=lam_mu[...,1], 
                                         label=f'{self.name}/mu_deletion_rate', 
                                         which='scalars')
         
@@ -286,7 +327,7 @@ class GlobalTKF92ExtProb(ModuleBase):
         ### unpack config
         manual_init = self.config['manual_init']
         self.tkf_err = self.config.get('tkf_err', 1e-4)
-        self.r_extend_min_val, self.r_extend_max_val = self.config.get( 'r range', 
+        self.r_extend_min_val, self.r_extend_max_val = self.config.get( 'r_range', 
                                                                 [self.tkf_err, 0.8] )
         filename = self.config.get('load_from_file', None)
 
@@ -295,8 +336,7 @@ class GlobalTKF92ExtProb(ModuleBase):
         # manually init from file of initial guesses
         if manual_init:
             with open(filename, 'rb') as f:
-                mat = jnp.load(f)
-            
+                mat = jnp.load(f)[2]
             init_func = lambda key, shape, dtype: mat
         
         # init from xavier uniform
@@ -307,8 +347,8 @@ class GlobalTKF92ExtProb(ModuleBase):
         ### init vector of logits
         self.logits = self.param('TKF92 R Extend Prob',
                                  init_func,
-                                 (1,),
-                                 jnp.float32)[None, ...]
+                                 (1,1),
+                                 jnp.float32)
         
     def __call__(self,
                  *args,
@@ -322,7 +362,7 @@ class GlobalTKF92ExtProb(ModuleBase):
                                         label=f'{self.name}/r_extension_prob', 
                                         which='scalars')
         
-        return r_extend, use_approx
+        return r_extend
 
 
 
@@ -355,7 +395,7 @@ class LocalExchMat(GlobalExchMat):
         
         # load from config
         self.emission_alphabet_size = self.config['emission_alphabet_size']
-        self.min_val, self.max_val = self.config.get( 'exchange range',
+        self.min_val, self.max_val = self.config.get( 'exchange_range',
                                                       (1e-4, 10) )
         self.avg_pool = self.config.get('avg_pool', False)
         
@@ -535,7 +575,7 @@ class LocalEqulVec(GlobalEqulVec):
         return equilibr_dist
 
 
-class LocalLamMuRates(GlobalLamMuRates):
+class LocalTKFLamMuRates(GlobalTKFLamMuRates):
     """
     lambda (first param) range: (min_val, max_val); canonically (0, inf)
     offset (second param) range: (min_val, max_val); canonically (0,1)
@@ -556,11 +596,11 @@ class LocalLamMuRates(GlobalLamMuRates):
         # read from config
         self.avg_pool = self.config['avg_pool']
         self.tkf_err = self.config.get('tkf_err', 1e-4)
-        self.lam_min_val, self.lam_max_val = self.config.get( 'lambda range', 
+        self.lam_min_val, self.lam_max_val = self.config.get( 'lambda_range', 
                                                                [self.tkf_err, 3] )
-        self.offs_min_val, self.offs_max_val = self.config.get( 'offset range', 
+        self.offs_min_val, self.offs_max_val = self.config.get( 'offset_range', 
                                                                 [self.tkf_err, 0.333] )
-        `
+        
         
         ### projection layer
         name = f'{self.name}/Project to lam, mu'
@@ -645,7 +685,7 @@ class LocalTKF92ExtProb(GlobalTKF92ExtProb):
         # read from config
         self.avg_pool = self.config['avg_pool']
         self.tkf_err = self.config.get('tkf_err', 1e-4)
-        self.r_extend_min_val, self.r_extend_max_val = self.config.get( 'r range', 
+        self.r_extend_min_val, self.r_extend_max_val = self.config.get( 'r_range', 
                                                                 [self.tkf_err, 0.8] )
         
         
@@ -704,7 +744,7 @@ class LocalTKF92ExtProb(GlobalTKF92ExtProb):
                                             which='scalars')
                 del label
             
-        return r_extend, use_approx
+        return r_extend
     
     
     

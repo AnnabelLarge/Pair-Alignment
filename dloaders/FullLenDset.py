@@ -29,7 +29,7 @@ outputs:
    > for neural pairHMM models: d = 5
      >> dim2 = 0: gapped ancestor
      >> dim2 = 1: gapped descendant
-     >> dim2 = 2: categorical representation of alignment
+     >> dim2 = 2: categorically-encoded alignment (<pad>, M, I, D, <bos>, <eos>)
      >> dim2 = 3: m-indices, precalculated from alignment
      >> dim2 = 4: n-indices, precalculated from alignment
          
@@ -182,7 +182,9 @@ def load_aligned_mats(data_dir,
                       split, 
                       pred_model_type,
                       toss_alignments_longer_than = None, 
-                      gap_tok = 43,
+                      gap_idx = 43,
+                      bos_idx = 1,
+                      eos_idx = 2,
                       emission_alphabet_size = 20):
     ### load data
     with open(f'{data_dir}/{split}_aligned_mats.npy','rb') as f:
@@ -234,7 +236,7 @@ def load_aligned_mats(data_dir,
     alignment = bos + eos + matches + ins + dels
     
     # these use padding token of 0: (B, L, 3)
-    zero_padded_mat = np.concatenate([gapped_seqs, alignment], axis=-1)
+    zero_padded_mat = np.concatenate([gapped_seqs, alignment[...,None]], axis=-1)
     
     # these use -9 as padding token: (B, L, 2)
     neg_nine_padded_mat = mat[:,:,[2,3]]
@@ -243,11 +245,11 @@ def load_aligned_mats(data_dir,
     ### model-specific transformations
     # feedforward: add 20 to insert sites in descendant, toss ancestor
     if pred_model_type == 'feedforward':
-        ins_pos = np.argwhere( zero_padded_mat[:,:,0] == gap_tok )
+        ins_pos = np.argwhere( zero_padded_mat[:,:,0] == gap_idx )
         zero_padded_mat[ins_pos[:,0], ins_pos[:,1], 1] += emission_alphabet_size
     
     # pairHMM: don't need alignment indices
-    elif pred_model_type == 'pairhmm':
+    elif pred_model_type.startswith('pairhmm'):
         mat = mat[:,:,[0,1,4]]
         neg_nine_padded_mat = None
     
@@ -399,7 +401,7 @@ class FullLenDset(Dataset):
                  toss_alignments_longer_than = None,
                  seq_padding_idx: int = 0,
                  align_padding_idx: int = -9,
-                 gap_tok: int = 43,
+                 gap_idx: int = 43,
                  emission_alphabet_size: int = 20):
         """
         data locations, format:
@@ -448,7 +450,7 @@ class FullLenDset(Dataset):
         ----------------------------------
         > seq_padding_idx: padding token, usually zero
         > align_padding_idx: padding for precomputed alignments; I use -9
-        > gap_tok: I use 43
+        > gap_idx: I use 43
         > emission_alphabet_size: 20 for proteins
         
         
@@ -485,7 +487,7 @@ class FullLenDset(Dataset):
                                     split = split, 
                                     toss_alignments_longer_than = toss_alignments_longer_than, 
                                     pred_model_type = pred_model_type,
-                                    gap_tok = gap_tok,
+                                    gap_idx = gap_idx,
                                     emission_alphabet_size = emission_alphabet_size)
             zero_padded_mat, neg_nine_padded_mat, idxes_to_keep = out
             del out

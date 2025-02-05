@@ -17,10 +17,20 @@ from jax import numpy as jnp
 from models.model_utils.BaseClasses import SeqEmbBase
 
 
+class Placeholder(SeqEmbBase):
+    """
+    Returns nothing
+    """
+    config: dict
+    name: str
+    
+    def __call__(self, *args, **kwargs):
+        return None
+    
 
 class EmptyEmb(SeqEmbBase):
     """
-    Placeholder; returns an empty matrix
+    Returns an empty matrix
     
     
     init with:
@@ -51,7 +61,6 @@ class EmptyEmb(SeqEmbBase):
                  training: bool=False):
         return jnp.empty( (datamat.shape[0], datamat.shape[1], 0) )
      
-        
      
 class OneHotEmb(SeqEmbBase):
     """

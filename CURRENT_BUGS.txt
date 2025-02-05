@@ -1,0 +1,16 @@
+BEFORE I RUN ANY NEURAL HMM MODEL:
+==================================
+- loss from neural tkf does not match hand-calculated values
+
+- all logprob matrices match reference implementation... is something wrong in indexing?
+
+
+
+BEFORE I RUN TKF91 GLOBAL TO COMPARE AGAINST COUNTS-BASED IMPLEMENTATION:
+=========================================================================
+- to enable global params, want to one-hot encode alignments as they are (keeping gap token)
+  > [WORKS] one hot sequence embedder would one-hot encode
+  > [DOESN'T WORK] I think I want to use the one-hot embeddings of gap functions, but current concatenation function will remove gap characters from the ancestor
+    > combine_one_hot_embeddings isn't quite what I want; this concatenates unaligned sequences, but I lose alignment structure
+      >> true_out does contain the encoded alignment; can I throw this in somewhere...?
+

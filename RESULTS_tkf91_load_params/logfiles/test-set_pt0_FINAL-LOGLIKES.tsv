@@ -1,0 +1,2 @@
+	ancestor	descendant	pfam	desc_seq_len	alignment_len	num_matches	num_ins	num_del	logP	logP/normlength	perplexity	dataloader_idx
+0	anc	desc	PF0000	3	4	1	1	1	98.779655	24.694914	53071920000.0	0

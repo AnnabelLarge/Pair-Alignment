@@ -7,7 +7,7 @@ Created on Thu Jan  9 19:01:01 2025
 
 fake alignments:
 
-    <b> A - G <e>
+    <b> A - D <e>
     <b> C C - <e>
     
     (1, 0)

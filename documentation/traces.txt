@@ -1,31 +1,3 @@
-All possible named arguments:
-=============================
-provided once by partial:
--------------------------
-all_model_instances
-loss_type
-norm_loss_by
-interms_for_tboard
-num_site_classes (not used yet)
-length_for_scan
-seq_padding_idx
-align_idx_padding
-
-used every train/eval loop:
----------------------------
-batch
-training_rngkey
-all_trainstates
-max_seq_len (optional)
-max_align_len (optional)
-
-remove:
--------
-which_alignment_states_to_encode (encoding already provided in batch)
-have_time_values? might not be able to remove...
-
-
-
 counts-based trace (training):
 ==============================
 
@@ -52,12 +24,16 @@ NEW trace:
 
 batch
 training_rngkey
-all_model_instances
 all_trainstates
-@ loss_type 
-@ norm_loss_by 
-@ num_site_classes
+max_seq_len = None
+max_align_len = None
+@ all_model_instances
+@ norm_loss_by
 @ interms_for_tboard 
+@ more_attributes (place in separate, persistent dictionary)
+   > loss_type 
+   > num_site_classes
+   > exponential_dist_param
 
 (plus **kwargs)
 
@@ -80,19 +56,19 @@ NEW trace:
 ----------
 @ = parted at beginning
 
-batch 
+batch
 training_rngkey
-all_model_instances
 all_trainstates
-max_seq_len
-max_align_len
-@ loss_type
+max_seq_len = None
+max_align_len = None
+@ all_model_instances
 @ norm_loss_by
-@ interms_for_tboard
-@ seq_padding_idx
-@ align_idx_padding
-
-(plus **kwargs)
+@ interms_for_tboard 
+@ more_attributes (place in separate, persistent dictionary)
+   > concat_fn
+   > (ff) add_prev_alignment_info
+   > (neuralHMM) loss_type 
+   > (neuralHMM) exponential_dist_param
 
 
 WITH JAX.LAX.SCAN 
@@ -116,19 +92,19 @@ NEW trace:
 
 batch
 training_rngkey
-all_model_instances
 all_trainstates
-max_seq_len
-max_align_len
-@ length_for_scan
-@ loss_type
+max_seq_len = None
+max_align_len = None
+@ all_model_instances
 @ norm_loss_by
-@ interms_for_tboard
-@ seq_padding_idx
-@ align_idx_padding
-
-(plus **kwargs)
-
+@ interms_for_tboard 
+@ more_attributes (place in separate, persistent dictionary)
+   > (scan implementations only) length_for_scan
+   > concat_fn
+   > loss_type 
+   > (ff) add_prev_alignment_info
+   > (neuralHMM) loss_type 
+   > (neuralHMM) exponential_dist_param
 
 
 edits to eval functions:
@@ -138,27 +114,18 @@ edits to eval functions:
 
 
 
-
-
-
-
 (FUTURE) markovian site classes trace (training):
 =================================================
 @ = parted at beginning
 
-batch 
+batch
 training_rngkey
-all_model_instances
 all_trainstates
-max_seq_len
-max_align_len
-@ loss_type
-@ norm_loss_by
-@ num_site_classes
-@ interms_for_tboard
-@ seq_padding_idx
-@ align_idx_padding
-
-(plus **kwargs)
-
-
+max_seq_len = None
+max_align_len = None
+@ all_model_instances
+@ norm_loss_by 
+@ interms_for_tboard 
+@ more_attributes (place in separate, persistent dictionary)
+   > loss_type 
+   > num_site_classes

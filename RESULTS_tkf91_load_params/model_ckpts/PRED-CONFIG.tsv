@@ -1,0 +1,16 @@
+training_wkdir	RESULTS_tkf91_load_params
+times_from	t_array_from_file
+exponential_dist_param	1
+times_file	toy_align_times.txt
+indel_model_type	tkf91
+use_precomputed_indices	True
+exchang_config/load_from_file	LG08_exchangeability_r.npy
+exchang_config/unit_norm_rate_matrix	True
+equilibr_config/training_dset_aa_counts	[1. 2. 1. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0. 0.]
+indels_config/tkf_err	0.0001
+indels_config/load_from_file	tkf_params_to_load.npy
+indels_config/safe_grads 	False
+loss_type	joint
+emission_alphabet_size	20
+full_alphabet_size	44
+seq_padding_idx	0

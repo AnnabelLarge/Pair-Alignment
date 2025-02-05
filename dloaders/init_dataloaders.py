@@ -24,7 +24,7 @@ def init_time_array(args):
         single_time_from_file = False
     
     # pairHMM models, which use times
-    elif (args.pred_model_type != 'feedforward') and (args.times_from == 'geometric'):
+    elif (args.pred_model_type != 'feedforward') and (args.pred_config['times_from'] == 'geometric'):
         t_grid_center = args.pred_config['t_grid_center']
         t_grid_step = args.pred_config['t_grid_step']
         t_grid_num_steps = args.pred_config['t_grid_num_steps']
@@ -39,9 +39,8 @@ def init_time_array(args):
                                     )
         single_time_from_file = False
     
-    elif (args.pred_model_type != 'feedforward') and (args.times_from == 't_array_from_file'):
+    elif (args.pred_model_type != 'feedforward') and (args.pred_config['times_from'] == 't_array_from_file'):
         times_file = args.pred_config['times_file']
-        const_for_time_marg = args.pred_config['const_for_time_marg']
         
         # read file
         times_from_array = []
@@ -50,13 +49,9 @@ def init_time_array(args):
                 times_from_array.append( float( line.strip() ) )
         times_from_array = np.array(times_from_array)
         
-        # use t_grid_step argument for time marginalization
-        #   modify args in place to do renaming
-        args.pred_config['t_grid_step'] = const_for_time_marg
-        
         single_time_from_file = False
         
-    elif (args.pred_model_type != 'feedforward') and (args.times_from == 'one_time_per_sample_from_file'):
+    elif (args.pred_model_type != 'feedforward') and (args.pred_config['times_from'] == 'one_time_per_sample_from_file'):
         raise NotImplementedError('do you REALLY need an individual time per sample?')
     
     return (times_from_array, single_time_from_file)
@@ -110,7 +105,7 @@ def init_dataloaders(args, task):
     #######################################
     ### OPTION 1: use the full sequence   #
     #######################################
-    if args.pred_model_type in ['feedforward', 'neural_pairhmm']:
+    if (args.pred_model_type in ['feedforward']) or (args.pred_model_type.startswith('neural_hmm')):
         from dloaders.FullLenDset import FullLenDset
         from dloaders.FullLenDset import jax_collator as collator
         
@@ -119,7 +114,7 @@ def init_dataloaders(args, task):
         assert type(args.test_dset_splits) == list
         test_dset = FullLenDset( data_dir = args.data_dir, 
                                  split_prefixes = args.test_dset_splits,
-                                 pred_model_type = pred_model_type,
+                                 pred_model_type = args.pred_model_type,
                                  use_scan_fns = args.use_scan_fns,
                                  times_from_array = times_from_array,
                                  single_time_from_file = single_time_from_file,
@@ -127,7 +122,7 @@ def init_dataloaders(args, task):
                                  toss_alignments_longer_than = args.toss_alignments_longer_than,
                                  seq_padding_idx = 0,
                                  align_padding_idx = -9,
-                                 gap_tok = 43,
+                                 gap_idx = 43,
                                  emission_alphabet_size = 20
                                  )
         
@@ -145,7 +140,7 @@ def init_dataloaders(args, task):
                                          toss_alignments_longer_than = args.toss_alignments_longer_than,
                                          seq_padding_idx = 0,
                                          align_padding_idx = -9,
-                                         gap_tok = 43,
+                                         gap_idx = 43,
                                          emission_alphabet_size = 20
                                          )
     
@@ -153,7 +148,7 @@ def init_dataloaders(args, task):
     ######################################################
     ### OPTION 2: use summaries of counts, precomputed   #
     ######################################################
-    elif args.pred_model_type in ['pairhmm']:
+    elif args.pred_model_type.startswith('pairhmm'):
         from dloaders.CountsDset import CountsDset 
         from dloaders.CountsDset import jax_collator as collator
         

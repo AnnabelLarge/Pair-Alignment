@@ -35,11 +35,12 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
 
 # custom function/classes imports (in order of appearance)
+from train_eval_fns.build_optimizer import build_optimizer
+from utils.write_config import write_config
 from utils.edit_argparse import (enforce_valid_defaults,
                                  fill_with_default_values,
                                  share_top_level_args)
 from utils.setup_training_dir import setup_training_dir
-from train_eval_fns.build_optimizer import build_optimizer
 from utils.sequence_length_helpers import (determine_seqlen_bin, 
                                            determine_alignlen_bin)
 from utils.tensorboard_recording_utils import (write_times,
@@ -60,47 +61,70 @@ def train(args, dataloader_dict: dict):
     ### import train/test functions; enforce some default variables
     if args.pred_model_type == 'feedforward':    
         have_acc = True
-        args.times_from = None
+        have_time_array = False
+        have_full_length_alignments = True
+        from models.feedforward_predict.initializers import create_all_tstates
         
         if args.use_scan_fns:
-            raise NotImplementedError('Add loss function')
+            raise NotImplementedError('Add scanned implementation of loss function')
+            more_attributes['length_for_scan'] = args.chunk_length
+            
         elif not args.use_scan_fns:
-            raise NotImplementedError('Add loss function')
-    
-    elif args.pred_model_type == 'neural_pairhmm':  
+            from train_eval_fns.full_length_training_fns import ( train_one_batch,
+                                                                  eval_one_batch )
+            from train_eval_fns.full_length_final_eval_wrapper import final_eval_wrapper
+        
+        more_attributes = {'add_prev_alignment_info': args.pred_config['add_prev_alignment_info']}
+                
+        
+        
+    elif args.pred_model_type.startswith( 'neural_hmm' ):  
         have_acc = False
-        if args.use_scan_fns:
-            raise NotImplementedError('Add loss function')
-        elif not args.use_scan_fns:
-            raise NotImplementedError('Add loss function')
-    
-    elif args.pred_model_type == 'pairhmm':
-        have_acc = False
-        raise NotImplementedError('Add loss function')
-    
-    
-    ### final defaults
-    # marginalizing over time?
-    if args.pred_model_type in ['neural_pairhmm', 'pairhmm']:
         have_time_array = True
-    elif args.pred_model_type in ['feedforward']:
-        have_time_array = False
-    
-    # using full alignment lengths, or summary of counts?
-    if args.pred_model_type in ['feedforward', 'neural_pairhmm']:
         have_full_length_alignments = True
-    elif args.pred_model_type in ['pairhmm']:
+        
+        from models.neural_hmm_predict.initializers import create_all_tstates
+        
+        if args.use_scan_fns:
+            raise NotImplementedError('Add scanned implementation of loss function')
+            more_attributes['length_for_scan'] = args.chunk_length
+            
+        elif not args.use_scan_fns:
+            from train_eval_fns.full_length_training_fns import ( train_one_batch,
+                                                                  eval_one_batch )
+            from train_eval_fns.full_length_final_eval_wrapper import final_eval_wrapper
+            
+        more_attributes = {'exponential_dist_param': args.pred_config['exponential_dist_param'],
+                           'loss_type': args.loss_type}
+                    
+
+                              
+    elif args.pred_model_type == 'pairhmm_indp_sites':
+        have_acc = False
+        have_time_array = True
         have_full_length_alignments = False
+        
+        from models.simple_site_class_predict.initializers import init_pairhmm_indp_sites as init_pairhmm
+        from train_eval_fns.indp_site_classes_training_fns import ( train_one_batch,
+                                                                    eval_one_batch,
+                                                                    final_eval_wrapper )
     
     
+    elif args.pred_model_type == 'pairhmm_markovian_sites':
+        have_acc = False
+        have_time_array = True
+        have_full_length_alignments = True
+        
+        from models.simple_site_class_predict.initializers import init_pairhmm_markov_sites as init_pairhmm
+        from train_eval_fns.markovian_site_classes_training_fns import ( train_one_batch,
+                                                                         eval_one_batch,
+                                                                         final_eval_wrapper )
+        
+        
     
     ###########################################################################
     ### 1: SETUP   ############################################################
     ###########################################################################
-    print(f'1: setup')
-    with open(args.logfile_name,'a') as g:
-        g.write(f'1: setup\n')
-        
     ### initial setup of misc things
     # setup the working directory (if not done yet) and this run's sub-directory
     setup_training_dir(args)
@@ -141,7 +165,7 @@ def train(args, dataloader_dict: dict):
     
     # add the equilibrium distribution from the training dataset object
     #   to the argparse object
-    if args.pred_model_type == 'neural_pairhmm':
+    if args.pred_model_type.startswith( 'neural_hmm' ):
         args.pred_config['equilibr_config']['training_dset_aa_counts'] = training_dset.aa_counts
     del dataloader_dict
     
@@ -169,12 +193,15 @@ def train(args, dataloader_dict: dict):
         g.write('\n')
         g.write(f'2: model init\n')
     
+    ######################
+    ### for all models   #
+    ######################
     # init the optimizer
     tx = build_optimizer(args)
     
     # initialize dummy array of times
     if have_time_array:
-        num_timepoints = training_dset.retrieve_num_timepoints(times_from = args.times_from)
+        num_timepoints = training_dset.retrieve_num_timepoints(times_from = args.pred_config['times_from'])
         dummy_t_array = jnp.empty( (num_timepoints, args.batch_size) )
     
     elif not have_time_array:
@@ -184,15 +211,15 @@ def train(args, dataloader_dict: dict):
     rngkey, model_init_rngkey = jax.random.split(rngkey, num=2)
     
     
-    ### for models that use full-length alignments: determine lengths
+    ################################################################
+    ### models using full-length alignments: init shapes, models   #
+    ################################################################
     if have_full_length_alignments:
-        # for unaligned seqs: longest possible input is global_seq_max_length
+        ### init sizes
         global_seq_max_length = max([training_dset.global_seq_max_length,
                                      test_dset.global_seq_max_length])
         largest_seqs = (args.batch_size, global_seq_max_length)
         
-        # for aligned matrices: longest possible input depends on if you're
-        #   using the scanned version of likelihood fns
         if args.use_scan_fns:
             max_dim1 = args.chunk_length
         
@@ -205,25 +232,127 @@ def train(args, dataloader_dict: dict):
         
         seq_shapes = [largest_seqs, largest_aligns]
         
-        # parted and jit-compiled seq len helpers
-        parted_determine_seqlen_bin = partial(determine_seqlen_bin,
-                                              chunk_length = args.chunk_length, 
-                                              seq_padding_idx = args.seq_padding_idx)
-        jitted_determine_seqlen_bin = jax.jit(parted_determine_seqlen_bin)
-        del parted_determine_seqlen_bin
-        
+        ### fn to handle jit-compiling according to alignment length
         parted_determine_alignlen_bin = partial(determine_alignlen_bin,  
                                                 chunk_length = args.chunk_length,
                                                 seq_padding_idx = args.seq_padding_idx)
         jitted_determine_alignlen_bin = jax.jit(parted_determine_alignlen_bin)
         del parted_determine_alignlen_bin
+        
+        
+        ######################################
+        ### pairHMM with independent sites   #
+        ######################################
+        if args.pred_model_type == 'pairhmm_markovian_sites':
+            ### initialize functions
+            all_trainstates = init_pairhmm( seq_shapes = seq_shapes, 
+                                            dummy_t_array = dummy_t_array,
+                                            tx = tx, 
+                                            model_init_rngkey = model_init_rngkey,
+                                            pred_config = args.pred_config)
+            
+            ### part+jit training function
+            parted_train_fn = partial( train_one_batch,
+                                       interms_for_tboard = args.interms_for_tboard,
+                                      )
+            
+            train_fn_jitted = jax.jit(parted_train_fn, 
+                                      static_argnames = ['max_align_len'])
+            del parted_train_fn
+            
+            ### part+jit eval function
+            parted_eval_fn = partial( eval_one_batch,
+                                       interms_for_tboard = {'finalpred_sow_outputs': False} )
+            
+            eval_fn_jitted = jax.jit(parted_eval_fn, 
+                                      static_argnames = ['max_align_len'])
+            del parted_eval_fn
+        
+        
+        #####################
+        ### neural models   #
+        #####################
+        elif (args.pred_model_type == 'feedforward') or args.pred_model_type.startswith( 'neural_hmm' ):
+            ### parted and jit-compiled seq len helpers
+            parted_determine_seqlen_bin = partial(determine_seqlen_bin,
+                                                  chunk_length = args.chunk_length, 
+                                                  seq_padding_idx = args.seq_padding_idx)
+            jitted_determine_seqlen_bin = jax.jit(parted_determine_seqlen_bin)
+            del parted_determine_seqlen_bin
+            
+            ### initialize functions, determine concat_fn
+            out = create_all_tstates( seq_shapes = seq_shapes, 
+                                      dummy_t_array = dummy_t_array,
+                                      tx = tx, 
+                                      model_init_rngkey = model_init_rngkey,
+                                      tabulate_file_loc = args.model_ckpts_dir,
+                                      anc_model_type = args.anc_model_type, 
+                                      desc_model_type = args.desc_model_type, 
+                                      pred_model_type = args.pred_model_type, 
+                                      anc_enc_config = args.anc_enc_config, 
+                                      desc_dec_config = args.desc_dec_config, 
+                                      pred_config = args.pred_config,
+                                      )  
+            all_trainstates, all_model_instances, concat_fn = out
+            more_attributes['concat_fn'] = concat_fn
+            del out
+            
+            
+            ### parted and jit-compiled training_fn
+            parted_train_fn = partial( train_one_batch,
+                                       all_model_instances = all_model_instances,
+                                       norm_loss_by = args.norm_loss_by,
+                                       interms_for_tboard = args.interms_for_tboard,
+                                       more_attributes = more_attributes,
+                                      )
+            
+            train_fn_jitted = jax.jit(parted_train_fn, 
+                                      static_argnames = ['max_seq_len',
+                                                         'max_align_len'])
+            del parted_train_fn
+        
+        
+            ### eval_fn used in training loop (to monitor progress)
+            # pass arguments into eval_one_batch; make a parted_eval_fn that doesn't
+            #   return any intermediates
+            no_returns = {'encoder_sow_outputs': False,
+                          'decoder_sow_outputs': False,
+                          'finalpred_sow_outputs': False,
+                          'gradients': False,
+                          'weights': False,
+                          'ancestor_embeddings': False,
+                          'descendant_embeddings': False,
+                          'forward_pass_outputs': False,
+                          'final_logprobs': False}
+            extra_args_for_eval = dict()
+            
+            # if this is a transformer model, will have extra arguments for eval funciton
+            if (args.anc_model_type == 'Transformer' or args.desc_model_type == 'Transformer'):
+                extra_args_for_eval['output_attn_weights'] = False
+            
+            parted_eval_fn = partial( eval_one_batch,
+                                      all_model_instances = all_model_instances,
+                                      norm_loss_by = args.norm_loss_by,
+                                      interms_for_tboard = no_returns,
+                                      more_attributes = more_attributes,
+                                      extra_args_for_eval = extra_args_for_eval
+                                      )
+            
+            # jit compile this eval function
+            eval_fn_jitted = jax.jit(parted_eval_fn, 
+                                      static_argnames = ['max_seq_len',
+                                                         'max_align_len'])
+            del parted_eval_fn
     
     
-    ### for models that use full-length alignments: define input shapes
+    ###################################################################
+    ### for models using count summaries: initialize shapes, models   #
+    ###################################################################
     elif not have_full_length_alignments:
+        ### determine shape
         B = args.batch_size
         emission_alphabet = args.base_alphabet_size - 3
-        num_states = 3 if args.bos_eos_as_match else 5
+        num_states = 4 if args.pred_config['indel_model'].startswith('tkf') else 3
         
         dummy_subCounts = jnp.empty( (B, emission_alphabet, emission_alphabet) )
         dummy_insCounts = jnp.empty( (B, emission_alphabet) )
@@ -235,112 +364,30 @@ def train(args, dataloader_dict: dict):
                       dummy_delCounts,
                       dummy_transCounts]
         
-        jitted_determine_seqlen_bin = None
-        jitted_determine_alignlen_bin = None
+        ### initialize functions
+        all_trainstates = init_pairhmm( seq_shapes = seq_shapes, 
+                                        dummy_t_array = dummy_t_array,
+                                        tx = tx, 
+                                        model_init_rngkey = model_init_rngkey,
+                                        pred_config = args.pred_config,
+                                        )
         
-    
-    raise NotImplementedError('Make initializers for each model AFTER defining models')
-    """
-    version of function in neural codebase:
-    
-    out = create_all_tstates(seq_shapes = seq_shapes, 
-                              dummy_t_array = dummy_t_array,
-                              tx = tx, 
-                              model_init_rngkey = model_init_rngkey,
-                              tabulate_file_loc = args.model_ckpts_dir,
-              [remove this ] which_alignment_states_to_encode = args.which_alignment_states_to_encode,
-                              anc_model_type = args.anc_model_type, 
-                              desc_model_type = args.desc_model_type, 
-                              pred_model_type = args.pred_model_type, 
-                              anc_enc_config = args.anc_enc_config, 
-                              desc_dec_config = args.desc_dec_config, 
-                              pred_config = args.pred_config,
-                              )  
-    
-    
-    pairHMM will just use a predictive head that: 
-      1.) creates global exch mat (or read LG08 exch)
-      2.) creates global equilib dist (or calculates from counts)
-      3.) initializes appropriate indel parameters per indel model
-    
-    and have no sequence embedders
-    """
-    
-    
-    ###  part and jit the functions for the training loop
-    """
-    taken from neural codebase:
-    NEED TO ADD: args.loss_type (which is either conditional or joint), 
-                 args.num_site_classes (just one, for now, but need the option to expand later)
-    
-    place everything below in a separate wrapper call
-    def initialize_train_fn( train_function,
-                             argparse_object, 
-                             all_model_instances ):
-        ...
-        return train_fn_jitted
-    
-    def initialize_eval_fn( eval_function,
-                            argparse_object, 
-                            all_model_instances,
-                            extra_args_for_eval,
-                            for_training: bool ):
-        ...
-        return eval_fn_jitted
-    
-    ### training_fn
-    parted_train_fn = partial( train_one_batch,
-                               all_model_instances = all_model_instances,
-                               which_alignment_states_to_encode = args.which_alignment_states_to_encode,
-                               interms_for_tboard = args.interms_for_tboard,
-                               norm_loss_by = args.pred_config['norm_loss_by'],
-                               length_for_scan = args.chunk_length,
-                               have_time_values = have_time_values,
-                               seq_padding_idx = args.seq_padding_idx
-                              )
-    
-    train_fn_jitted = jax.jit(parted_train_fn, 
-                              static_argnames = ['max_seq_len',
-                                                  'max_align_len'])
-    del parted_train_fn
-    
-    
-    ### eval_fn used in training loop (to monitor progress)
-    # pass arguments into eval_one_batch; make a parted_eval_fn that doesn't
-    #   return any intermediates
-    no_returns = {'encoder_sow_outputs': False,
-                  'decoder_sow_outputs': False,
-                  'finalpred_sow_outputs': False,
-                  'gradients': False,
-                  'weights': False,
-                  'ancestor_embeddings': False,
-                  'descendant_embeddings': False,
-                  'forward_pass_outputs': False,
-                  'final_logprobs': False}
-    extra_args_for_eval = dict()
-    
-    # if this is a transformer model, will have extra arguments for eval funciton
-    if (args.anc_model_type == 'Transformer' or args.desc_model_type == 'Transformer'):
-        extra_args_for_eval['output_attn_weights'] = False
-    
-    parted_eval_fn = partial(eval_one_batch,
-                             all_model_instances = all_model_instances,
-                             which_alignment_states_to_encode = args.which_alignment_states_to_encode, 
-                             interms_for_tboard = no_returns,
-                             length_for_scan = args.chunk_length,
-                             seq_padding_idx = args.seq_padding_idx,
-                             norm_loss_by = args.pred_config['norm_loss_by'],
-                             have_time_values = have_time_values,
-                             extra_args_for_eval = extra_args_for_eval)
-    del no_returns, extra_args_for_eval
-    
-    # jit compile this eval function
-    eval_fn_jitted = jax.jit(parted_eval_fn, 
-                              static_argnames = ['max_seq_len',
-                                                 'max_align_len'])
-    del parted_eval_fn
-    """
-    
+        ### part+jit training function
+        parted_train_fn = partial( train_one_batch,
+                                   interms_for_tboard = args.interms_for_tboard )
+        
+        train_fn_jitted = jax.jit(parted_train_fn)
+        del parted_train_fn
+        
+        
+        ### part+jit eval function
+        parted_eval_fn = partial( eval_one_batch,
+                                   interms_for_tboard = {'finalpred_sow_outputs': False} )
+        
+        eval_fn_jitted = jax.jit(parted_eval_fn)
+        del parted_eval_fn
+        
+
     ###########################################################################
     ### 3: START TRAINING LOOP   ##############################################
     ###########################################################################
@@ -407,10 +454,6 @@ def train(args, dataloader_dict: dict):
                            f'({args.chunk_length})')
                     assert (batch_max_alignlen - 1) % args.chunk_length == 0, err
             
-            elif not have_full_length_alignments:
-                batch_max_seqlen = None
-                batch_max_alignlen = None
-            
             # !!!!!!!!!!!!!!! BELOW IS FOR DEBUG-ONLY !!!!!!!!!!!!!!! 
             # record values before gradient update
             if batch_epoch_idx > 0:
@@ -421,11 +464,9 @@ def train(args, dataloader_dict: dict):
                             np.save(g, val)
             # !!!!!!!!!!!!!!! ABOVE IS FOR DEBUG-ONLY !!!!!!!!!!!!!!! 
             
-            rngkey_for_training_batch = jax.random.fold_in(training_rngkey, epoch_idx+batch_idx)
-            
             
             ### run function to train on one batch of samples
-            raise NotImplementedError('make and jit-compile a training function')
+            rngkey_for_training_batch = jax.random.fold_in(training_rngkey, epoch_idx+batch_idx)
             out = train_fn_jitted(batch=batch, 
                                   training_rngkey=rngkey_for_training_batch, 
                                   all_trainstates=all_trainstates, 
@@ -453,7 +494,7 @@ def train(args, dataloader_dict: dict):
             for key, val in train_metrics.items():
                 if key.startswith('FPO_'):
                     out_filename = (f'{args.out_arrs_dir}/'+
-                                    '{key.replace("FPO_","AFTER-UPDATE_")}.npy')
+                                    f'{key.replace("FPO_","AFTER-UPDATE_")}.npy')
                     with open(out_filename,'wb') as g:
                         np.save(g, val)
             # !!!!!!!!!!!!!!! ABOVE IS FOR DEBUG-ONLY !!!!!!!!!!!!!!! 
@@ -472,7 +513,7 @@ def train(args, dataloader_dict: dict):
                 
                 # save all trainstate objects
                 for i in range(3):
-                    new_outfile = all_savemodel_filenames[i].replace('.pkl','_BROKEN.pkl')
+                    new_outfile = all_save_model_filenames[i].replace('.pkl','_BROKEN.pkl')
                     with open(new_outfile, 'wb') as g:
                         model_state_dict = flax.serialization.to_state_dict(all_trainstates[i])
                         pickle.dump(model_state_dict, g)
@@ -566,14 +607,10 @@ def train(args, dataloader_dict: dict):
                            f'({args.chunk_length})')
                     assert (batch_max_alignlen - 1) % args.chunk_length == 0, err
             
-            elif not have_full_length_alignments:
-                batch_max_seqlen = None
-                batch_max_alignlen = None
-            
             eval_metrics = eval_fn_jitted(batch=batch, 
                                           all_trainstates=all_trainstates,
-                                          max_seq_len=batch_max_seqlen.item(),
-                                          max_align_len=batch_max_alignlen.item())
+                                          max_seq_len=batch_max_seqlen,
+                                          max_align_len=batch_max_alignlen)
             
 #__4___8__12: batch level (three tabs)
             ### add to total loss for this epoch; weight by number of
@@ -644,7 +681,7 @@ def train(args, dataloader_dict: dict):
             # save models to regular python pickles too (in case training is 
             #   interrupted)
             for i in range(3):
-                with open(f'{all_savemodel_filenames[i]}', 'wb') as g:
+                with open(f'{all_save_model_filenames[i]}', 'wb') as g:
                     model_state_dict = flax.serialization.to_state_dict(all_trainstates[i])
                     pickle.dump(model_state_dict, g)
                     
@@ -782,38 +819,46 @@ def train(args, dataloader_dict: dict):
     del epoch_idx
     
     
-    raise NotImplementedError('Make jitted eval function')
-    raise NotImplementedError('Make a new final eval wrapper function')
-    
-    """
-    ### jit-compile a different version of eval function for final eval    
-    # if both are transformer models, will have extra arguments for eval funciton
-    # TODO: how to handle if only one is transformer?
-    extra_args_for_eval = dict()
-    if (args.anc_model_type == 'Transformer' and args.desc_model_type == 'Transformer'):
-        flag = (args.anc_enc_config.get('output_attn_weights',False) or 
-                args.desc_dec_config.get('output_attn_weights',False))
-        extra_args_for_eval['output_attn_weights'] = flag
+    ### jit compile new eval function
+    if (args.pred_model_type == 'feedforward') or args.pred_model_type.startswith( 'neural_hmm' ):
+        # if this is a transformer model, will have extra arguments for eval funciton
+        extra_args_for_eval = dict()
+        if (args.anc_model_type == 'Transformer' and args.desc_model_type == 'Transformer'):
+            flag = (args.anc_enc_config.get('output_attn_weights',False) or 
+                    args.desc_dec_config.get('output_attn_weights',False))
+            extra_args_for_eval['output_attn_weights'] = flag
         
+        parted_eval_fn = partial( eval_one_batch,
+                                  all_model_instances = all_model_instances,
+                                  norm_loss_by = args.norm_loss_by,
+                                  interms_for_tboard = args.interms_for_tboard,
+                                  more_attributes = more_attributes,
+                                  extra_args_for_eval = extra_args_for_eval
+                                  )
+        del no_returns, extra_args_for_eval
+        
+        # jit compile this eval function
+        eval_fn_jitted = jax.jit(parted_eval_fn, 
+                                  static_argnames = ['max_seq_len',
+                                                     'max_align_len'])
+        del parted_eval_fn
     
-    # new parted_eval_fn 
-    parted_eval_fn = partial(eval_one_batch,
-                             all_model_instances = all_model_instances,
-                             length_for_scan = args.chunk_length,
-                             which_alignment_states_to_encode = args.which_alignment_states_to_encode, 
-                             interms_for_tboard = args.interms_for_tboard, 
-                             seq_padding_idx = args.seq_padding_idx,
-                             norm_loss_by = args.pred_config['norm_loss_by'],
-                             have_time_values = have_time_values,
-                             extra_args_for_eval = extra_args_for_eval)
-    del extra_args_for_eval
+    
+    elif args.pred_model_type == 'pairhmm_markovian_sites': 
+        parted_eval_fn = partial( eval_one_batch,
+                                   interms_for_tboard = args.interms_for_tboard )
+        
+        eval_fn_jitted = jax.jit(parted_eval_fn, 
+                                  static_argnames = ['max_align_len'])
+        del parted_eval_fn
     
     
-    # new jit compiled eval function to use for final evaluation
-    eval_fn_jitted = jax.jit(parted_eval_fn, 
-                             static_argnames = ['max_seq_len',
-                                                'max_align_len'])
-    del parted_eval_fn
+    elif not have_full_length_alignments:
+        parted_eval_fn = partial( eval_one_batch,
+                                   interms_for_tboard = args.interms_for_tboard )
+        
+        eval_fn_jitted = jax.jit(parted_eval_fn)
+        del parted_eval_fn
     
     
     ###########################################
@@ -829,7 +874,7 @@ def train(args, dataloader_dict: dict):
                                              jitted_determine_seqlen_bin = jitted_determine_seqlen_bin,
                                              jitted_determine_alignlen_bin = jitted_determine_alignlen_bin,
                                              eval_fn_jitted = eval_fn_jitted,
-                    # [when do I use this?]  out_alph_size = args.full_alphabet_size,
+                                             out_alph_size = args.full_alphabet_size,
                                              save_arrs = args.save_arrs,
                                              interms_for_tboard = args.interms_for_tboard, 
                                              logfile_dir = args.logfile_dir,
@@ -852,14 +897,13 @@ def train(args, dataloader_dict: dict):
                                              jitted_determine_seqlen_bin = jitted_determine_seqlen_bin,
                                              jitted_determine_alignlen_bin = jitted_determine_alignlen_bin,
                                              eval_fn_jitted = eval_fn_jitted,
-                    # [when do I use this?]  out_alph_size = args.full_alphabet_size, 
+                                             out_alph_size = args.full_alphabet_size, 
                                              save_arrs = args.save_arrs,
                                              interms_for_tboard = args.interms_for_tboard, 
                                              logfile_dir = args.logfile_dir,
                                              out_arrs_dir = args.out_arrs_dir,
                                              outfile_prefix = f'test-set',
                                              tboard_writer = writer)
-    """
     
     
     ###########################################

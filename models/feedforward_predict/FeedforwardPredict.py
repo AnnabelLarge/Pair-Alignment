@@ -58,12 +58,10 @@ class FeedforwardPredict(ModuleBase):
     config: dict
     name: str
     
-    
     def setup(self):
         ### unpack config
         self.layer_sizes = self.config['layer_sizes']
         self.normalize_inputs = self.config["normalize_inputs"]
-        self.use_bias = self.config["use_bias"]
         self.dropout = self.config.get("dropout", 0.0)
         
         #!!! hardcode these options for now; change as desired
@@ -72,7 +70,7 @@ class FeedforwardPredict(ModuleBase):
         self.kernel_init = nn.initializers.lecun_normal()
         self.norm = nn.LayerNorm(reduction_axes = -1, feature_axes = -1)
         self.output_size = self.config.get("full_alphabet_size", 44)
-        
+        self.use_bias = True
             
     @nn.compact
     def __call__(self, 
@@ -92,7 +90,7 @@ class FeedforwardPredict(ModuleBase):
         new_shape = (padding_mask.shape[0],
                      padding_mask.shape[1],
                      datamat.shape[2])
-        masking_mat = jnp.broadcast_to(padding_mask[:,:,None], new_shape)
+        masking_mat = jnp.broadcast_to(padding_mask[...,None], new_shape)
         del new_shape
         
         datamat = jnp.multiply(datamat, masking_mat)
@@ -201,16 +199,39 @@ class FeedforwardPredict(ModuleBase):
         return {'FPO_final_logits': final_logits}
     
     
-    def get_length_for_normalization(self,
-                                     true_out,
-                                     norm_loss_by,
-                                     seq_padding_idx = 0,
-                                     gap_tok = 43):
+    def process_aligned_mats(self,
+                             prefixes,
+                             suffixes,
+                             norm_loss_by,
+                             more_attributes: dict,
+                             seq_padding_idx: int = 0,
+                             gap_tok: int = 43):
         """
-        using true_out, figure out the length to normalize by
-          - true_out will be (B, L)
-          - this won't include <bos>
+        use this for three things:
+            1. generating the "true_out" for the supervised training task
+            2. preparing the alignment_state for use during training 
+               ("extra_features")
+            3. determining length to normalize by
+        
+        used OUTSIDE of scan function
         """
+        add_prev_alignment_info = more_attributes['add_prev_alignment_info']
+        
+        ### true_out
+        # only need the alignment-augmented descendant; dim0=0
+        true_out = suffixes[...,0]
+        
+        
+        ### optionally, one-hot encode the alignment state as an 
+        ### extra input feature (found at dim0=1)
+        if add_prev_alignment_info:
+            extra_features = activation.one_hot( x = prefixes[...,1], 
+                                                 num_classes = 6 )
+        else:
+            extra_features = None
+            
+            
+        ### length_for_normalization
         length = jnp.where(true_out != seq_padding_idx, 
                            True, 
                            False).sum(axis=1)
@@ -221,17 +242,17 @@ class FeedforwardPredict(ModuleBase):
                                  False).sum(axis=1)
             length = length - num_gaps
         
-        return length
+        return (true_out, extra_features, length)
         
-
 
     def neg_loglike_in_scan_fn(self, 
                                forward_pass_outputs, 
                                true_out,
-                               seq_padding_idx = 0,
-                               **kwargs):
+                               more_attributes: dict,
+                               seq_padding_idx: int = 0):
         """
         Cross-entropy loss per position, using a chunk over alignment length
+        true_out is (B, L): the alignment-augmented descendant
         
         return sum(-logP)
         """
@@ -262,16 +283,14 @@ class FeedforwardPredict(ModuleBase):
         ### output sum
         # (B, L) -> (B,)
         sum_neg_logP = jnp.sum(neg_logP_perSamp_perPos, axis=1)
-        intermediate_vals = {'neg_logP_perSamp_perPos': neg_logP_perSamp_perPos, #(B, L)
-                             }
-        return (sum_neg_logP, intermediate_vals)
+        intermeds_to_stack = {'neg_logP_perSamp_perPos': neg_logP_perSamp_perPos, #(B, L)
+                              }
+        return (sum_neg_logP, intermeds_to_stack)
         
     
     def compile_metrics_in_scan(self,
                                 forward_pass_outputs, 
-                                true_out, 
-                                seq_padding_idx = 0,
-                                **kwargs):
+                                seq_padding_idx = 0):
         # forward pass only returns logits
         final_logits = forward_pass_outputs['FPO_final_logits']
         del forward_pass_outputs
@@ -285,7 +304,8 @@ class FeedforwardPredict(ModuleBase):
     def evaluate_loss_after_scan(self, 
                                  scan_fn_outputs,
                                  length_for_normalization,
-                                 seq_padding_idx = 0,
+                                 more_attributes: dict,
+                                 seq_padding_idx: int = 0,
                                  **kwargs):
         # unpack; remove dummy time from sum_neg_logP
         # (T=1, B) -> (B, )
@@ -319,7 +339,6 @@ class FeedforwardPredict(ModuleBase):
                         seq_padding_idx = 0,
                         out_alph_size = 43):
         """
-        *** HARD-CODED FOR AMINO ACIDS ***
         metrics include:
             - accuracy + confusion matrix
             - perplexity

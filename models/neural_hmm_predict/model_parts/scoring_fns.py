@@ -18,6 +18,7 @@ def matrix_indexing_fn(logprob_mat, index_vec, offset):
     row = index_vec[0]-offset
     col = index_vec[1]-offset
     return logprob_mat[row, col]
+
 vmapped_matrix_indexing = jax.vmap(matrix_indexing_fn, in_axes = (0,0, None))
 
 
@@ -113,13 +114,13 @@ def score_transitions(alignment_state,
     del new_shape
     
     
-    ### use vmapped function
+    ### use vmapped function (could probably turn into vmapped take, but
+    ###    do that later)
     # offset of 1 to map:
     # Match: 1 -> 0
     # Ins: 2 -> 1
     # Del: 3 -> 2
-    # S/E: 4 -> 3 
-    
+    # S/E: 4 -> 3
     out_by_vmap_raw = vmapped_matrix_indexing(trans_mat_reshape, 
                                               alignment_state_reshape,
                                               1)
@@ -138,7 +139,7 @@ def score_transitions(alignment_state,
     padding_mask =  ( (alignment_state[:,:,0] != padding_idx) &
                       (alignment_state[:,:,1] != padding_idx) )
     
-    final_logprobs = jnp.where(padding_mask[None,:,:],
+    final_logprobs = jnp.where( padding_mask[None,:,:],
                                 raw_logprobs,
                                 0)
     
@@ -218,9 +219,10 @@ def score_substitutions(true_out,
 
 
 
-def score_insertions(true_out, 
-                     ins_vec, 
-                     token_offset=3):
+def score_indels(true_out: jnp.array, 
+                 scoring_vec: jnp.array, 
+                 which_seq: int,
+                 token_offset: int=3):
     """
     inputs:
     -------
@@ -228,7 +230,9 @@ def score_insertions(true_out,
       > dim2=0: gapped ancestor
       > dim2=1: gapped descendant
       
-    ins_vec: (B, max_align_len - 1, alph) OR (1, 1, alph)
+    scoring_vec: (B, max_align_len - 1, alph) OR (1, 1, alph)
+    
+    which_seq: 0 to score ancestor, 1 to score descendant
      
     token_offset: int; used to map
         A: n -> 0
@@ -242,23 +246,23 @@ def score_insertions(true_out,
     final_logprobs: (T, B, max_align_len - 1)
       
     """
-    desc_toks = true_out[:,:,-1] - token_offset
+    residue_tokens = true_out[:,:,which_seq] - token_offset
     
     # dims
-    B = desc_toks.shape[0]
-    L = desc_toks.shape[1]
-    alph = ins_vec.shape[2]
+    B = residue_tokens.shape[0]
+    L = residue_tokens.shape[1]
+    alph = scoring_vec.shape[2]
     
-    ### if one ins_vec for all positions, need new view of ins_vec 
+    ### if one scoring_vec for all positions, need new view of scoring_vec 
     ###   for take_along_axis
-    if ins_vec.shape[1] == 1:
+    if scoring_vec.shape[1] == 1:
         # broadcast up: (B, 1, alph) -> (B, L, alph)
         new_shape = (B, L, alph)
-        ins_vec = jnp.broadcast_to(ins_vec, new_shape)
+        scoring_vec = jnp.broadcast_to(scoring_vec, new_shape)
         del new_shape
 
-    final_logprobs = jnp.take_along_axis(arr=ins_vec, 
-                                         indices=desc_toks[:,:,None], 
+    final_logprobs = jnp.take_along_axis(arr=scoring_vec, 
+                                         indices=residue_tokens[:,:,None], 
                                          axis=-1)[:,:,0]
     
     return final_logprobs

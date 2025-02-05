@@ -8,10 +8,8 @@ Created on Tue Nov  5 15:57:26 2024
 from collections import OrderedDict
 
 
-def create_config(bidirect: bool,
-                  *args, 
-                  **kwargs):
-    out = OrderedDict({"initial_embed_module": "[STR]",
+def create_config(*args, **kwargs):
+    return OrderedDict({"initial_embed_module": "[STR]",
                        "first_block_module": "[STR]",
                        "subsequent_block_module": "[STR]",
                          
@@ -21,5 +19,4 @@ def create_config(bidirect: bool,
                        "return_final_carry": "[BOOL=false]",
                        "hidden_dim": "[INT]",
                        "dropout": "[FLOAT=0.0]"})
-    else:
-        return out
+    

@@ -4,6 +4,12 @@
 Created on Sat Oct  5 14:42:56 2024
 
 @author: annabel
+
+parts:
+======
+CondMatchEmissionsLogprobs
+JointMatchEmissionsLogprobs
+MatchEmissionsLogprobsFromFile
 """
 # jumping jax and leaping flax
 from flax import linen as nn
@@ -178,7 +184,7 @@ class JointMatchEmissionsLogprobs(ModuleBase):
     config: dict
     name: str
     
-    def setup():
+    def setup(self):
         self.conditional_model = CondMatchEmissionsLogprobs(config=self.config,
                                                             name=f'cond_logprob')
         
@@ -190,7 +196,7 @@ class JointMatchEmissionsLogprobs(ModuleBase):
                  t_array,
                  sow_intermediates: bool=False):
         
-        out = CondMatchEmissionsLogprobs(final_shape = final_shape,
+        out = self.conditional_model(final_shape = final_shape,
                                          exchangeability_matrices = exchangeability_matrices,
                                          log_equilibr_distrib = log_equilibr_distrib,
                                          t_array = t_array,
@@ -203,7 +209,7 @@ class JointMatchEmissionsLogprobs(ModuleBase):
         ### final matrix sizes
         # logprob_subst: (T, B, L, base_alphabet_size, base_alphabet_size)
         # subst_rate_mat: (B, L, base_alphabet_size, base_alphabet_size)
-        return (logprob_subst, subst_rate_mat)
+        return (joint_logprob_subst, subst_rate_mat)
 
 
 class MatchEmissionsLogprobsFromFile(ModuleBase):
@@ -211,7 +217,8 @@ class MatchEmissionsLogprobsFromFile(ModuleBase):
     name: str
     
     def setup(self):
-        load_from_file = self.config['load_from_file']
+        load_from_file = self.config.get('load_from_file', 
+                                         'LG08_exchangeability_r.npy')
         
         with open(load_from_file, 'rb') as f:
             self.logprob_subst = jnp.load(f)
@@ -246,107 +253,3 @@ class MatchEmissionsLogprobsFromFile(ModuleBase):
         # (T, B, L, base_alphabet_size, base_alphabet_size), OR
         # (1, 1, 1, base_alphabet_size, base_alphabet_size)
         return (logprob_subst, placeholder_mat)
-
-
-
-###############################################################################
-### Retrieve logprob at insert sites   ########################################
-###############################################################################
-### this is handled in concat_feats_to_params
-# class IndelEmissionsLogprobs(ModuleBase):
-#     config: dict
-#     name: str
-    
-#     @nn.compact
-#     def __call__(self,
-#                  equilibr_logits,
-#                  sow_intermediates: bool,
-#                  **kwargs):
-#         """
-#         (no parameters to train, but ModuleBase allows writing to tensorboard)
-        
-#         purpose:
-#         --------
-#         evolutionary parameters (from neural network) -> 
-#             logprob(emissions at insert sites)
-        
-        
-#         input sizes:
-#         -------------
-#         equilibr_logits: (B, L, alph) OR (1, 1, alph)
-        
-        
-#         output sizes:
-#         -------------
-#         logprob_equilibr: (B, L, alph) OR (1, 1, alph)
-#         prob_equilibr: (B, L, alph) OR (1, 1, alph)
-        
-#         """
-#         logprob_equilibr = nn.log_softmax(equilibr_logits)
-#         prob_equilibr = jnp.exp( logprob_equilibr )
-         
-#         if sow_intermediates:
-#             self.sow_histograms_scalars(mat=logprob_equilibr, 
-#                                         label=f'{self.name}/logprob_equilibr', 
-#                                         which='scalars')
-        
-#         # final mats are both: 
-#         # (B, L, base_alphabet_size), OR (1, 1, base_alphabet_size)
-#         return prob_equilibr, logprob_equilibr
-
-
-class IndelEmissionsLogprobsFromFile(ModuleBase):
-    """
-    read the logprobs from a file
-    """
-    config: dict
-    name: str
-    
-    def setup(self):
-        load_from_file = self.config['load_from_file']
-        
-        with open(load_from_file, 'rb') as f:
-            self.logprob_equilibr = jnp.load(f)
-        
-        if len(self.logprob_equilibr.shape) == 1:
-            self.logprob_equilibr = self.logprob_equilibr[None, None, :]
-        
-    
-    def __call__(self,
-                 sow_intermediates: bool=False,
-                 **kwargs):
-        logprob_equilibr = self.logprob_equilibr
-        prob_equilibr = jnp.exp( logprob_equilibr )
-
-        # (B, L, base_alphabet_size), OR (1, 1, base_alphabet_size)
-        return prob_equilibr, logprob_equilibr
-
-
-class IndelEmissionsLogprobsFromCounts(ModuleBase):
-    """
-    construct logprobs from the aa counts in the training set
-    """
-    config: dict
-    name: str
-    
-    def setup(self):
-        # (alph,)
-        training_dset_aa_counts = self.config['training_dset_aa_counts']
-        
-        prob_equilibr = training_dset_aa_counts/training_dset_aa_counts.sum()
-        logprob_equilibr = jnp.log( jnp.where( prob_equilibr != 0,
-                                              prob_equilibr,
-                                              SMALLEST_FLOAT32
-                                              )
-                                   )
-        
-        # expand to to (B=1, L=1, alph)
-        self.logprob_equilibr = logprob_equilibr[None, None, :]
-        self.prob_equilibr = prob_equilibr[None, None, :]
-        
-    def __call__(self,
-                 sow_intermediates: bool=False,
-                 **kwargs):
-        # (1, 1, base_alphabet_size)
-        return self.prob_equilibr, self.logprob_equilibr
-    

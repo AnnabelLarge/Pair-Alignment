@@ -9,8 +9,8 @@ from collections import OrderedDict
 
 
 def create_config(*args, **kwargs):
-    return OrderedDict({"layer_sizes": "[list of INT]",
+    return OrderedDict({"add_prev_alignment_info": "[BOOL]",
+                        "layer_sizes": "[list of INT]",
                         "normalize_inputs": "[BOOL]",
-                        "use_bias": "[BOOL]",
                         "dropout": "[FLOAT=0.0]"})
 

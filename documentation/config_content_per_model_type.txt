@@ -1,31 +1,32 @@
 for pred_model_type = 'feedforward':
 ======================================
 top-level config contains:
-  - use_scan_fns: bool
-  - chunk_length: int
-  - add_prev_alignment_info: bool
+  X use_scan_fns: bool
+  X chunk_length: int
 
 pred_config sub-dictionary contains:
-
-
+  X add_prev_alignment_info: bool
+  X layer_sizes: int
+  X normalize_inputs: bool
+  X dropout: float=0.0
 
 
 for pred_model_type = 'neural_pairhmm':
 ======================================
 top-level config contains:
-  - use_scan_fns: bool
-  - chunk_length: int
+  X use_scan_fns: bool
+  X chunk_length: int
 
 pred_config sub-dictionary contains:
-- indels_config: dict
-- equilibr_config: dict
+X indels_config: dict
+X equilibr_config: dict
+X exchange_config: dict
+- (ADDED AUTOMATICALLY): emission_alphabet_size
 
-indel_config sub-sub-dictionary contains:
+indel_config sub-sub-dictionary always contains:
 - safe_grads: bool
 - tkf_err: float
 
-equilibr_config sub-sub-dictionary contains:
-- (ADDED AUTOMATICALLY): training_dset_aa_counts
 
 
 

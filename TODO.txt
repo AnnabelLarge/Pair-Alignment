@@ -1,5 +1,6 @@
 Changes to note:
 =================
+
 - valid tasks: train, resume_train, eval
 
 - valid pred_model_type: feedfroward, neural_pairhmm, pairhmm
@@ -58,22 +59,25 @@ Changes to note:
 
 REFACTOR LIST:
 ==============
-[X] all dataloaders
-[ip] train CLI (skeleton done)
 
-[ip] utils
+[X] all dataloaders
+[X] train CLI (skeleton done)
+
+[X] utils
   [X] edit_argparse
   [X] setup_training_dir
   [X] sequence_length_helpers
   [X] tensorboard_recording_utils (kept as-is for all models, may need to update for pairhmm models?)
+  [X] logsumexp utils
 
-[ip] train_eval_fns
+[X] train_eval_fns
   [X] build_optimizer
+  [X] train/eval for full length alignments
+  [X] final eval wrapper for full length alignments
 
 [X] models (update all blocks, hard-code some defaults, update script that generates config file)
   [X] feedforward_predict
     [X] initializer
-
   [X] model_utils
   
   [X] sequence_embedders
@@ -83,7 +87,7 @@ REFACTOR LIST:
     [X] mamba
     [X] other infrastructure
   
-  [ip] neural_hmm_predict
+  [X] neural_hmm_predict
     [X] initializer
     [X] concat_feats_to_params
     [X] pairHMM_emissions_blocks
@@ -98,6 +102,51 @@ when done with train CLI:
 [ ] tabulate_model
 
 
+later:
+------
+- scanned version of above (if needed)
+
+
+
+
+
+
+Neural TKF models to pre-assemble:
+==================================
+for unit tests:
+---------------
+1. given paramaters, reduce to same counts-based score
+   - anc seq embedder: None
+   - desc seq embedder: None
+   - prediction head: neural TKF
+     > exchangeabilities modules
+       >> postprocess: Placeholder (or None)
+       >> feats to params: EvoparamsFromFile (load LG08)
+
+     > equilibriums modules
+       >> postprocess: Placeholder (or None)
+       >> feats to params: Placeholder (or None)
+
+     > indel parameters modules
+       >> postprocess: Placeholder (or None)
+       >> feats to params: EvoparamsFromFile 
+          > run a model that uses local rates, but make all indel parameters the same
+
+     > evaluate emissions
+       >> match sites: JointMatchEmissionsLogprobs
+       >> indel sites: IndelEmissionsLogprobsFromCounts
+
+     > evaluate transitions: 
+       > [MAKE THIS THE SOLE CONFIGURABLE OPTION: tkf91 cond, tkf91 joint, tkf92 cond, tkf92 joint]
+
+     > concat_fn: doesn't matter, because you won't use the features
+
+
+2. given exchangeabilities and equilibrium distribution, fit to same indel parameters and 
+   - same as above, but change:
+     > indel parameters modules
+       >> postprocess: Placeholder (or None)
+       >> feats to params: GlobalTKFLamMuRates, GlobalTKF92ExtProb
 
 
 
@@ -105,60 +154,74 @@ when done with train CLI:
 
 
 
-Dogshow Evolpair Prediction head variants:
-============================================
-
-controls:
-----------
-
-1. reduction to EvolPairHMMore calculation (all global TKF91)
-2. reduction to EvolPairHMMore calculation (all global TKF92)
 
 
-using per-position embeddings (of any kind):
---------------------------------------------
+using per-position embeddings (no sequence embedders):
+-------------------------------------------------------
 - embeddings -> some combination of local+global params (already implemented)
   1.  LOCAL exch, global pi, global tkf92
+   - anc seq embedder: OneHot
+   - desc seq embedder: None
+   - prediction head: neural TKF
+     > exchangeabilities modules:
+     > equilibriums modules:
+     > indel parameters modules:
+     > concat_fn:
+
   2. global exch,  LOCAL pi, global tkf92
+   - anc seq embedder: None
+   - desc seq embedder: None
+   - prediction head: neural TKF
+     > exchangeabilities modules:
+     > equilibriums modules:
+     > indel parameters modules:
+     
   3. global exch, global pi,  LOCAL tkf92
+   - anc seq embedder: None
+   - desc seq embedder: None
+   - prediction head: neural TKF
+     > exchangeabilities modules:
+     > equilibriums modules:
+     > indel parameters modules:
+     
   4. global exch,  LOCAL pi,  LOCAL tkf92
+   - anc seq embedder: None
+   - desc seq embedder: None
+   - prediction head: neural TKF
+     > exchangeabilities modules:
+     > equilibriums modules:
+     > indel parameters modules:
+     
   5. all LOCAL: exch, pi, tkf92
+   - anc seq embedder: None
+   - desc seq embedder: None
+   - prediction head: neural TKF
+     > exchangeabilities modules:
+     > equilibriums modules:
+     > indel parameters modules:
+     
 
 - direct collaries to method with different site classes
   1. global exch, LOCAL pi, global lambda and mu, LOCAL r
-
-
-Things that should be adjustable:
-- number of repeats, reduction size per layer
-- whether or not to average pool
-
-
-
-Things to hold constant:
-- dropout (when appropriate)
-- norm type
-- activations
-- if average pooling: window size
-- don't take these options away from the base class, but overwrite them
+   - anc seq embedder: None
+   - desc seq embedder: None
+   - prediction head: neural TKF
+     > exchangeabilities modules:
+     > equilibriums modules:
+     > indel parameters modules:
+     
 
 
 
 
-Counts-based calculations in DogShow:
--------------------------------------
-  1. ignore sequence embedders entirely
-  2. load counts matrices from data (I already precomputed these)
-  3. potentially might need to update training loop, since you don't have a length dimension anymore?
-
-
+Unit tests to build:
+====================
 
 frequencies-based controls:
 ----------------------------
 - load data, get descendant-only and anc-desc frequencies
 - score all sequences
 - return parameter matrices
-
-
 
 
 Unit test suite (after combining):

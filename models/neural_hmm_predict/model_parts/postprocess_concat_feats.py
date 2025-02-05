@@ -26,7 +26,7 @@ from flax import linen as nn
 import jax
 import jax.numpy as jnp
 
-from models.modeling_utils.BaseClasses import ModuleBase
+from models.model_utils.BaseClasses import ModuleBase
 
 
 class Placeholder(ModuleBase):
@@ -39,9 +39,10 @@ class Placeholder(ModuleBase):
     
     @nn.compact
     def __call__(self, 
+                 padding_mask,
                  *args,
                  **kwargs):
-        return None
+        return (None, padding_mask)
     
 class SelectMask(ModuleBase):
     config: dict
@@ -209,6 +210,8 @@ class FeedforwardToEvoparams(SelectMask):
 
 class ConvToEvoparams(SelectMask):
     """
+    (not used yet)
+    
     inherit process_datamat_lst() from SelectMask
     
     apply this blocks as many times as specified by layer_sizes: 
@@ -286,6 +289,7 @@ class ConvToEvoparams(SelectMask):
             datamat = nn.Conv(features = hidden_dim, 
                               kernel_size = kernel_size,
                               kernel_init = self.kernel_init,
+                              padding='CAUSAL',
                               name=f'{self.name}/final conv layer {layer_idx}')(datamat)
             datamat = jnp.multiply(datamat, concat_masking_mat)
             

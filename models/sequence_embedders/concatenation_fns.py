@@ -16,11 +16,12 @@ import jax
 import jax.numpy as jnp
 
 
-
 def extract_embs(anc_encoded, 
                  desc_encoded, 
+                 extra_features,
                  idx_lst, 
-                 align_idx_padding = -9):
+                 align_idx_padding = -9,
+                 **kwargs):
     """
     extract embeddings, according to coordinates given by idx_lst
     need this as a class in order to initialize the special indexing function
@@ -40,47 +41,43 @@ def extract_embs(anc_encoded,
           > (batch, seq_len, 2)
         
     outputs:
-        - tuple of (anc_embs, desc_embs)
+        - tuple of (anc_embs, desc_embs, extra_features)
           > both of size (batch, alignment_len, hid_dim)
         - mask for alignment positions
     """
     # get indexes needed
-    anc_idxes = idx_lst[:,:,0] #(B, L)
-    desc_idxes = idx_lst[:,:,1] #(B, L)
+    anc_idxes = idx_lst[:,:,0][...,None] #(B, L, 1)
+    desc_idxes = idx_lst[:,:,1][...,None] #(B, L, 1)
+    masking_vec = ( anc_idxes != align_idx_padding )
     
-    # from the idx list, padding characters correspond to 
-    #   align_idx_padding (different from general padding index)
-    # (B,L,2) -> (B, L)
-    masking_vec = jnp.where( idx_lst!=align_idx_padding, True, False)[:,:,0]
+    # index with jnp take
+    anc_selected = jnp.take_along_axis(anc_encoded, anc_idxes, axis=1)
+    anc_selected = anc_selected * masking_vec
+    
+    desc_selected = jnp.take_along_axis(desc_encoded, desc_idxes, axis=1)
+    desc_selected = desc_selected * masking_vec
+    
+    out_lst = [anc_selected, desc_selected]
+    
+    if extra_features is not None:
+        out_lst.append(extra_features)
+    
+    return (out_lst, masking_vec[...,0])
 
-    # indexing, but along the batch dimension
-    # TODO: COULD THIS BE REPLACED BY JNP.TAKE SOMEHOW, FOR SPEED UPS?
-    def index_perbatch(idx_lst, enc_mat, masking_mat):
-        # do the indexing
-        raw_out = enc_mat[idx_lst,:]
-        
-        # reshape the mask to match the hidden dimension
-        masking_mat = jnp.expand_dims(masking_mat, 1)
-        masking_mat = jnp.repeat(masking_mat, raw_out.shape[1], axis=1)
-        
-        # apply mask
-        masked_out = raw_out * masking_mat
-        return masked_out
-    init_vmapped_indexer = jax.vmap(index_perbatch, 
-                                    in_axes=0, 
-                                    out_axes=0)
+
+def combine_one_hot_embeddings(anc_encoded, 
+                               desc_encoded,
+                               seq_padding_idx = 0,
+                               *args,
+                               **kwargs):
+    """
+    ignore idx_lst, and just return embeddings as-is
     
-    # do indexing along batch dimension and get a masking matrix
-    anc_selected = init_vmapped_indexer(anc_idxes,
-                                        anc_encoded,
-                                        masking_vec)
-    
-    desc_selected = init_vmapped_indexer(desc_idxes, 
-                                         desc_encoded,
-                                         masking_vec)
-    
-    return ([anc_selected, desc_selected], masking_vec)
-    
+    when used in TKF92, this is essentially one-hot encoding the alignment
+    itself
+    """
+    masking_vec = anc_encoded != seq_padding_idx
+    return ([anc_encoded, desc_encoded], masking_vec)
 
 
 
