@@ -5,32 +5,62 @@ Created on Wed Feb  5 05:58:42 2025
 
 @author: annabel
 """
+# regular python
+import numpy as np
+from collections.abc import MutableMapping
+import pickle
+import math
+from functools import partial
+from tqdm import tqdm
+
+# flax, jax, and optax
+import jax
+import jax.numpy as jnp
+from jax import config
+from flax import linen as nn
+import optax
 
 def train_one_batch(batch, 
                     training_rngkey, 
-                    pairhmm_trainstate,
-                    interms_for_tboard
+                    all_trainstates,
+                    t_array,
+                    interms_for_tboard,
+                    update_grads: bool = True,
                     **kwargs):
+    
     finalpred_sow_outputs = interms_for_tboard['finalpred_sow_outputs']
     
     def apply_model(pairhmm_params):
-        out = pairhmm_trainstate.apply_fn(variables = pairhmm_params,
+        loss_dict, sow_dict = all_trainstates.apply_fn(variables = pairhmm_params,
                                           batch = batch,
-                                          sow_outputs = finalpred_sow_outputs)
-        (loss, aux_dict), pred_sow_dict = out
-        aux_dict = {**aux_dict, **pred_sow_dict}
+                                          t_array = t_array,
+                                          sow_intermediates = finalpred_sow_outputs,
+                                          mutable=['histograms','scalars'] if finalpred_sow_outputs else [])
         
-        return loss, aux_dict
+        sow_dict = {'histograms': sow_dict.get( 'histograms', dict() ),
+                    'scalars': sow_dict.get( 'scalars', dict() )
+                    }
+        
+        aux_dict = {k:v for k,v in loss_dict.items() if k != 'loss'}
+        aux_dict = {**aux_dict, **sow_dict}
+        
+        return loss_dict['loss'], aux_dict
     
     grad_fn = jax.value_and_grad(apply_model, has_aux=True)
-    (batch_loss, aux_dict), grad = grad_fn
+    (batch_loss, aux_dict), grad = grad_fn(all_trainstates.params)
  
-    # update gradients 
-    updates, new_opt_state = pairhmm_trainstate.tx.update(grad)
-    new_params = optax.apply_updates(pairhmm_trainstate.params,
-                                     updates)
-    new_trainstate = pairhmm_trainstate.replace(params = new_params,
-                                                opt_state = new_opt_state)
+    
+    ### only turn this off during debug
+    if update_grads:
+        updates, new_opt_state = all_trainstates.tx.update(grad,
+                                                            all_trainstates.opt_state,
+                                                            all_trainstates.params)
+        new_params = optax.apply_updates(all_trainstates.params,
+                                          updates)
+        new_trainstate = all_trainstates.replace(params = new_params,
+                                                    opt_state = new_opt_state)
+    else:
+        new_trainstate = all_trainstates
     
     
     ### other metrics
@@ -39,7 +69,7 @@ def train_one_batch(batch,
     perplexity_perSamp = jnp.exp(neg_logP_length_normed) #(B,)
     
     # exponentiated cross entropy
-    ece = jnp.exp(loss)
+    ece = jnp.exp(batch_loss)
     
     out_dict = {'neg_logP_length_normed': aux_dict['neg_logP_length_normed'],
                 'sum_neg_logP': aux_dict['sum_neg_logP'],
@@ -52,32 +82,35 @@ def train_one_batch(batch,
 
 
 def eval_one_batch(batch, 
-                    pairhmm_trainstate,
-                    interms_for_tboard
+                   t_array,
+                    all_trainstates,
+                    interms_for_tboard,
                     **kwargs):
     finalpred_sow_outputs = interms_for_tboard['finalpred_sow_outputs']
-    
-    
-    out = pairhmm_trainstate.apply_fn(variables = pairhmm_trainstate.params,
+    loss_dict, sow_dict = all_trainstates.apply_fn(variables = all_trainstates.params,
                                       batch = batch,
-                                      sow_outputs = finalpred_sow_outputs)
-    (loss, aux_dict), pred_sow_dict = out
-    aux_dict = {**aux_dict, **pred_sow_dict}
+                                      t_array = t_array,
+                                      sow_intermediates = finalpred_sow_outputs,
+                                      mutable=['histograms','scalars'] if finalpred_sow_outputs else [])
+    
+    sow_dict = {'histograms': sow_dict.get( 'histograms', dict() ),
+                'scalars': sow_dict.get( 'scalars', dict() )
+                }
     
     ### other metrics
     # perplexity per sample
-    neg_logP_length_normed = aux_dict['neg_logP_length_normed']
+    neg_logP_length_normed = loss_dict['neg_logP_length_normed']
     perplexity_perSamp = jnp.exp(neg_logP_length_normed) #(B,)
     
     # exponentiated cross entropy
-    ece = jnp.exp(loss)
+    ece = jnp.exp(loss_dict['loss'])
     
-    out_dict = {'neg_logP_length_normed': aux_dict['neg_logP_length_normed'],
-                'sum_neg_logP': aux_dict['sum_neg_logP'],
+    out_dict = {'neg_logP_length_normed': loss_dict['neg_logP_length_normed'],
+                'sum_neg_logP': loss_dict['sum_neg_logP'],
                 'perplexity_perSamp': perplexity_perSamp,
                 'ece': ece,
-                'batch_loss': batch_loss}
-    
+                'batch_loss': loss_dict['loss']}
+    out_dict = {**out_dict, **sow_dict}
     return out_dict
 
 
@@ -85,14 +118,10 @@ def final_eval_wrapper(dataloader,
                        dataset, 
                        best_trainstates, 
                        eval_fn_jitted,
-                       interms_for_tboard: dict, 
                        logfile_dir: str,
                        out_arrs_dir: str, 
                        outfile_prefix: str, 
-                       tboard_writer = None,
                        **kwargs):
-    return_forward_pass_outputs = interms_for_tboard['forward_pass_outputs']
-    
     final_ave_loss = 0
     final_ave_loss_seqlen_normed = 0
     final_perplexity = 0
@@ -100,7 +129,7 @@ def final_eval_wrapper(dataloader,
     for batch_idx, batch in tqdm( enumerate(dataloader), total=len(dataloader) ): 
         # eval
         eval_metrics = eval_fn_jitted(batch=batch, 
-                                      pairhmm_trainstate=best_trainstates)
+                                      all_trainstates=best_trainstates)
         
         
         #########################################
@@ -135,12 +164,6 @@ def final_eval_wrapper(dataloader,
                      'final_perplexity':final_perplexity,
                      'final_ece':final_ece}
     
-    # write summary stats collected from final_stats_for_tboard
-    #   top_layer_name has already been provided
-    if tboard_writer:
-        write_stats_to_tabular(flat_dict = final_stats_for_tboard,
-                               writer_obj = tboard_writer)
-        
     return summary_stats
 
     

@@ -318,6 +318,10 @@ def neural_hmm_params_instance( input_shapes,
                      'local_exch_equilibr_r': local_exch_equilibr_r,
                      'all_local': all_local }
     
+    err = f'present_name options: {initializers.keys()}'
+    assert preset_name in initializers.keys(), err
+    del err
+    
     indel_model_type = model_config['indel_model_type']
     loss_type = model_config['loss_type']
     argsdict = initializers[preset_name]( indel_model_type = indel_model_type,

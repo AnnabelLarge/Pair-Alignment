@@ -366,7 +366,7 @@ def write_optional_outputs_during_training(writer_obj,
         - gradients
     """
     ### intermediates sowed by the models
-    if interms_for_tboard['encoder_sow_outputs']:
+    if interms_for_tboard.get('encoder_sow_outputs',False):
         flat_dict = flatten_convert( dict_of_values['anc_layer_metrics']['scalars'] )
         write_scalars_from_dict(flat_dict=flat_dict,  
                                 top_layer_name=f'IN TRAIN LOOP/ANC_INTERMS/',
@@ -374,7 +374,7 @@ def write_optional_outputs_during_training(writer_obj,
                                 global_step=global_step)
         del flat_dict
     
-    if interms_for_tboard['decoder_sow_outputs']:
+    if interms_for_tboard.get('decoder_sow_outputs',False):
         flat_dict = flatten_convert( dict_of_values['desc_layer_metrics']['scalars'] )
         write_scalars_from_dict(flat_dict=flat_dict,
                                 top_layer_name=f'IN TRAIN LOOP/DESC_INTERMS/',
@@ -382,7 +382,7 @@ def write_optional_outputs_during_training(writer_obj,
                                 global_step=global_step)
         del flat_dict
     
-    if interms_for_tboard['finalpred_sow_outputs']:
+    if interms_for_tboard.get('finalpred_sow_outputs',False):
         flat_dict = flatten_convert( dict_of_values['pred_layer_metrics']['scalars'] )
         write_scalars_from_dict(flat_dict=flat_dict, 
                                 top_layer_name=f'IN TRAIN LOOP/FINALPRED_INTERMS/',
@@ -392,9 +392,9 @@ def write_optional_outputs_during_training(writer_obj,
     
     
     ### weights; already flattened with top_layer_name
-    if interms_for_tboard['weights']:
+    if interms_for_tboard.get('weights',False):
         flat_dict = weight_summary_stats(all_trainstates = all_trainstates,
-                                         tag_prefix = 'IN TRAIN LOOP')
+                                          tag_prefix = 'IN TRAIN LOOP')
         write_scalars_from_dict(flat_dict=flat_dict, 
                                 top_layer_name='',
                                 writer_obj=writer_obj, 
@@ -406,17 +406,17 @@ def write_optional_outputs_during_training(writer_obj,
             for tstate in all_trainstates:
                 param_dict = flatten_convert( tstate.params.get('params', dict()) )
                 write_histograms_from_dict(flat_dict=param_dict, 
-                                           top_layer_name='IN TRAIN LOOP/WEIGHTS/',
-                                           writer_obj=writer_obj, 
-                                           global_step=global_step)
+                                            top_layer_name='IN TRAIN LOOP/WEIGHTS/',
+                                            writer_obj=writer_obj, 
+                                            global_step=global_step)
             del param_dict
         
             
     
     ### gradients; also already flattened with top_layer_name
-    if interms_for_tboard['gradients']:
+    if interms_for_tboard.get('gradients',False):
         gradient_dictionaries = {key: val for key, val in dict_of_values.items() if key in 
-                                 ['enc_gradient', 'dec_gradient','finalpred_gradient']}        
+                                  ['enc_gradient', 'dec_gradient','finalpred_gradient']}        
         flat_dict = grads_summary_stats(gradient_dictionaries = gradient_dictionaries,
                                 tag_prefix = 'IN TRAIN LOOP') 
         write_scalars_from_dict(flat_dict=flat_dict, 
@@ -430,23 +430,23 @@ def write_optional_outputs_during_training(writer_obj,
             for key, grad_dict in gradient_dictionaries.items():
                 grad_dict = flatten_convert( grad_dict.get('params',dict()) )
                 write_histograms_from_dict(flat_dict=grad_dict, 
-                                           top_layer_name='IN TRAIN LOOP/GRADIENTS/',
-                                           writer_obj=writer_obj, 
-                                           global_step=global_step)
+                                            top_layer_name='IN TRAIN LOOP/GRADIENTS/',
+                                            writer_obj=writer_obj, 
+                                            global_step=global_step)
             del grad_dict
     
     
     ### optimizer updates; functions defined above
-    if interms_for_tboard['optimizer']:
+    if interms_for_tboard.get('optimizer',False):
         # mu, nu
         write_adam_optimizer_summary_stats(all_trainstates = all_trainstates,
-                                           writer_obj=writer_obj,
-                                           global_step=global_step)
+                                            writer_obj=writer_obj,
+                                            global_step=global_step)
         
         # updates
         all_updates = [dict_of_values.get(item, dict()) for item in
-                       ['encoder_updates', 'decoder_updates', 'finalpred_updates']
-                       ]
+                        ['encoder_updates', 'decoder_updates', 'finalpred_updates']
+                        ]
         write_optimizer_updates(all_updates = all_updates,
                                 writer_obj=writer_obj,
                                 global_step=global_step)
@@ -479,7 +479,7 @@ def calc_stats_during_final_eval(all_trainstates,
     
     arrays_dict = dict()
     for flagname, keyname in flags_keynames:
-        if (interms_for_tboard[flagname] and
+        if (interms_for_tboard.get(flagname,False) and
             keyname in dict_of_values.keys()):
             to_add = calc_stats(mat = dict_of_values[keyname], 
                                 name = f'FINAL-EVAL/{top_level_tag}/{keyname}')
@@ -488,7 +488,7 @@ def calc_stats_during_final_eval(all_trainstates,
     out_dict = {**out_dict, **arrays_dict}
     
     # check final outputs from forward pass separately
-    if interms_for_tboard['forward_pass_outputs']:
+    if interms_for_tboard.get('forward_pass_outputs',False):
         for keyname in dict_of_values.keys():
             if keyname.startswith('FPO_'):
                 to_add = calc_stats(mat = dict_of_values[keyname],
@@ -497,19 +497,19 @@ def calc_stats_during_final_eval(all_trainstates,
     # stats for sowed intermediates are already calculated, so just flatten
     #   and add
     sowed_dict = dict()
-    if interms_for_tboard['encoder_sow_outputs']:
+    if interms_for_tboard.get('encoder_sow_outputs',False):
         flat_dict = flatten_convert( dict_of_values['anc_layer_metrics']['scalars'],
                                     parent_key = f'FINAL-EVAL/{top_level_tag}/ANC_INTERMS')
         sowed_dict = {**sowed_dict, **flat_dict}
         del flat_dict
     
-    if interms_for_tboard['decoder_sow_outputs']:
+    if interms_for_tboard.get('decoder_sow_outputs',False):
         flat_dict = flatten_convert( dict_of_values['desc_layer_metrics']['scalars'],
                                     parent_key = f'FINAL-EVAL/{top_level_tag}/DESC_INTERMS' )
         sowed_dict = {**sowed_dict, **flat_dict}
         del flat_dict
     
-    if interms_for_tboard['finalpred_sow_outputs']:
+    if interms_for_tboard.get('finalpred_sow_outputs',False):
         flat_dict = flatten_convert( dict_of_values['pred_layer_metrics']['scalars'],
                                     parent_key = f'FINAL-EVAL/{top_level_tag}/FINALPRED_INTERMS' )
         sowed_dict = {**sowed_dict, **flat_dict}

@@ -11,12 +11,8 @@ import os
 import argparse 
 import jax
 
-# functions to run
-from cli.train import train
-from dloaders.init_dataloaders import init_dataloaders
 
-
-# jax.config.update("jax_debug_nans", True)
+jax.config.update("jax_debug_nans", True)
 # jax.config.update("jax_enable_x64", True)
 
 
@@ -32,7 +28,8 @@ def main():
     parser = argparse.ArgumentParser(prog='Pair_Alignment')
     
     ### which program do you want to run?
-    valid_tasks = ['train']
+    valid_tasks = ['train_pairhmm_indp_sites',
+                   'train_pairhmm_markovian_sites']
     
     # parser.add_argument('-task',
     #                     type=str,
@@ -55,8 +52,8 @@ def main():
     
     
     # ### UNCOMMENT TO RUN IN SPYDER IDE
-    args.task = 'train'
-    args.configs = 'tkf91_load_params.json'
+    args.task = 'train_pairhmm_markovian_sites'
+    args.configs = 'markovian_one_class.json'
     
     
     ### helper function to open a single config file and extract additional arguments
@@ -73,29 +70,35 @@ def main():
     ###########################################################################
     ### TRAINING OPTIONS   ####################################################
     ###########################################################################
-
-    ############
-    ### TRAIN  #
-    ############
-    if args.task == 'train':
+    if args.task.startswith('train'):
+        # read argparse
         assert args.configs.endswith('.json'), print("input is one JSON file")
         print(f'TRAINING WITH: {args.configs}')
         args = read_config_file(args.configs)
         
+        # import correct wrappers, dataloader initializers
+        if args.pred_model_type == 'pairhmm_indp_sites':
+            from cli.train_pairhmm_indp_sites import train_pairhmm_indp_sites as train
+            from dloaders.init_counts_dset import init_counts_dset as init_dataloaders
+
+        elif args.pred_model_type == 'pairhmm_markovian_sites':
+            from cli.train_pairhmm_markovian_sites import train_pairhmm_markovian_sites as train
+            from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
+
+        elif args.pred_model_type == 'feedforward':
+            from dloaders.full_len_dset import full_len_dset as init_dataloaders
+            raise NotImplementedError("make new train script")
+
+        elif args.pred_model_type == 'neural_hmm':
+            from dloaders.full_len_dset import full_len_dset as init_dataloaders
+            raise NotImplementedError("make new train script")
+        
+        # train model
         dload_lst = init_dataloaders(args, 'train')
-        train(args, dload_lst)
-    
-    
+        
+        with jax.disable_jit():
+            train(args, dload_lst)
+
 
 if __name__ == '__main__':
-    import shutil
-    import os
-    
-    folder = 'RESULTS_tkf91_load_params'
-    print(f'REMOVING PREVIOUS RUN: {folder}')
-    
-    if folder in os.listdir():
-        shutil.rmtree(folder)
-
-
     main()

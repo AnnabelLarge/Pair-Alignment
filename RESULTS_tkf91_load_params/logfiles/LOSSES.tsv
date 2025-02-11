@@ -1,4 +1,0 @@
-epoch_idx	which	batch_idx	ave_loss	ave_perplexity	ece	notes
-0	train_set	0	24.694913864135742	53071921152.0	53071921152.0	none
-0	train_dset	DSET_AVE	24.694913864135742	53071921152.0	53071922779.4807	best_epoch
-0	test_dset	DSET_AVE	24.694913864135742	53071921152.0	53071922779.4807	best_epoch

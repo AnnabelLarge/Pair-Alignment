@@ -32,9 +32,9 @@ Data to be read:
 3. delCounts.npy: (num_pairs, 20)
     counts of bases that get deleted
 
-4. transCounts.npy: (num_pairs, 3, 3) OR (num_pairs, 5, 5)
+4. transCounts.npy: (num_pairs, 3, 3) OR (num_pairs, 4, 4)
     transition counts across whole alignment length
-    3x3 if encoding start and end states as match sites; 5x5 otherwise
+    3x3 if encoding start and end states as match sites; 4x4 otherwise
 
 5. AAcounts.npy: (20, )
     equilibrium counts from whole dataset
@@ -180,8 +180,10 @@ class CountsDset(Dataset):
                 mat = safe_convert( np.load(f)[idxes_to_keep, ...] )
                 if bos_eos_as_match:
                     mat = five_state_to_three_state_transCounts(mat)
+                    self.num_transitions = 3
                 elif not bos_eos_as_match:
                     mat = mat[:, :-1, [0,1,2,4]]
+                    self.num_transitions = 4
                 transCounts_list.append( mat )
                 del mat       
             
@@ -293,9 +295,12 @@ class CountsDset(Dataset):
         return self.times #array of size (T,)
     
     def retrieve_num_timepoints(self, times_from):
-        if times_from == 'geometric':
+        if times_from in ['geometric', 't_array_from_file']:
             return self.times.shape[0]
         
-        elif times_from == 'from_file':
-            return 1
+        elif times_from == 'one_time_per_sample_from_file':
+            return self.times.shape[1] # should be one
+        
+        elif (times_from is None):
+            return 0
     

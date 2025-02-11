@@ -12,15 +12,23 @@ import jax.numpy as jnp
 from jax.scipy.linalg import expm
 
 from models.model_utils.BaseClasses import ModuleBase
-from models.simple_site_class_predict.emission_models import (EqulVecFromCounts,
-                                                       EqulVecPerClass,
+from models.simple_site_class_predict.emission_models import (LogEqulVecFromCounts,
+                                                       LogEqulVecPerClass,
+                                                       LogEqulVecFromFile,
                                                        LG08RateMat,
-                                                       PerClassRateMat)
+                                                       PerClassRateMat,
+                                                       SiteClassLogprobs,
+                                                       SiteClassLogprobsFromFile)
 from models.simple_site_class_predict.transition_models import (CondTKF91TransitionLogprobs, 
                                                          JointTKF91TransitionLogprobs,
                                                          CondTKF92TransitionLogprobs, 
-                                                         JointTKF92TransitionLogprobs)
+                                                         JointTKF92TransitionLogprobs,
+                                                         JointTKF91TransitionLogprobsFromFile,
+                                                         JointTKF92TransitionLogprobsFromFile)
 
+def bounded_sigmoid(x, min_val, max_val):
+    return min_val + (max_val - min_val) / (1 + jnp.exp(-x))
+   
 
 class CondPairHMM(ModuleBase):
     config: dict
@@ -28,16 +36,16 @@ class CondPairHMM(ModuleBase):
     
     def setup(self):
         num_emit_site_classes = self.config['num_emit_site_classes']
-        indel_model = self.config['indel_model']
+        indel_model_type = self.config['indel_model_type']
         self.norm_loss_by = self.config['norm_loss_by']
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
         
         ### how to score emissions from indel sites
         if num_emit_site_classes == 1:
-            self.indel_prob_module = EqulVecFromCounts(config = self.config,
+            self.indel_prob_module = LogEqulVecFromCounts(config = self.config,
                                                        name = f'get equilibrium')
         elif num_emit_site_classes > 1:
-            self.indel_prob_module = EqulVecPerClass(config = self.config,
+            self.indel_prob_module = LogEqulVecPerClass(config = self.config,
                                                      name = f'get equilibrium')
         
         
@@ -47,38 +55,45 @@ class CondPairHMM(ModuleBase):
         
         
         ### TKF91 or TKF92
-        if indel_model == 'tkf91':
+        if indel_model_type == 'tkf91':
             self.transitions_module = CondTKF91TransitionLogprobs(config = self.config,
                                                      name = f'tkf91 indel model')
         
-        elif indel_model == 'tkf92':
+        elif indel_model_type == 'tkf92':
             self.transitions_module = CondTKF92TransitionLogprobs(config = self.config,
                                                      name = f'tkf92 indel model')
     
     def __call__(self,
                  batch,
+                 t_array,
                  sow_intermediates: bool):
         # unpack batch: (B, ...)
         subCounts = batch[0] #(B, 20, 20)
         insCounts = batch[1] #(B, 20)
         transCounts = batch[3] #(B, 4)
-        t_array = batch[4]
+        
+        # TODO: if using one time per sample (i.e. the time from FastTree), then
+        # you'll need to unpack time from batch; will have to initialize a new
+        # time array with shape (T, B) instead of (T,)
         
         ### get logprob matrices
         logprob_emit_at_indel = self.indel_prob_module()
-        
         rate_mat_times_rho = self.rate_matrix_module(logprob_equl = logprob_emit_at_indel,
                                                      sow_intermediates = sow_intermediates)
         
         # rate_mat_times_rho: (C, alph, alph)
         # time: (T,)
         # output: (T, C, alph, alph)
-        to_expm = jnp.einsum('cij,t->tcij', 
-                             rate_mat_times_rho[None, ...],
-                             t_array[..., None,None,None])
-        logprob_emit_at_match = expm(to_expm)
-        logprob_emit_at_match = self.weight_by_equilibrium(logprob_emit_at_indel = logprob_emit_at_indel,
-                                                           logprob_emit_at_match = logprob_emit_at_match)
+        to_expm = jnp.multiply( rate_mat_times_rho[None,...],
+                                t_array[:, None,None,None,] )
+        
+        prob_emit_at_match = expm(to_expm)
+        logprob_emit_at_match = jnp.where( prob_emit_at_match>0,
+                                           jnp.log(prob_emit_at_match),
+                                           jnp.log(jnp.finfo('float32').smallest_normal) )
+        
+        logprob_emit_at_match = self.apply_weighting(logprob_emit_at_indel = logprob_emit_at_indel,
+                                                     logprob_emit_at_match = logprob_emit_at_match)
         
         # (T,4,4)
         logprob_transit = self.transitions_module(t_array = t_array,
@@ -102,7 +117,7 @@ class CondPairHMM(ModuleBase):
         
         # final score is (T,B)
         logprob_perSamp_perTime = (match_emit_score + 
-                                   ins_emit_score +
+                                   ins_emit_score[None,:] +
                                    transit_score)
         
         ### marginalize over times
@@ -117,41 +132,45 @@ class CondPairHMM(ModuleBase):
         
         ### normalize
         if self.norm_loss_by == 'desc_len':
-            length_for_normalization = ( subCounts.sum(axis=(1,2)) + 
-                                         insCounts.sum(axis=(1,2))
+            length_for_normalization = ( subCounts.sum(axis=(-2, -1)) + 
+                                         insCounts.sum(axis=(-1))
                                          )
             length_for_normalization += 1 #for <eos>
         
         elif self.norm_loss_by == 'align_len':
-            length_for_normalization = transCounts.sum(axis=(1,2)) 
+            length_for_normalization = transCounts.sum(axis=(-2, -1)) 
         
         logprob_perSamp_length_normed = sum_neg_logP / length_for_normalization
         loss = -jnp.mean(logprob_perSamp_length_normed)
         
-        aux_dict = {'sum_neg_logP': sum_neg_logP,
-                    'neg_logP_length_normed': logprob_perSamp_length_normed}
+        out = {'loss': loss,
+               'sum_neg_logP': sum_neg_logP,
+               'neg_logP_length_normed': logprob_perSamp_length_normed}
         
-        return loss, aux_dict
+        return out
         
-        
-    def weight_by_equilibrium(self,
-                              logprob_emit_at_indel,
-                              logprob_emit_at_match): 
-        # (C, alph, alph)
+    def apply_weighting(self,
+                        logprob_emit_at_indel,
+                        logprob_emit_at_match): 
+        """
+        weights determined by ancestor frequencies
+        """
+        # (C, alph)
         equl_prob = jnp.exp( logprob_emit_at_indel )
         
-        # weight each by pi(c|x)
-        sum_per_class = equl_prob.sum(axis=0)
-        weight = (equl_prob / sum_per_class[None,:])
-        log_weight = safe_log( weight )
-        
-        # add weights; return (C, alph, alph) matrix
-        weighted_logprob_mat = log_weight + logprob_emit_at_match
+        # weight each by pi(c|x); broadcast across rows
+        sum_per_class = equl_prob.sum(axis=0) #(alph)
+        weight = (equl_prob / sum_per_class[None,:]) #(C, alph)
+        log_weight = jnp.where( weight > 0, 
+                               jnp.log(weight),
+                               jnp.log(jnp.finfo('float32').smallest_normal)
+                               ) #(C, alph)
+        weighted_logprob_mat = log_weight[None,:,:,None] + logprob_emit_at_match
         return weighted_logprob_mat
     
     def marginalize_over_times(self,
                                logprob_perSamp_perTime,
-                               exponential_dist_param)
+                               exponential_dist_param,
                                t_array):
         # logP(t_k) = exponential distribution
         logP_time = ( jnp.log(exponential_dist_param) - 
@@ -168,28 +187,139 @@ class CondPairHMM(ModuleBase):
         logP_perSamp_raw = logsumexp(logP_perSamp_perTime_withConst, axis=0)
         
         return logP_perSamp_raw
+    
+    
+    def write_params(self,
+                     pred_config,
+                     tstate,
+                     out_folder: str):
+        params_dict = tstate.params['params']
+        
+        ##################################################
+        ### use default values, if ranges aren't found   #
+        ##################################################
+        out  = pred_config.get( 'exchange_range', (1e-4, 10) )
+        exchange_min_val, exchange_max_val = out
+        del out
+        
+        out  = pred_config.get( 'rate_mult_range', (0.01, 10) )
+        rate_mult_min_val, rate_mult_max_val = out
+        del out
+        
+        out = pred_config.get( 'lambda_range', (pred_config['tkf_err'], 3) )
+        lam_min_val, lam_max_val = out
+        del out
+         
+        out = pred_config.get( 'offset_range', (pred_config['tkf_err'], 0.333) )
+        offs_min_val, offs_max_val = out
+        del out
+        
+        out = pred_config.get( 'r_range', (pred_config['tkf_err'], 0.8) )
+        r_extend_min_val, r_extend_max_val = out
+        del out
+        
+        
+        ###############
+        ### extract   #
+        ###############
+        ### site class probs
+        class_logits = params_dict['get site class probabilities']['class_logits']
+        class_probs = nn.log_softmax(class_logits)
+        with open(f'{out_folder}/PARAMS_class_probs.txt','w') as g:
+            [g.write(f'{elem.item()}') for elem in class_probs]
+        
+        ### emissions
+        if 'get rate matrix' in params_dict.keys():
+            
+            if 'exchangeabilities' in params_dict['get rate matrix']:
+                exch_logits = params_dict['get rate matrix']['exchangeabilities']
+                exchangeabilities = bounded_sigmoid(x = exch_logits, 
+                                                    min_val = exchange_min_val,
+                                                    max_val = exchange_max_val)
+                
+                with open(f'{out_folder}/PARAMS_exchangeabilities.npy','wb') as g:
+                    jnp.save(g, exchangeabilities)
+                
+            if 'rate_multipliers' in params_dict['get rate matrix']:
+                rate_mult_logits = params_dict['get rate matrix']['rate_multipliers']
+                rate_mult = bounded_sigmoid(x = rate_mult_logits, 
+                                            min_val = rate_mult_min_val,
+                                            max_val = rate_mult_max_val)
+    
+                with open(f'{out_folder}/PARAMS_rate_multipliers.txt','w') as g:
+                    [g.write(f'{elem.item()}') for elem in rate_multipliers]
+                
+                
+        ### transitions
+        # tkf91
+        if 'tkf91 indel model' in params_dict.keys():
+            lam_mu_logits = params_dict['tkf91 indel model']['TKF91 lambda, mu']
+            
+            lam = bounded_sigmoid(x = lam_mu_logits[0],
+                                  min_val = lam_min_val,
+                                  max_val = lam_max_val)
+            
+            offset = bounded_sigmoid(x = lam_mu_logits[1],
+                                     min_val = offs_min_val,
+                                     max_val = offs_max_val)
+            mu = lam / ( 1 -  offset) 
+            
+            with open(f'{out_folder}/PARAMS_tkf91_indel_params.txt','w') as g:
+                g.write(f'insert rate, lambda: {lam}\n')
+                g.write(f'deletion rate, mu: {mu}\n')
+            
+        # tkf92
+        elif 'tkf92 indel model' in params_dict.keys():
+            lam_mu_logits = params_dict['tkf92 indel model']['TKF92 lambda, mu']
+        
+            lam = bounded_sigmoid(x = lam_mu_logits[0],
+                                  min_val = lam_min_val,
+                                  max_val = lam_max_val)
+            
+            offset = bounded_sigmoid(x = lam_mu_logits[1],
+                                     min_val = offs_min_val,
+                                     max_val = offs_max_val)
+            mu = lam / ( 1 -  offset) 
+            
+            r_extend_logits = params_dict['tkf92 indel model']['TKF92 r extension prob']
+            r_extend = bounded_sigmoid(x = r_extend_logits,
+                                       min_val = r_extend_min_val,
+                                       max_val = r_extend_max_val)
+            
+            mean_indel_lengths = 1 / (1 - r_extend)
+            
+            with open(f'{out_folder}/PARAMS_tkf92_indel_params.txt','w') as g:
+                g.write(f'insert rate, lambda: {lam}\n')
+                g.write(f'deletion rate, mu: {mu}\n')
+                g.write(f'extension prob, r: ')
+                [g.write(f'{elem}\t') for elem in r_extend]
+                g.write('\n')
+                g.write(f'mean indel legnth: ')
+                [g.write(f'{elem}\t') for elem in mean_indel_lengths]
+                g.write('\n')
+        
         
     
 class JointPairHMM(CondPairHMM):
     """
-    inherit setup(), weight_by_equilibrium, and marginalize_over_times
-      from CondPairHMM
+    inherit setup, marginalize_over_times, and write_params from CondPairHMM
+    
     """
     config: dict
     name: str
     
     def setup(self):
         num_emit_site_classes = self.config['num_emit_site_classes']
-        indel_model = self.config['indel_model']
+        indel_model_type = self.config['indel_model_type']
         self.norm_loss_by = self.config['norm_loss_by']
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
         
         ### how to score emissions from indel sites
         if num_emit_site_classes == 1:
-            self.indel_prob_module = EqulVecFromCounts(config = self.config,
+            self.indel_prob_module = LogEqulVecFromCounts(config = self.config,
                                                        name = f'get equilibrium')
         elif num_emit_site_classes > 1:
-            self.indel_prob_module = EqulVecPerClass(config = self.config,
+            self.indel_prob_module = LogEqulVecPerClass(config = self.config,
                                                      name = f'get equilibrium')
         
         
@@ -198,47 +328,56 @@ class JointPairHMM(CondPairHMM):
                                                  name = f'get rate matrix')
         
         
+        ### now need probabilities for rate classes themselves
+        self.site_class_probability_module = SiteClassLogprobs(config = self.config,
+                                                  name = f'get site class probabilities')
+        
+        
         ### TKF91 or TKF92
-        if indel_model == 'tkf91':
+        if indel_model_type == 'tkf91':
             self.transitions_module = JointTKF91TransitionLogprobs(config = self.config,
                                                      name = f'tkf91 indel model')
         
-        elif indel_model == 'tkf92':
+        elif indel_model_type == 'tkf92':
             self.transitions_module = JointTKF92TransitionLogprobs(config = self.config,
                                                      name = f'tkf92 indel model')
     
     def __call__(self,
                  batch,
+                 t_array,
                  sow_intermediates: bool):
         # unpack batch: (B, ...)
         subCounts = batch[0] #(B, 20, 20)
         insCounts = batch[1] #(B, 20)
         delCounts = batch[2]
         transCounts = batch[3] #(B, 4)
-        t_array = batch[4] #(T,)
+        
+        # TODO: if using one time per sample (i.e. the time from FastTree), then
+        # you'll need to unpack time from batch; will have to initialize a new
+        # time array with shape (T, B) instead of (T,)
         
         ### get logprob matrices
         logprob_emit_at_indel = self.indel_prob_module()
-        
         rate_mat_times_rho = self.rate_matrix_module(logprob_equl = logprob_emit_at_indel,
                                                      sow_intermediates = sow_intermediates)
         
         # rate_mat_times_rho: (C, alph, alph)
         # time: (T,)
         # output: (T, C, alph, alph)
-        to_expm = jnp.einsum('cij,t->tcij', 
-                             rate_mat_times_rho[None, ...],
-                             t_array[..., None,None,None])
-        cond_logprob_emit_at_match = expm(to_expm)
-        joint_logprob_emit_at_match = cond_logprob_emit_at_match + equl_logprob[None,...,None]
-        joint_logprob_emit_at_match = self.weight_by_equilibrium(logprob_emit_at_indel = logprob_emit_at_indel,
-                                                           logprob_emit_at_match = joint_logprob_emit_at_match)
+        to_expm = jnp.multiply( rate_mat_times_rho[None,...],
+                                t_array[:, None,None,None,] )
+        cond_prob_emit_at_match = expm(to_expm)
+        cond_logprob_emit_at_match = jnp.where( cond_prob_emit_at_match>0,
+                                           jnp.log(cond_prob_emit_at_match),
+                                           jnp.log(jnp.finfo('float32').smallest_normal) )
+        joint_logprob_emit_at_match = cond_logprob_emit_at_match + logprob_emit_at_indel[None,:,:,None]
+        joint_logprob_emit_at_match = self.apply_weighting(joint_logprob_per_class = joint_logprob_emit_at_match)
         
         # (T,4,4)
         logprob_transit = self.transitions_module(t_array = t_array,
                                                   sow_intermediates = sow_intermediates)
         
-        
+
         ### score
         # (T, B)
         match_emit_score = jnp.einsum('tcij,bij->tb',
@@ -260,8 +399,8 @@ class JointPairHMM(CondPairHMM):
         
         # final score is (T,B)
         logprob_perSamp_perTime = (match_emit_score + 
-                                   ins_emit_score +
-                                   del_emit_score +
+                                   ins_emit_score[None,:] +
+                                   del_emit_score[None,:] +
                                    transit_score)
         
         ### marginalize over times
@@ -276,39 +415,50 @@ class JointPairHMM(CondPairHMM):
         
         ### normalize
         if self.norm_loss_by == 'desc_len':
-            length_for_normalization = ( subCounts.sum(axis=(1,2)) + 
-                                         insCounts.sum(axis=(1,2))
+            length_for_normalization = ( subCounts.sum(axis=(-2, -1)) + 
+                                         insCounts.sum(axis=(-1))
                                          )
             length_for_normalization += 1 #for <eos>
         
         elif self.norm_loss_by == 'align_len':
-            length_for_normalization = transCounts.sum(axis=(1,2)) 
+            length_for_normalization = transCounts.sum(axis=(-2, -1)) 
         
         logprob_perSamp_length_normed = sum_neg_logP / length_for_normalization
         loss = -jnp.mean(logprob_perSamp_length_normed)
         
-        aux_dict = {'sum_neg_logP': sum_neg_logP,
+        out = {'loss': loss,
+                    'sum_neg_logP': sum_neg_logP,
                     'neg_logP_length_normed': logprob_perSamp_length_normed}
         
-        return loss, aux_dict
-
-
+        return out
+    
+    
+    def apply_weighting(self,
+                        joint_logprob_per_class):
+        log_weight = self.site_class_probability_module()
+        log_weight = log_weight[None,:,None,None]
+        return log_weight + joint_logprob_per_class
+    
+    
 class JointPairHMMLoadAll(JointPairHMM):
     """
     same as JointPairHMM, but load values (i.e. no free parameters)
+    
+    files must exist:
+        equl_file
+        tkf_params_file
     """
     config: dict
     name: str
     
     def setup(self):
-        num_emit_site_classes = 1 #CHANGE HERE: force this to be 1
-        indel_model = self.config['indel_model']
+        num_emit_site_classes = self.config['num_emit_site_classes']
+        indel_model_type = self.config['indel_model_type']
         self.norm_loss_by = self.config['norm_loss_by']
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
         
         ### how to score emissions from indel sites
-        ### CHANGE HERE: force this to be from counts
-        self.indel_prob_module = EqulVecFromCounts(config = self.config,
+        self.indel_prob_module = LogEqulVecFromFile(config = self.config,
                                                    name = f'get equilibrium')
         
         
@@ -317,18 +467,22 @@ class JointPairHMMLoadAll(JointPairHMM):
                                                  name = f'get rate matrix')
         
         
+        ### probability of site classes
+        self.site_class_probability_module = SiteClassLogprobsFromFile(config = self.config,
+                                                 name = f'get site class probabilities')
+        
+        
         ### TKF91 or TKF92
         ### make sure you're loading from a model file here
-        if indel_model == 'tkf91':
-            self.transitions_module = JointTKF91TransitionLogprobs(config = self.config,
+        if indel_model_type == 'tkf91':
+            self.transitions_module = JointTKF91TransitionLogprobsFromFile(config = self.config,
                                                      name = f'tkf91 indel model')
         
-        elif indel_model == 'tkf92':
-            self.transitions_module = JointTKF92TransitionLogprobs(config = self.config,
+        elif indel_model_type == 'tkf92':
+            self.transitions_module = JointTKF92TransitionLogprobsFromFile(config = self.config,
                                                      name = f'tkf92 indel model')
-
+            
+    def write_params(self, **kwargs):
+        pass
     
-
-
-
-
+            

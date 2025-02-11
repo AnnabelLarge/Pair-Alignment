@@ -21,6 +21,8 @@ from jax.scipy.linalg import expm
 
 from models.model_utils.BaseClasses import ModuleBase
 
+
+
 def bounded_sigmoid(x, min_val, max_val):
     return min_val + (max_val - min_val) / (1 + jnp.exp(-x))
 
@@ -29,6 +31,43 @@ def safe_log(x):
                                x, 
                                jnp.finfo('float32').smallest_normal ) )
 
+def save_interms(param_name, mat):
+    with open(f'pred_{param_name}.npy','wb') as g:
+        jnp.save(g, mat)
+
+
+
+###############################################################################
+### For joint loss functions: probability of classes   ########################
+###############################################################################
+class SiteClassLogprobs(ModuleBase):
+    config: dict
+    name: str
+    
+    def setup(self):
+        n_classes = self.config['num_emit_site_classes']
+        
+        self.class_logits = self.param('class_logits',
+                                        nn.initializers.normal(),
+                                        (n_classes,),
+                                        jnp.float32)
+    
+    def __call__(self):
+        return nn.log_softmax(self.class_logits)
+
+
+class SiteClassLogprobsFromFile(ModuleBase):
+    config: dict
+    name: str
+    
+    def setup(self):
+        in_file = self.config['filenames']['class_probs']
+        with open(in_file,'rb') as f:
+            class_probs = jnp.load(f)
+        self.log_class_probs = safe_log(class_probs)
+    
+    def __call__(self):
+        return self.log_class_probs
 
 
 ###############################################################################
@@ -46,37 +85,46 @@ class LG08RateMat(ModuleBase):
     def setup(self):
         # could still have multiple site classes
         self.num_emit_site_classes = self.config['num_emit_site_classes']
+        rate_multiplier_file = self.config['filenames']['rate_mult']
+        exchangeabilities_file = self.config['filenames']['exch']
         
-        # LG08 exchangeabilities (for unit testing); (20, 20)
-        with open(f'LG08_exchangeability_r.npy','rb') as f:
+        # LG08 exchangeabilities; (20, 20)
+        with open(exchangeabilities_file,'rb') as f:
             self.lg08_exch = jnp.load(f)
         
         # RATE MULTIPLIERS: (c,)
-        if self.num_emit_site_classes != 1:
-            self.rate_mult_logits = self.param('rate_multipliers',
-                                               nn.initializers.glorot_uniform(),
-                                               (num_emit_site_classes,),
-                                               jnp.float32)
-
+        if self.num_emit_site_classes > 1:
+            with open(rate_multiplier_file, 'rb') as f:
+                self.rate_multiplier = jnp.load(f)
+        else:
+            self.rate_multiplier = jnp.array([1])
+            
+        
     def __call__(self,
                  logprob_equl,
                  sow_intermediates: bool,
                  *args,
                  **kwargs):
-        # pi; one per class
+        # (C, alph)
         equl = jnp.exp(logprob_equl)
         
         # chi; one shared all classes
         exchangeabilities = self.lg08_exch
         
-        return prepare_rate_matrix(exchangeabilities = exchangeabilities,
+        return self.prepare_rate_matrix(exchangeabilities = exchangeabilities,
                                    equilibrium_distributions = equl,
-                                   sow_intermediates = sow_intermediates)
+                                   sow_intermediates = sow_intermediates,
+                                   rate_multiplier = self.rate_multiplier)
     
     
-    def prepare_rate_matrix(exchangeabilities,
+    def prepare_rate_matrix(self,
+                            exchangeabilities,
                             equilibrium_distributions,
-                            sow_intermediates: bool):
+                            rate_multiplier,
+                            sow_intermediates: bool,
+                            alphabet_size: int=20):
+        C = equilibrium_distributions.shape[0]
+
         # Q = chi * pi
         rate_mat_without_diags = jnp.einsum('ij, cj -> cij', 
                                             exchangeabilities, 
@@ -90,27 +138,16 @@ class LG08RateMat(ModuleBase):
         diags_to_add = -jnp.einsum('ci,cij->cij', row_sums, ones_diag)
         subst_rate_mat = rate_mat_without_diags + diags_to_add
         
-        # for one site class
-        if self.num_emit_site_classes == 1:
-            diag = jnp.einsum("cii->ci", subst_rate_mat) 
-            norm_factor = -jnp.sum(diag * equl, axis=1)[:,None,None]
-            subst_rate_mat = subst_rate_mat / norm_factor
-            rate_multipilers = jnp.ones( (1,) )
+        # normalize by default
+        diag = jnp.einsum("cii->ci", subst_rate_mat) 
+        norm_factor = -jnp.sum(diag * equilibrium_distributions, axis=1)[:,None,None]
+        subst_rate_mat = subst_rate_mat / norm_factor
             
-        # for many site classes
-        elif self.num_emit_site_classes > 1:
-            rate_multipilers = bounded_sigmoid(x = self.rate_mult_logits, 
-                                                min_val = self.rate_mult_min_val,
-                                                max_val = self.rate_mult_max_val)
+        final = jnp.einsum( 'c,cij->cij', 
+                            rate_multiplier, 
+                            subst_rate_mat ) 
         
-            if (sow_intermediates):
-                self.sow_histograms_scalars(mat = rate_multipliers, 
-                                            label = 'rate_multipliers', 
-                                            which='scalars')
-        
-        return jnp.multiply( 'c,cij->cij', 
-                             rate_multipliers, 
-                             subst_rate_mat ) 
+        return final
         
 
 class PerClassRateMat(LG08RateMat):
@@ -134,7 +171,6 @@ class PerClassRateMat(LG08RateMat):
     def setup(self):
         emission_alphabet_size = self.config['emission_alphabet_size']
         self.num_emit_site_classes = self.config['num_emit_site_classes']
-        
         out  = self.config.get( 'exchange_range',
                                (1e-4, 10) )
         self.exchange_min_val, self.exchange_max_val = out
@@ -150,7 +186,7 @@ class PerClassRateMat(LG08RateMat):
         # init logits
         num_vars = int( (emission_alphabet_size * (emission_alphabet_size-1))/2 )
         exch_raw = self.param('exchangeabilities',
-                               nn.initializers.glorot_uniform(),
+                               nn.initializers.normal(),
                                (num_vars,),
                                jnp.float32)
         
@@ -165,10 +201,10 @@ class PerClassRateMat(LG08RateMat):
         
         
         ### RATE MULTIPLIERS: (c,)
-        if self.num_emit_site_classes != 1:
+        if self.num_emit_site_classes > 1:
             self.rate_mult_logits = self.param('rate_multipliers',
-                                               nn.initializers.glorot_uniform(),
-                                               (num_emit_site_classes,),
+                                               nn.initializers.normal(),
+                                               (self.num_emit_site_classes,),
                                                jnp.float32)
         
     def __call__(self,
@@ -178,6 +214,14 @@ class PerClassRateMat(LG08RateMat):
                  **kwargs):
         # pi; one per class
         equl = jnp.exp(logprob_equl)
+        
+        # rate multiplier
+        if self.num_emit_site_classes > 1:
+            rate_multiplier = bounded_sigmoid(self.rate_mult_logits,
+                                              min_val = self.rate_mult_min_val,
+                                              max_val = self.rate_mult_max_val)
+        else:
+            rate_multiplier = jnp.array([1])
         
         # chi; one shared all classes
         exchangeabilities = bounded_sigmoid(x = self.exchangeabilities_logits, 
@@ -190,16 +234,17 @@ class PerClassRateMat(LG08RateMat):
                                         which='scalars')
         
         # output is (c, i, j)
-        return prepare_rate_matrix(exchangeabilities = exchangeabilities,
+        return self.prepare_rate_matrix(exchangeabilities = exchangeabilities,
                                    equilibrium_distributions = equl,
-                                   sow_intermediates = sow_intermediates)
+                                   sow_intermediates = sow_intermediates,
+                                   rate_multiplier = rate_multiplier)
     
     
 
 ###############################################################################
 ### LOGPROB (emit at indel sites)   ###########################################
 ###############################################################################
-class EqulVecPerClass(ModuleBase):
+class LogEqulVecPerClass(ModuleBase):
     """
     generate equilibrium distribution; (num_site_clases, features) matrix
     """
@@ -210,7 +255,7 @@ class EqulVecPerClass(ModuleBase):
         emission_alphabet_size = self.config['emission_alphabet_size']
         num_emit_site_classes = self.config['num_emit_site_classes']
         self.logits = self.param('Equilibrium distr.',
-                                 init_func,
+                                 nn.initializers.normal(),
                                  (num_emit_site_classes, emission_alphabet_size),
                                  jnp.float32)
         
@@ -220,10 +265,30 @@ class EqulVecPerClass(ModuleBase):
         return nn.log_softmax( self.logits, axis = 1 )
 
 
+class LogEqulVecFromFile(ModuleBase):
+    config: dict
+    name: str
+    
+    def setup(self):
+        # (C, alph)
+        equl_file = self.config['filenames']['equl_dist']
+        
+        with open(equl_file,'rb') as f:
+            prob_equilibr = jnp.load(f)
 
-class EqulVecFromCounts(ModuleBase):
+        self.logprob_equilibr = safe_log(prob_equilibr)
+        
+        
+    def __call__(self,
+                 *args,
+                 **kwargs):
+        # (C, alpha)
+        return self.logprob_equilibr
+    
+
+class LogEqulVecFromCounts(ModuleBase):
     """
-    A (1, faetures) matrix from counts
+    A (1, features) matrix from counts
     """
     config: dict
     name: str

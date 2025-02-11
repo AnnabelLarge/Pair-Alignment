@@ -58,15 +58,17 @@ def write_config(args, out_dir):
     
     ### write individual tables
     def write_indv_table(key, prefix):
-        sub_dict = args[key]
-        sub_dict = flatten_convert(sub_dict)
+        sub_dict = args.get(key, None)
         
-        with open(f'{out_dir}/{prefix}.tsv','w') as g:
-            g.write('training_wkdir' + '\t' + runname + '\n')
-            for key, val in sub_dict.items():
-                g.write(f'{key}\t')
-                g.write(f'{val}\n')
-    
+        if sub_dict is not None:
+            sub_dict = flatten_convert(sub_dict)
+            
+            with open(f'{out_dir}/{prefix}.tsv','w') as g:
+                g.write('training_wkdir' + '\t' + runname + '\n')
+                for key, val in sub_dict.items():
+                    g.write(f'{key}\t')
+                    g.write(f'{val}\n')
+        
     
     write_indv_table('optimizer_config', 'OPTIM-CONFIG')
     write_indv_table('anc_enc_config', 'ANC-ENC-CONFIG')

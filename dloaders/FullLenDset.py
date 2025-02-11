@@ -250,8 +250,8 @@ def load_aligned_mats(data_dir,
     
     # pairHMM: don't need alignment indices
     elif pred_model_type.startswith('pairhmm'):
-        mat = mat[:,:,[0,1,4]]
         neg_nine_padded_mat = None
+    
     
     # (neural pairHMM: keep everything as-is)
     return zero_padded_mat, neg_nine_padded_mat, idxes_to_keep

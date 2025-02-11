@@ -18,6 +18,7 @@ from flax import linen as nn
 import jax
 import jax.numpy as jnp
 from jax.scipy.special import logsumexp
+import pickle
 
 from models.model_utils.BaseClasses import ModuleBase
 
@@ -64,7 +65,9 @@ def log_one_minus_x(x):
 
 
 
-
+###############################################################################
+### TKF91 (conditional and joint)   ###########################################
+###############################################################################
 class CondTKF91TransitionLogprobs(ModuleBase):
     config: dict
     name: str
@@ -72,50 +75,38 @@ class CondTKF91TransitionLogprobs(ModuleBase):
     def setup(self):
         ### unpack config
         self.tkf_err = self.config.get('tkf_err', 1e-4)
-        self.load_tkf_params = self.config['load_tkf_params']
         
-        if self.load_tkf_params:
-            self.tkf_params_file = self.config['tkf_params_file']
-            with open(self.tkf_params_file, 'rb') as f:
-                self.tkf_params = jnp.load(f)
-                self.use_approx = False
+        self.lam_min_val, self.lam_max_val = self.config.get( 'lambda_range', 
+                                                               [self.tkf_err, 3] )
+        self.offs_min_val, self.offs_max_val = self.config.get( 'offset_range', 
+                                                                [self.tkf_err, 0.333] )
         
-        elif not self.load_tkf_params:
-            self.lam_min_val, self.lam_max_val = self.config.get( 'lambda_range', 
-                                                                   [self.tkf_err, 3] )
-            self.offs_min_val, self.offs_max_val = self.config.get( 'offset_range', 
-                                                                    [self.tkf_err, 0.333] )
-            
-            ### initialize logits
-            self.tkf_logits = self.param('TKF91 lambda, mu',
-                                            nn.initializers.glorot_uniform(),
+        ### initialize logits
+        self.tkf_lam_mu_logits = self.param('TKF91 lambda, mu',
+                                            nn.initializers.normal(),
                                             (2,),
                                             jnp.float32)
         
     def __call__(self,
                  t_array,
                  sow_intermediates: bool):
-        if not self.load_tkf_params:
-            out = self.logits_to_indel_rates(tkf_logits = self.tkf_logits,
-                                             lam_min_val = self.lam_min_val,
-                                             lam_max_val = self.lam_max_val,
-                                             offs_min_val = self.offs_min_val,
-                                             offs_max_val = self.offs_max_val,
-                                             tkf_err = self.tkf_err )
-            lam, mu, use_approx = out
-            del out
-        
-        elif self.load_tkf_params:
-            lam = self.tkf_params[0]
-            mu = self.tkf_params[1]
-            use_approx = False
+        out = self.logits_to_indel_rates(lam_mu_logits = self.tkf_lam_mu_logits,
+                                         lam_min_val = self.lam_min_val,
+                                         lam_max_val = self.lam_max_val,
+                                         offs_min_val = self.offs_min_val,
+                                         offs_max_val = self.offs_max_val,
+                                         tkf_err = self.tkf_err )
+        lam, mu, use_approx = out
+        del out
         
         # get alpha, beta, gamma
+        # only one class for TKF91
         out_dict = self.tkf_params(lam = lam, 
                                    mu = mu, 
                                    t_array = t_array,
                                    use_approx = use_approx,
-                                   tkf_err = self.tkf_err)
+                                   tkf_err = self.tkf_err,
+                                   num_classes = 1)
         
         # record values
         if sow_intermediates:
@@ -130,8 +121,11 @@ class CondTKF91TransitionLogprobs(ModuleBase):
             self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_gamma']), 
                                         label=f'{self.name}/tkf_gamma', 
                                         which='scalars')
-        
-        
+        return self.fill_cond_tkf91(out_dict)
+    
+    
+    def fill_cond_tkf91(self,
+                        out_dict):
         ### entries in the matrix
         # a_f = (1-beta)*alpha;     log(a_f) = log(1-beta) + log(alpha)
         # b_g = beta;               log(b_g) = log(beta)
@@ -156,10 +150,10 @@ class CondTKF91TransitionLogprobs(ModuleBase):
                            jnp.stack([log_a_f, log_b_g, log_c_h, log_mis_e], axis=-1)
                           ], axis=-2)
         return out[:,None,...]
-    
+        
     
     def logits_to_indel_rates(self, 
-                              tkf_logits,
+                              lam_mu_logits,
                               lam_min_val,
                               lam_max_val,
                               offs_min_val,
@@ -169,12 +163,12 @@ class CondTKF91TransitionLogprobs(ModuleBase):
         assumes idx=0 is lambda, idx=1 is for calculating mu
         """
         # lambda
-        lam = bounded_sigmoid(x = tkf_logits[...,0],
+        lam = bounded_sigmoid(x = lam_mu_logits[0],
                               min_val = lam_min_val,
                               max_val = lam_max_val)
         
         # mu
-        offset = bounded_sigmoid(x = tkf_logits[...,1],
+        offset = bounded_sigmoid(x = lam_mu_logits[1],
                                  min_val = offs_min_val,
                                  max_val = offs_max_val)
         mu = lam / ( 1 -  offset) 
@@ -183,15 +177,23 @@ class CondTKF91TransitionLogprobs(ModuleBase):
         
         return (lam, mu, use_approx)
     
+    
     def tkf_params(self,
                    lam,
                    mu,
                    t_array,
                    use_approx,
-                   tkf_err):
-        ### lam * t, mu * t; (T,)
-        mu_per_t = mu * t
-        lam_per_t = lam * t
+                   tkf_err,
+                   num_classes):
+        # T, C
+        t_array = jnp.broadcast_to( t_array[:,None],
+                                    (t_array.shape[0],
+                                     num_classes) 
+                                    )
+        
+        ### lam * t, mu * t
+        mu_per_t = mu * t_array
+        lam_per_t = lam * t_array
         
         ### log(lam), log(mu); one value
         log_lam = safe_log(lam)
@@ -240,19 +242,12 @@ class CondTKF91TransitionLogprobs(ModuleBase):
         
         # 1 - gamma = num/denom; log(1 - gamma) = log(num) - log(denom)
         log_one_minus_gamma = gamma_numerator - gamma_denom
-        
-        # probably pretty rare that log(1 - gamma) is exactly zero,
-        # but it does come up when overfitting to one sample
-        log_one_minus_gamma = jnp.where( log_one_minus_gamma != 0.0,
-                                         log_one_minus_gamma,
-                                         jnp.log(SMALLEST_FLOAT32) )
-
         log_gamma = log_one_minus_x(log_one_minus_gamma)
         log_one_minus_beta = log_one_minus_x(log_beta)
             
         
         ### final dictionary
-        out_dict = {'log_lam':log_lam,
+        out_dict = {'log_lam': log_lam,
                     'log_mu':log_mu,
                     'log_alpha': log_alpha,
                     'log_beta': log_beta,
@@ -265,38 +260,37 @@ class CondTKF91TransitionLogprobs(ModuleBase):
         
         return out_dict
     
+        
     
-class JointTKF91TransitionLogprobs(CondTKF91TransitionLogprobs):
+class CondTKF91TransitionLogprobsFromFile(CondTKF91TransitionLogprobs):
     """
-    inherit setup from CondTKF91TransitionLogprobs
+    inherit tkf_params and fill_cond_tkf91 from CondTKF91TransitionLogprobs
     """
     config: dict
     name: str
     
+    def setup(self):
+        ### unpack config
+        self.tkf_err = self.config.get('tkf_err', 1e-4)
+        in_file = self.config['filenames']['tkf_params_file']
+        
+        with open(in_file,'rb') as f:
+            self.tkf_lam_mu = jnp.load(f)
+            
     def __call__(self,
                  t_array,
                  sow_intermediates: bool):
-        if not self.load_tkf_params:
-            out = self.logits_to_indel_rates(tkf_logits = self.tkf_logits,
-                                             lam_min_val = self.lam_min_val,
-                                             lam_max_val = self.lam_max_val,
-                                             offs_min_val = self.offs_min_val,
-                                             offs_max_val = self.offs_max_val,
-                                             tkf_err = self.tkf_err )
-            lam, mu, use_approx = out
-            del out
-        
-        elif self.load_tkf_params:
-            lam = self.tkf_params[0]
-            mu = self.tkf_params[0]
-            use_approx = False
+        lam = self.tkf_lam_mu[...,0]
+        mu = self.tkf_lam_mu[...,1]
+        use_approx = False
         
         # get alpha, beta, gamma
         out_dict = self.tkf_params(lam = lam, 
                                    mu = mu, 
                                    t_array = t_array,
                                    use_approx = use_approx,
-                                   tkf_err = self.tkf_err)
+                                   tkf_err = self.tkf_err,
+                                   num_classes = 1)
         
         # record values
         if sow_intermediates:
@@ -312,13 +306,38 @@ class JointTKF91TransitionLogprobs(CondTKF91TransitionLogprobs):
                                         label=f'{self.name}/tkf_gamma', 
                                         which='scalars')
         
+        return self.fill_cond_tkf91(out_dict)
         
+    
+    
+class JointTKF91TransitionLogprobs(CondTKF91TransitionLogprobs):
+    """
+    inherit logits_to_indel_rates, tkf_params, and setup 
+      from CondTKF91TransitionLogprobs
+    """
+    config: dict
+    name: str
+   
+    def __call__(self,
+                 t_array,
+                 sow_intermediates: bool):
+        out = self.logits_to_indel_rates(lam_mu_logits = self.tkf_lam_mu_logits,
+                                         lam_min_val = self.lam_min_val,
+                                         lam_max_val = self.lam_max_val,
+                                         offs_min_val = self.offs_min_val,
+                                         offs_max_val = self.offs_max_val,
+                                         tkf_err = self.tkf_err )
+        lam, mu, use_approx = out
+        del out
         
         # get alpha, beta, gamma
-        out_dict = self.tkf_params(lam = lam_mu[...,0], 
-                                   mu = lam_mu[...,1], 
+        # only one class for TKF91
+        out_dict = self.tkf_params(lam = lam, 
+                                   mu = mu, 
                                    t_array = t_array,
-                                   use_approx = use_approx)
+                                   use_approx = use_approx,
+                                   tkf_err = self.tkf_err,
+                                   num_classes = 1)
         
         # record values
         if sow_intermediates:
@@ -334,7 +353,11 @@ class JointTKF91TransitionLogprobs(CondTKF91TransitionLogprobs):
                                         label=f'{self.name}/tkf_gamma', 
                                         which='scalars')
         
+        return self.fill_joint_tkf91(out_dict)
         
+    
+    def fill_joint_tkf91(self, 
+                         out_dict):
         ### entries in the matrix
         log_lam_div_mu = out_dict['log_lam'] - out_dict['log_mu']
         log_one_minus_lam_div_mu = log_one_minus_x(log_lam_div_mu)
@@ -364,7 +387,7 @@ class JointTKF91TransitionLogprobs(CondTKF91TransitionLogprobs):
                  log_lam_div_mu)
         log_d_e = out_dict['log_one_minus_gamma'] + log_one_minus_lam_div_mu
         
-        #(T, 1, 4, 4)
+        #(T, 4, 4)
         out = jnp.stack([ jnp.stack([log_a_f, log_b_g, log_c_h, log_mis_e], axis=-1),
                            jnp.stack([log_a_f, log_b_g, log_c_h, log_mis_e], axis=-1),
                            jnp.stack([  log_p,   log_q,   log_r,   log_d_e], axis=-1),
@@ -372,11 +395,13 @@ class JointTKF91TransitionLogprobs(CondTKF91TransitionLogprobs):
                           ], axis=-2)
         
         return out[:,None,...]
-        
-    
-class CondTKF92TransitionLogprobs(CondTKF91TransitionLogprobs):
+
+
+class JointTKF91TransitionLogprobsFromFile(JointTKF91TransitionLogprobs):
     """
-    only one TKF extension probability for independent site classes
+    inherit fill_joint_tkf91 from JointTKF91TransitionLogprobs
+    inherit tkf_params from CondTKF91TransitionLogprobs
+    
     """
     config: dict
     name: str
@@ -384,59 +409,25 @@ class CondTKF92TransitionLogprobs(CondTKF91TransitionLogprobs):
     def setup(self):
         ### unpack config
         self.tkf_err = self.config.get('tkf_err', 1e-4)
-        self.load_tkf_params = self.config['load_tkf_params']
-        self.num_tkf_site_classes = self.config['num_tkf_site_classes']
+        in_file = self.config['filenames']['tkf_params_file']
         
-        if self.load_tkf_params:
-            self.tkf_params_file = self.config['tkf_params_file']
-            with open(self.tkf_params_file, 'rb') as f:
-                self.tkf_params = jnp.load(f)
-                self.use_approx = False
-        
-        elif not self.load_tkf_params:
-            self.lam_min_val, self.lam_max_val = self.config.get( 'lambda_range', 
-                                                                   [self.tkf_err, 3] )
-            self.offs_min_val, self.offs_max_val = self.config.get( 'offset_range', 
-                                                                    [self.tkf_err, 0.333] )
-            self.r_extend_min_val, self.r_extend_max_val = self.config.get( 'r_range', 
-                                                                    [self.tkf_err, 0.8] )
-            
-            ### initialize logits
-            self.tkf_logits = self.param( 'TKF92 lambda, mu, r_extend',
-                                          nn.initializers.glorot_uniform(),
-                                          (self.num_tkf_site_classes, 3),
-                                          jnp.float32 )
-            
-            
+        with open(in_file,'rb') as f:
+            self.tkf_lam_mu = jnp.load(f)
+    
     def __call__(self,
                  t_array,
                  sow_intermediates: bool):
-        if not self.load_tkf_params:
-            out = self.logits_to_indel_rates(tkf_logits = self.tkf_logits,
-                                             lam_min_val = self.lam_min_val,
-                                             lam_max_val = self.lam_max_val,
-                                             offs_min_val = self.offs_min_val,
-                                             offs_max_val = self.offs_max_val,
-                                             tkf_err = self.tkf_err )
-            lam, mu, use_approx = out
-            del out
-            r_extend = bounded_sigmoid(x = self.tkf_logits[:,-1],
-                                       min_val = r_extend_min_val,
-                                       max_val = r_extend_max_val)
-        
-        elif self.load_tkf_params:
-            lam = self.tkf_params[...,0][None,:]
-            mu = self.tkf_params[...,1][None,:]
-            r_extend = self.tkf_params[...,2][None,:]
-            use_approx = False
+        lam = self.tkf_lam_mu[...,0]
+        mu = self.tkf_lam_mu[...,1]
+        use_approx = False
         
         # get alpha, beta, gamma
         out_dict = self.tkf_params(lam = lam, 
                                    mu = mu, 
                                    t_array = t_array,
                                    use_approx = use_approx,
-                                   tkf_err = self.tkf_err)
-        out_dict = {key: val[...,None] for key, val in out_dict}
+                                   tkf_err = self.tkf_err,
+                                   num_classes = 1)
         
         # record values
         if sow_intermediates:
@@ -452,8 +443,97 @@ class CondTKF92TransitionLogprobs(CondTKF91TransitionLogprobs):
                                         label=f'{self.name}/tkf_gamma', 
                                         which='scalars')
         
+        return self.fill_joint_tkf91(out_dict)
+        
+    
+    
+###############################################################################
+### TKF92 (conditional and joint)   ###########################################
+###############################################################################
+class CondTKF92TransitionLogprobs(CondTKF91TransitionLogprobs):
+    """
+    inherit logits_to_indel_rates and tkf_params from CondTKF91TransitionLogprobs
+    
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        ### unpack config
+        self.tkf_err = self.config.get('tkf_err', 1e-4)
+        self.num_tkf_site_classes = self.config['num_tkf_site_classes']
+        
+        self.lam_min_val, self.lam_max_val = self.config.get( 'lambda_range', 
+                                                               [self.tkf_err, 3] )
+        self.offs_min_val, self.offs_max_val = self.config.get( 'offset_range', 
+                                                                [self.tkf_err, 0.333] )
+        self.r_extend_min_val, self.r_extend_max_val = self.config.get( 'r_range', 
+                                                                [self.tkf_err, 0.8] )
+        
+        ### initialize logits
+        # one lambda and one mu
+        self.tkf_lam_mu_logits = self.param('TKF92 lambda, mu',
+                                            nn.initializers.normal(),
+                                            (2,),
+                                            jnp.float32)
+        
+        # up to num_tkf_site_classes different r extension probabilities
+        self.r_extend_logits = self.param('TKF92 r extension prob',
+                                          nn.initializers.normal(),
+                                          (self.num_tkf_site_classes,),
+                                          jnp.float32)
+            
+    def __call__(self,
+                 t_array,
+                 sow_intermediates: bool):
+        out = self.logits_to_indel_rates(lam_mu_logits = self.tkf_lam_mu_logits,
+                                         lam_min_val = self.lam_min_val,
+                                         lam_max_val = self.lam_max_val,
+                                         offs_min_val = self.offs_min_val,
+                                         offs_max_val = self.offs_max_val,
+                                         tkf_err = self.tkf_err )
+        lam, mu, use_approx = out
+        del out
+        
+        r_extend = bounded_sigmoid(x = self.r_extend_logits,
+                                   min_val = self.r_extend_min_val,
+                                   max_val = self.r_extend_max_val)
+        
+        # get alpha, beta, gamma
+        out_dict = self.tkf_params(lam = lam, 
+                                   mu = mu, 
+                                   t_array = t_array,
+                                   use_approx = use_approx,
+                                   tkf_err = self.tkf_err,
+                                   num_classes = r_extend.shape[0])
+        
+        # record values
+        if sow_intermediates:
+            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_alpha']), 
+                                        label=f'{self.name}/tkf_alpha', 
+                                        which='scalars')
+            
+            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_beta']), 
+                                        label=f'{self.name}/tkf_beta', 
+                                        which='scalars')
+            
+            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_gamma']), 
+                                        label=f'{self.name}/tkf_gamma', 
+                                        which='scalars')
+    
+        return self.fill_cond_tkf92(out_dict, r_extend)
+    
+    def fill_cond_tkf92(self,
+                        out_dict,
+                        r_extend):
+        T = out_dict['log_alpha'].shape[0]
+        
         ### entries in the matrix
-        log_r_extend = safe_log(r_extend)[None,...]
+        log_r_extend = jnp.broadcast_to( safe_log(r_extend)[None,...],
+                                         (T,
+                                          r_extend.shape[0])
+                                         )
+                                         
         log_one_minus_r_extend = log_one_minus_x(log_r_extend)
         
         # a = r_extend + (1-r_extend)*(1-beta)*alpha
@@ -532,46 +612,42 @@ class CondTKF92TransitionLogprobs(CondTKF91TransitionLogprobs):
                            jnp.stack([  log_p,   log_q,   log_r,  log_d_e], axis=-1),
                            jnp.stack([log_s_m, log_s_i, log_s_d,  log_s_e], axis=-1)
                           ], axis=-2)
-    
 
-class JointTKF92TransitionLogprobs(CondTKF92TransitionLogprobs):
-    """
-    only one TKF extension probability for independent site classes
     
-    inherit setup from  CondTKF92TransitionLogprobs
+class CondTKF92TransitionLogprobsFromFile(CondTKF92TransitionLogprobs):
+    """
+    inherit setup and fill_cond_tkf92 from CondTKF92TransitionLogprobs
+    inherit tkf_params from CondTKF91TransitionLogprobs
     """
     config: dict
     name: str
     
+    def setup(self):
+        ### unpack config
+        self.tkf_err = self.config.get('tkf_err', 1e-4)
+        in_file = self.config['filenames']['tkf_params_file']
+        
+        with open(in_file,'rb') as f:
+            in_dict = pickle.load(f)
+            self.tkf_lam_mu = in_dict['lam_mu']
+            self.r_extend = in_dict['r_extend']
+        
     def __call__(self,
                  t_array,
                  sow_intermediates: bool):
-        if not self.load_tkf_params:
-            out = self.logits_to_indel_rates(tkf_logits = self.tkf_logits,
-                                             lam_min_val = self.lam_min_val,
-                                             lam_max_val = self.lam_max_val,
-                                             offs_min_val = self.offs_min_val,
-                                             offs_max_val = self.offs_max_val,
-                                             tkf_err = self.tkf_err )
-            lam, mu, use_approx = out
-            del out
-            r_extend = bounded_sigmoid(x = self.tkf_logits[:,-1],
-                                       min_val = r_extend_min_val,
-                                       max_val = r_extend_max_val)
-        
-        elif self.load_tkf_params:
-            lam = self.tkf_params[...,0][None,:]
-            mu = self.tkf_params[...,1][None,:]
-            r_extend = self.tkf_params[...,2][None,:]
-            use_approx = False
+        lam = self.tkf_lam_mu[0]
+        mu = self.tkf_lam_mu[1]
+        r_extend = self.r_extend
+        num_site_classes = r_extend.shape[0]
+        use_approx = False
         
         # get alpha, beta, gamma
         out_dict = self.tkf_params(lam = lam, 
                                    mu = mu, 
                                    t_array = t_array,
                                    use_approx = use_approx,
-                                   tkf_err = self.tkf_err)
-        out_dict = {key: val[...,None] for key, val in out_dict}
+                                   tkf_err = self.tkf_err,
+                                   num_classes = num_site_classes)
         
         # record values
         if sow_intermediates:
@@ -587,10 +663,73 @@ class JointTKF92TransitionLogprobs(CondTKF92TransitionLogprobs):
                                         label=f'{self.name}/tkf_gamma', 
                                         which='scalars')
         
-        ### entries in the matrix
-        log_r_extend = safe_log(r_extend)[None,...]
-        log_one_minus_r_extend = log_one_minus_x(log_r_extend)
+        return self.fill_cond_tkf92(out_dict, r_extend)
+    
+
+class JointTKF92TransitionLogprobs(CondTKF92TransitionLogprobs):
+    """
+    inherit setup from CondTKF92TransitionLogprobs
+    inherit logits_to_indel_rates, tkf_params from CondTKF91TransitionLogprobs
+    
+    """
+    config: dict
+    name: str
+    
+    def __call__(self,
+                 t_array,
+                 sow_intermediates: bool):
+        out = self.logits_to_indel_rates(lam_mu_logits = self.tkf_lam_mu_logits,
+                                         lam_min_val = self.lam_min_val,
+                                         lam_max_val = self.lam_max_val,
+                                         offs_min_val = self.offs_min_val,
+                                         offs_max_val = self.offs_max_val,
+                                         tkf_err = self.tkf_err )
+        lam, mu, use_approx = out
+        del out
+        
+        r_extend = bounded_sigmoid(x = self.r_extend_logits,
+                                   min_val = self.r_extend_min_val,
+                                   max_val = self.r_extend_max_val)
+        
+        # get alpha, beta, gamma
+        out_dict = self.tkf_params(lam = lam, 
+                                   mu = mu, 
+                                   t_array = t_array,
+                                   use_approx = use_approx,
+                                   tkf_err = self.tkf_err,
+                                   num_classes = r_extend.shape[0])
+        
+        # record values
+        if sow_intermediates:
+            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_alpha']), 
+                                        label=f'{self.name}/tkf_alpha', 
+                                        which='scalars')
             
+            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_beta']), 
+                                        label=f'{self.name}/tkf_beta', 
+                                        which='scalars')
+            
+            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_gamma']), 
+                                        label=f'{self.name}/tkf_gamma', 
+                                        which='scalars')
+    
+        return self.fill_joint_tkf92(out_dict, r_extend)
+    
+    
+    def fill_joint_tkf92(self,
+                        out_dict,
+                        r_extend):
+        log_lam_div_mu = out_dict['log_lam'] - out_dict['log_mu']
+        log_one_minus_lam_div_mu = log_one_minus_x(log_lam_div_mu)
+        T = out_dict['log_alpha'].shape[0]
+        
+        ### entries in the matrix
+        log_r_extend = jnp.broadcast_to( safe_log(r_extend)[None,...],
+                                         (T,
+                                          r_extend.shape[0])
+                                         )
+        log_one_minus_r_extend = log_one_minus_x(log_r_extend)
+        
         # a = r_extend + (1-r_extend)*(1-beta)*alpha*(lam/mu)
         # log(a) = logsumexp([r_extend, 
         #                     log(1-r_extend) + log(1-beta) + log(alpha) + log(lam/mu)
@@ -681,4 +820,57 @@ class JointTKF92TransitionLogprobs(CondTKF92TransitionLogprobs):
                            jnp.stack([  log_p,   log_q,   log_r,  log_d_e], axis=-1),
                            jnp.stack([log_s_m, log_s_i, log_s_d,  log_s_e], axis=-1)
                           ], axis=-2)
+
+
+class JointTKF92TransitionLogprobsFromFile(JointTKF92TransitionLogprobs):
+    """
+    inherit fill_joint_tkf92 from JointTKF92TransitionLogprobs
+    inherit setup from CondTKF92TransitionLogprobs
+    inherit logits_to_indel_rates, tkf_params from CondTKF91TransitionLogprobs
+    
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        ### unpack config
+        self.tkf_err = self.config.get('tkf_err', 1e-4)
+        in_file = self.config['filenames']['tkf_params_file']
         
+        with open(in_file,'rb') as f:
+            in_dict = pickle.load(f)
+            self.tkf_lam_mu = in_dict['lam_mu']
+            self.r_extend = in_dict['r_extend']
+    
+    def __call__(self,
+                 t_array,
+                 sow_intermediates: bool):
+        lam = self.tkf_lam_mu[0]
+        mu = self.tkf_lam_mu[1]
+        r_extend = self.r_extend
+        num_site_classes = r_extend.shape[0]
+        use_approx = False
+        
+        # get alpha, beta, gamma
+        out_dict = self.tkf_params(lam = lam, 
+                                   mu = mu, 
+                                   t_array = t_array,
+                                   use_approx = use_approx,
+                                   tkf_err = self.tkf_err,
+                                   num_classes = num_site_classes)
+        
+        # record values
+        if sow_intermediates:
+            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_alpha']), 
+                                        label=f'{self.name}/tkf_alpha', 
+                                        which='scalars')
+            
+            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_beta']), 
+                                        label=f'{self.name}/tkf_beta', 
+                                        which='scalars')
+            
+            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_gamma']), 
+                                        label=f'{self.name}/tkf_gamma', 
+                                        which='scalars')
+        
+        return self.fill_joint_tkf92(out_dict, r_extend)
