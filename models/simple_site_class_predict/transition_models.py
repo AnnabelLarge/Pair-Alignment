@@ -7,10 +7,17 @@ Created on Sat Oct  5 14:42:28 2024
 
 modules:
 ========
-CondTKF91TransitionLogprobs
-CondTKF92TransitionLogprobs
-JointTKF91TransitionLogprobs
-JointTKF92TransitionLogprobs
+ 'CondTKF91TransitionLogprobs',
+ 'CondTKF91TransitionLogprobsFromFile',
+  
+ 'JointTKF91TransitionLogprobs',
+ 'JointTKF91TransitionLogprobsFromFile',
+ 
+ 'CondTKF92TransitionLogprobs',
+ 'CondTKF92TransitionLogprobsFromFile',
+
+ 'JointTKF92TransitionLogprobs',
+ 'JointTKF92TransitionLogprobsFromFile',
  
 """
 # jumping jax and leaping flax

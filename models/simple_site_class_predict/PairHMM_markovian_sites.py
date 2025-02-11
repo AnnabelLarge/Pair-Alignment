@@ -18,8 +18,8 @@ from models.model_utils.BaseClasses import ModuleBase
 from models.simple_site_class_predict.emission_models import (LogEqulVecFromCounts,
                                                        LogEqulVecPerClass,
                                                        LogEqulVecFromFile,
-                                                       LG08RateMat,
-                                                       PerClassRateMat,
+                                                       LG08RateMatFromFile,
+                                                       LG08RateMatFitBoth,
                                                        SiteClassLogprobs,
                                                        SiteClassLogprobsFromFile)
 from models.simple_site_class_predict.transition_models import (JointTKF92TransitionLogprobs,
@@ -54,7 +54,8 @@ class MarkovSitesJointPairHMM(ModuleBase):
     
     
         ### rate matrix to score emissions from match sites
-        self.rate_matrix_module = PerClassRateMat(config = self.config,
+        # init with values from LG08
+        self.rate_matrix_module = LG08RateMatFitBoth(config = self.config,
                                                  name = f'get rate matrix')
         
         
@@ -394,7 +395,7 @@ class JointPairHMMLoadAll(MarkovSitesJointPairHMM):
         
         
         ### rate matrix to score emissions from match sites
-        self.rate_matrix_module = LG08RateMat(config = self.config,
+        self.rate_matrix_module = LG08RateMatFromFile(config = self.config,
                                                  name = f'get rate matrix')
         
         ### probability of site classes

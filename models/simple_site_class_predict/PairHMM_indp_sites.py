@@ -15,8 +15,8 @@ from models.model_utils.BaseClasses import ModuleBase
 from models.simple_site_class_predict.emission_models import (LogEqulVecFromCounts,
                                                        LogEqulVecPerClass,
                                                        LogEqulVecFromFile,
-                                                       LG08RateMat,
-                                                       PerClassRateMat,
+                                                       LG08RateMatFromFile,
+                                                       LG08RateMatFitBoth,
                                                        SiteClassLogprobs,
                                                        SiteClassLogprobsFromFile)
 from models.simple_site_class_predict.transition_models import (CondTKF91TransitionLogprobs, 
@@ -50,7 +50,7 @@ class CondPairHMM(ModuleBase):
         
         
         ### rate matrix to score emissions from match sites
-        self.rate_matrix_module = PerClassRateMat(config = self.config,
+        self.rate_matrix_module = LG08RateMatFitBoth(config = self.config,
                                                  name = f'get rate matrix')
         
         
@@ -224,7 +224,7 @@ class CondPairHMM(ModuleBase):
         ###############
         ### site class probs
         class_logits = params_dict['get site class probabilities']['class_logits']
-        class_probs = nn.log_softmax(class_logits)
+        class_probs = nn.softmax(class_logits)
         with open(f'{out_folder}/PARAMS_class_probs.txt','w') as g:
             [g.write(f'{elem.item()}') for elem in class_probs]
         
@@ -324,7 +324,7 @@ class JointPairHMM(CondPairHMM):
         
         
         ### rate matrix to score emissions from match sites
-        self.rate_matrix_module = PerClassRateMat(config = self.config,
+        self.rate_matrix_module = LG08RateMatFitBoth(config = self.config,
                                                  name = f'get rate matrix')
         
         
@@ -463,7 +463,7 @@ class JointPairHMMLoadAll(JointPairHMM):
         
         
         ### rate matrix to score emissions from match sites
-        self.rate_matrix_module = LG08RateMat(config = self.config,
+        self.rate_matrix_module = LG08RateMatFromFile(config = self.config,
                                                  name = f'get rate matrix')
         
         

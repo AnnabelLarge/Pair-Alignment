@@ -7,10 +7,17 @@ Created on Wed Feb  5 02:03:13 2025
 
 modules:
 ========
-'EqulVecFromCounts',
- 'EqulVecPerClass',
- 'LG08RateMat',
- 'PerClassRateMat'
+ 'LG08RateMatFromFile',
+ 'LG08RateMatFitRateMult',
+ 'LG08RateMatFitBoth',
+ 'PerClassRateMat',
+ 
+ 'LogEqulVecFromFile',
+ 'LogEqulVecFromCounts',
+ 'LogEqulVecPerClass',
+
+ 'SiteClassLogprobs',
+ 'SiteClassLogprobsFromFile'
 
 """
 # jumping jax and leaping flax
@@ -25,6 +32,14 @@ from models.model_utils.BaseClasses import ModuleBase
 
 def bounded_sigmoid(x, min_val, max_val):
     return min_val + (max_val - min_val) / (1 + jnp.exp(-x))
+
+def bounded_sigmoid_inverse(y, min_val, max_val, eps=1e-4):
+    """
+    note: this is only for logit initialization; jnp.clip has bad 
+          gradients at extremes
+    """
+    y = jnp.clip(y, min_val + eps, max_val - eps)
+    return jnp.log((y - min_val) / (max_val - y))
 
 def safe_log(x):
     return jnp.log( jnp.where( x>0, 
@@ -73,11 +88,12 @@ class SiteClassLogprobsFromFile(ModuleBase):
 ###############################################################################
 ### SUBSTITUTION RATE MATRICES   ##############################################
 ###############################################################################
-class LG08RateMat(ModuleBase):
+class LG08RateMatFromFile(ModuleBase):
     """
     return (rho * Q), to be directly used in matrix exponential
 
     exchanegabilities come from LG08 substitution model
+    rate multipliers directly loaded from separate file
     """
     config: dict
     name: str
@@ -148,13 +164,176 @@ class LG08RateMat(ModuleBase):
                             subst_rate_mat ) 
         
         return final
-        
 
-class PerClassRateMat(LG08RateMat):
+
+class LG08RateMatFitRateMult(LG08RateMatFromFile):
     """
     return (rho * Q), to be directly used in matrix exponential
+    inherit prepare_rate_matrix from LG08RateMatFromFile
 
-    inherit rate matrix calculation from LG08RateMat
+    exchanegabilities come from LG08 substitution model
+    rate multipliers fit with gradient updates
+    
+    params: 
+        - rate_mult_logits( C, )
+    
+    valid ranges:
+        - rate_mult: (0, inf); bound values with rate_mult_range
+        
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        self.num_emit_site_classes = self.config['num_emit_site_classes']
+        exchangeabilities_file = self.config['filenames']['exch']
+        
+        out  = self.config.get( 'rate_mult_range',
+                               (0.01, 10) )
+        self.rate_mult_min_val, self.rate_mult_max_val = out
+        del out
+        
+        ### LG08 exchangeabilities; (20, 20)
+        with open(exchangeabilities_file,'rb') as f:
+            self.lg08_exch = jnp.load(f)
+        
+        
+        ### RATE MULTIPLIERS: (c,)
+        if self.num_emit_site_classes > 1:
+            self.rate_mult_logits = self.param('rate_multipliers',
+                                               nn.initializers.normal(),
+                                               (self.num_emit_site_classes,),
+                                               jnp.float32)
+        
+    def __call__(self,
+                 logprob_equl,
+                 sow_intermediates: bool,
+                 *args,
+                 **kwargs):
+        # (C, alph)
+        equl = jnp.exp(logprob_equl)
+        
+        # rate multiplier
+        if self.num_emit_site_classes > 1:
+            rate_multiplier = bounded_sigmoid(self.rate_mult_logits,
+                                              min_val = self.rate_mult_min_val,
+                                              max_val = self.rate_mult_max_val)
+        else:
+            rate_multiplier = jnp.array([1])
+        
+        # chi; one shared all classes
+        exchangeabilities = self.lg08_exch
+        
+        return self.prepare_rate_matrix(exchangeabilities = exchangeabilities,
+                                   equilibrium_distributions = equl,
+                                   sow_intermediates = sow_intermediates,
+                                   rate_multiplier = self.rate_multiplier)
+
+
+class LG08RateMatFitBoth(LG08RateMatFitRateMult):
+    """
+    return (rho * Q), to be directly used in matrix exponential
+    inherit prepare_rate_matrix from LG08RateMatFromFile
+
+    exchanegabilities come from LG08 substitution model, but are updated with
+      gradient updates
+    rate multipliers fit with gradient updates
+    
+    params: 
+        - exchangeabilities_logits ( alph, alph )
+        - rate_mult_logits( C, )
+    
+    valid ranges:
+        - exchangeabilities: (0, inf); bound values with exchange_range
+        - rate_mult: (0, inf); bound values with rate_mult_range
+        
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        emission_alphabet_size = self.config['emission_alphabet_size']
+        self.num_emit_site_classes = self.config['num_emit_site_classes']
+        exchangeabilities_file = self.config['filenames']['exch']
+        
+        out  = self.config.get( 'rate_mult_range',
+                               (0.01, 10) )
+        self.rate_mult_min_val, self.rate_mult_max_val = out
+        del out
+
+        out  = self.config.get( 'exchange_range',
+                               (1e-4, 10) )
+        self.exchange_min_val, self.exchange_max_val = out
+        del out
+        
+        
+        ### initialize with LG08 upper triangular matrix
+        # (190,)
+        with open(exchangeabilities_file,'rb') as f:
+            vec = jnp.load(f)
+        transformed_vec = bounded_sigmoid_inverse(vec, 
+                                                  min_val = self.exchange_min_val,
+                                                  max_val = self.exchange_max_val)
+        
+        exch_raw = self.param("exchangeabilities", 
+                              lambda rng, shape: transformed_vec,
+                              transformed_vec.shape )
+        
+        # fill upper triangular part of matrix
+        out_size = (emission_alphabet_size, emission_alphabet_size)
+        upper_tri_exchang = jnp.zeros( out_size )
+        idxes = jnp.triu_indices(emission_alphabet_size, k=1)  
+        upper_tri_exchang = upper_tri_exchang.at[idxes].set(exch_raw)
+        
+        # reflect across diagonal
+        self.exchangeabilities_logits = (upper_tri_exchang + upper_tri_exchang.T)
+        
+            
+        ### RATE MULTIPLIERS: (c,)
+        if self.num_emit_site_classes > 1:
+            self.rate_mult_logits = self.param('rate_multipliers',
+                                               nn.initializers.normal(),
+                                               (self.num_emit_site_classes,),
+                                               jnp.float32)
+        
+    def __call__(self,
+                 logprob_equl,
+                 sow_intermediates: bool,
+                 *args,
+                 **kwargs):
+        # pi; one per class
+        equl = jnp.exp(logprob_equl)
+        
+        # rate multiplier
+        if self.num_emit_site_classes > 1:
+            rate_multiplier = bounded_sigmoid(self.rate_mult_logits,
+                                              min_val = self.rate_mult_min_val,
+                                              max_val = self.rate_mult_max_val)
+        else:
+            rate_multiplier = jnp.array([1])
+        
+        # chi; one shared all classes
+        exchangeabilities = bounded_sigmoid(x = self.exchangeabilities_logits, 
+                                            min_val = self.exchange_min_val,
+                                            max_val = self.exchange_max_val)
+        
+        if (sow_intermediates):
+            self.sow_histograms_scalars(mat = exchangeabilities, 
+                                        label = 'exchangeabilities', 
+                                        which='scalars')
+        
+        # output is (c, i, j)
+        return self.prepare_rate_matrix(exchangeabilities = exchangeabilities,
+                                   equilibrium_distributions = equl,
+                                   sow_intermediates = sow_intermediates,
+                                   rate_multiplier = rate_multiplier)
+            
+            
+class PerClassRateMat(LG08RateMatFitBoth):
+    """
+    return (rho * Q), to be directly used in matrix exponential
+    inherit prepare_rate_matrix from LG08RateMatFromFile
+    inherit call from LG08RateMatFitBoth
 
     params: 
         - exchangeabilities_logits ( alph, alph )
@@ -207,37 +386,7 @@ class PerClassRateMat(LG08RateMat):
                                                (self.num_emit_site_classes,),
                                                jnp.float32)
         
-    def __call__(self,
-                 logprob_equl,
-                 sow_intermediates: bool,
-                 *args,
-                 **kwargs):
-        # pi; one per class
-        equl = jnp.exp(logprob_equl)
-        
-        # rate multiplier
-        if self.num_emit_site_classes > 1:
-            rate_multiplier = bounded_sigmoid(self.rate_mult_logits,
-                                              min_val = self.rate_mult_min_val,
-                                              max_val = self.rate_mult_max_val)
-        else:
-            rate_multiplier = jnp.array([1])
-        
-        # chi; one shared all classes
-        exchangeabilities = bounded_sigmoid(x = self.exchangeabilities_logits, 
-                                            min_val = self.exchange_min_val,
-                                            max_val = self.exchange_max_val)
-        
-        if (sow_intermediates):
-            self.sow_histograms_scalars(mat = exchangeabilities, 
-                                        label = 'exchangeabilities', 
-                                        which='scalars')
-        
-        # output is (c, i, j)
-        return self.prepare_rate_matrix(exchangeabilities = exchangeabilities,
-                                   equilibrium_distributions = equl,
-                                   sow_intermediates = sow_intermediates,
-                                   rate_multiplier = rate_multiplier)
+    
     
     
 

@@ -1,7 +1,0 @@
-training_wkdir	RESULTS_tkf92_one_markovian_site_class
-init_value	0.001
-peak_value	0.001
-end_value	0.001
-warmup_steps	0
-weight_decay	0
-every_k_schedule	1

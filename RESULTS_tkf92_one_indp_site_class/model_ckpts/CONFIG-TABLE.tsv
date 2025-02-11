@@ -8,6 +8,7 @@ batch_size	7
 bos_eos_as_match	False
 norm_loss_by	desc_len
 loss_type	joint
+update_grads	True
 num_epochs	1000
 early_stop_cond1_atol	0.01
 early_stop_cond2_gap	3
@@ -18,4 +19,3 @@ align_padding_idx	-9
 emission_alphabet_size	20
 base_alphabet_size	23
 full_alphabet_size	44
-update_grads	True
