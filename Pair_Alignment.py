@@ -12,7 +12,7 @@ import argparse
 import jax
 
 
-# jax.config.update("jax_debug_nans", True)
+jax.config.update("jax_debug_nans", True)
 # jax.config.update("jax_enable_x64", True)
 
 
@@ -95,9 +95,8 @@ def main():
         
         # train model
         dload_lst = init_dataloaders(args, 'train')
-        
-        # with jax.disable_jit():
-        train(args, dload_lst)
+        with jax.disable_jit():
+            train(args, dload_lst)
 
 
 if __name__ == '__main__':

@@ -28,6 +28,11 @@ from models.simple_site_class_predict.transition_models import (CondTKF91Transit
 
 def bounded_sigmoid(x, min_val, max_val):
     return min_val + (max_val - min_val) / (1 + jnp.exp(-x))
+
+def safe_log(x):
+    return jnp.log( jnp.where( x>0, 
+                               x, 
+                               jnp.finfo('float32').smallest_normal ) )
    
 
 class CondPairHMM(ModuleBase):
@@ -88,10 +93,7 @@ class CondPairHMM(ModuleBase):
                                 t_array[:, None,None,None,] )
         
         prob_emit_at_match = expm(to_expm)
-        logprob_emit_at_match = jnp.where( prob_emit_at_match>0,
-                                           jnp.log(prob_emit_at_match),
-                                           jnp.log(jnp.finfo('float32').smallest_normal) )
-        
+        logprob_emit_at_match = safe_log( jnp.where( prob_emit_at_match )
         logprob_emit_at_match = self.apply_weighting(logprob_emit_at_indel = logprob_emit_at_indel,
                                                      logprob_emit_at_match = logprob_emit_at_match)
         
@@ -161,10 +163,7 @@ class CondPairHMM(ModuleBase):
         # weight each by pi(c|x); broadcast across rows
         sum_per_class = equl_prob.sum(axis=0) #(alph)
         weight = (equl_prob / sum_per_class[None,:]) #(C, alph)
-        log_weight = jnp.where( weight > 0, 
-                               jnp.log(weight),
-                               jnp.log(jnp.finfo('float32').smallest_normal)
-                               ) #(C, alph)
+        log_weight = safe_log(weight)
         weighted_logprob_mat = log_weight[None,:,:,None] + logprob_emit_at_match
         return weighted_logprob_mat
     
@@ -367,9 +366,7 @@ class JointPairHMM(CondPairHMM):
         to_expm = jnp.multiply( rate_mat_times_rho[None,...],
                                 t_array[:, None,None,None,] )
         cond_prob_emit_at_match = expm(to_expm)
-        cond_logprob_emit_at_match = jnp.where( cond_prob_emit_at_match>0,
-                                           jnp.log(cond_prob_emit_at_match),
-                                           jnp.log(jnp.finfo('float32').smallest_normal) )
+        cond_logprob_emit_at_match = safe_log( cond_prob_emit_at_match )
         joint_logprob_emit_at_match = cond_logprob_emit_at_match + logprob_emit_at_indel[None,:,:,None]
         joint_logprob_emit_at_match = self.apply_weighting(joint_logprob_per_class = joint_logprob_emit_at_match)
         

@@ -28,6 +28,11 @@ from models.simple_site_class_predict.transition_models import (JointTKF92Transi
 
 def bounded_sigmoid(x, min_val, max_val):
     return min_val + (max_val - min_val) / (1 + jnp.exp(-x))
+
+def safe_log(x):
+    return jnp.log( jnp.where( x>0, 
+                               x, 
+                               jnp.finfo('float32').smallest_normal ) )
     
     
 class MarkovSitesJointPairHMM(ModuleBase):
@@ -90,10 +95,7 @@ class MarkovSitesJointPairHMM(ModuleBase):
         to_expm = jnp.multiply( rate_mat_times_rho[None, ...],
                                 t_array[..., None,None,None] )
         cond_prob_emit_at_match = expm(to_expm)
-        cond_logprob_emit_at_match = jnp.where( cond_prob_emit_at_match>0,
-                                           jnp.log(cond_prob_emit_at_match),
-                                           jnp.log(jnp.finfo('float32').smallest_normal) )
-        
+        cond_logprob_emit_at_match = safe_log (cond_prob_emit_at_match )
         joint_logprob_emit_at_match = cond_logprob_emit_at_match + logprob_emit_at_indel[None,:,:,None]
         del to_expm
         

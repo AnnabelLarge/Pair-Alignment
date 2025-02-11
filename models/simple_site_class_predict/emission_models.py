@@ -29,6 +29,10 @@ from jax.scipy.linalg import expm
 from models.model_utils.BaseClasses import ModuleBase
 
 
+def safe_log(x):
+    return jnp.log( jnp.where( x>0, 
+                               x, 
+                               jnp.finfo('float32').smallest_normal ) )
 
 def bounded_sigmoid(x, min_val, max_val):
     return min_val + (max_val - min_val) / (1 + jnp.exp(-x))
@@ -39,12 +43,7 @@ def bounded_sigmoid_inverse(y, min_val, max_val, eps=1e-4):
           gradients at extremes
     """
     y = jnp.clip(y, min_val + eps, max_val - eps)
-    return jnp.log((y - min_val) / (max_val - y))
-
-def safe_log(x):
-    return jnp.log( jnp.where( x>0, 
-                               x, 
-                               jnp.finfo('float32').smallest_normal ) )
+    return safe_log( (y - min_val) / (max_val - y) )
 
 def save_interms(param_name, mat):
     with open(f'pred_{param_name}.npy','wb') as g:
@@ -447,11 +446,7 @@ class LogEqulVecFromCounts(ModuleBase):
         training_dset_aa_counts = self.config['training_dset_aa_counts']
         
         prob_equilibr = training_dset_aa_counts/training_dset_aa_counts.sum()
-        logprob_equilibr = jnp.log( jnp.where( prob_equilibr != 0,
-                                              prob_equilibr,
-                                              jnp.finfo('float32').smallest_normal
-                                              )
-                                   )
+        logprob_equilibr = safe_log( prob_equilibr )
         
         # expand to to (C=1, alpha)
         self.logprob_equilibr = logprob_equilibr[None,...]
