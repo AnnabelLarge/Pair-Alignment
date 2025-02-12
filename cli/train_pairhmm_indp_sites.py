@@ -13,6 +13,8 @@ Load parameters and evaluate likelihoods for an independent
 import os
 import shutil
 from tqdm import tqdm
+from time import process_time
+from time import time as wall_clock_time
 import numpy as np
 import pandas as pd
 pd.options.mode.chained_assignment = None # this is annoying
@@ -203,6 +205,8 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     rngkey, training_rngkey = jax.random.split(rngkey, num=2)
     
     for epoch_idx in tqdm(range(args.num_epochs)):
+        epoch_real_start = wall_clock_time()
+        epoch_cpu_start = process_time()
         ave_epoch_train_loss = 0
         ave_epoch_train_perpl = 0
         
@@ -211,7 +215,10 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
         ### 3.1: train and update model parameters   #
         ##############################################
         for batch_idx, batch in enumerate(training_dl):   
-            batch_epoch_idx = epoch_idx * len(training_dl) + batch_idx   
+            batch_epoch_idx = epoch_idx * len(training_dl) + batch_idx  
+            batch_real_start = wall_clock_time()
+            batch_cpu_start = process_time() 
+            
             rngkey_for_training_batch = jax.random.fold_in(training_rngkey, epoch_idx+batch_idx)
             out = train_fn_jitted(batch=batch, 
                                   training_rngkey=rngkey_for_training_batch, 
@@ -260,6 +267,19 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
                                                     interms_for_tboard = args.interms_for_tboard, 
                                                     write_histograms_flag = interm_rec or final_rec)
             
+            # record the CPU+system and wall-clock (real) time
+            batch_real_end = wall_clock_time()
+            batch_cpu_end = process_time()
+            write_times(cpu_start = batch_cpu_start, 
+                        cpu_end = batch_cpu_end, 
+                        real_start = batch_real_start, 
+                        real_end = batch_real_end, 
+                        tag = 'Process one training batch', 
+                        step = batch_epoch_idx, 
+                        writer_obj = writer)
+            
+            del batch_cpu_start, batch_cpu_end, batch_real_start, batch_real_end
+        
             
 #__4___8: epoch level (two tabs)
         ##############################################################
@@ -350,12 +370,43 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
             with open(args.logfile_name,'a') as g:
                 g.write(f'\n\nEARLY STOPPING AT {epoch_idx}:\n')
             
+            # record time spent at this epoch
+            epoch_real_end = wall_clock_time()
+            epoch_cpu_end = process_time()
+            
+            write_times(cpu_start = epoch_cpu_start, 
+                        cpu_end = epoch_cpu_end, 
+                        real_start = epoch_real_start, 
+                        real_end = epoch_real_end, 
+                        tag = 'Process one epoch', 
+                        step = epoch_idx, 
+                        writer_obj = writer)
+            
+            del epoch_cpu_start, epoch_cpu_end
+            
+            # save the trainstates for later use
+            best_trainstates = all_trainstates
+            
             # rage quit
             break
 
 
         ### before next epoch, remember this epoch's loss for next iteration
         prev_test_loss = ave_epoch_test_loss
+        
+        # record time spent at this epoch
+        epoch_real_end = wall_clock_time()
+        epoch_cpu_end = process_time()
+        
+        write_times(cpu_start = epoch_cpu_start, 
+                    cpu_end = epoch_cpu_end, 
+                    real_start = epoch_real_start, 
+                    real_end = epoch_real_end, 
+                    tag = 'Process one epoch', 
+                    step = epoch_idx, 
+                    writer_obj = writer)
+        
+        del epoch_cpu_start, epoch_cpu_end
         
         
 
@@ -367,6 +418,9 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     with open(args.logfile_name,'a') as g:
         g.write('\n')
         g.write(f'4: post-training actions\n')
+    
+    post_training_real_start = wall_clock_time()
+    post_training_cpu_start = process_time()
     
     # don't accidentally use old trainstates or eval fn
     del all_trainstates, eval_fn_jitted
@@ -447,8 +501,33 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
         for key, val in test_summary_stats.items():
             g.write(f'{key}: {val}\n')
     
+    post_training_real_end = wall_clock_time()
+    post_training_cpu_end = process_time()
+    
+    # record total time spent on post-training actions; write this to a table
+    #   instead of a scalar
+    cpu_sys_time = post_training_cpu_end - post_training_cpu_start
+    real_time = post_training_real_end - post_training_real_start
+    
+    df = pd.DataFrame({'label': ['CPU+sys time', 'Real time'],
+                       'value': [cpu_sys_time, real_time]})
+    markdown_table = df.to_markdown()
+    writer.add_text(tag = 'Code Timing | Post-training actions',
+                    text_string = markdown_table,
+                    global_step = 0)
+    
     # when you're done with the function, close the tensorboard writer and
     #   compress the output file
     writer.close()
+    
+    # don't remove source on macOS (when I'm doing CPU testing)
+    print('\n\nDONE; compressing tboard folder')
+    if platform.system() == 'Darwin':
+        os.system(f"tar -czvf {args.training_wkdir}/tboard.tar.gz {args.training_wkdir}/tboard")
+    
+    # DO remove source on linux (when I'm doing real experiments)
+    elif platform.system() == 'Linux':
+        os.system(f"tar -czvf {args.training_wkdir}/tboard.tar.gz  --remove-files {args.training_wkdir}/tboard")
+    
     
     
