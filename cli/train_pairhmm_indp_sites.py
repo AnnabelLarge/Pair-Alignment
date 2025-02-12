@@ -152,11 +152,12 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     
     ### initialize functions
     out = init_pairhmm( seq_shapes = seq_shapes, 
-                                    dummy_t_array = dummy_t_array,
-                                    tx = tx, 
-                                    model_init_rngkey = model_init_rngkey,
-                                    pred_config = args.pred_config,
-                                    )
+                        dummy_t_array = dummy_t_array,
+                        tx = tx, 
+                        model_init_rngkey = model_init_rngkey,
+                        pred_config = args.pred_config,
+                        tabulate_file_loc = args.model_ckpts_dir
+                        )
     all_trainstates, all_model_instances = out
     del out
     

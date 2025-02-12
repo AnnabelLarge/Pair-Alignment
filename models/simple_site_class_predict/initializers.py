@@ -15,6 +15,7 @@ def init_pairhmm_indp_sites( seq_shapes,
                              tx, 
                              model_init_rngkey,
                              pred_config,
+                             tabulate_file_loc
                              ):
     """
     for independent site classses over substitution models
@@ -47,7 +48,20 @@ def init_pairhmm_indp_sites( seq_shapes,
             from models.simple_site_class_predict.PairHMM_indp_sites import JointPairHMMFitBoth
             pairhmm_instance = JointPairHMMFitBoth(config = pred_config,
                                                    name = 'JointPairHMMFitBoth')
-        
+    
+    ### tabulate and save the model
+    if (tabulate_file_loc is not None):
+        tab_fn = nn.tabulate(pairhmm_instance, 
+                              rngs=model_init_rngkey,
+                              console_kwargs = {'soft_wrap':True,
+                                                'width':250})
+        str_out = tab_fn(batch = seq_shapes,
+                         t_array = dummy_t_array,
+                         sow_intermediates = False,
+                         mutable = ['params'])
+        with open(f'{tabulate_file_loc}/PAIRHMM_tabulate.txt','w') as g:
+            g.write(str_out)
+    
     init_params = pairhmm_instance.init(rngs = model_init_rngkey,
                                         batch = seq_shapes,
                                         t_array = dummy_t_array,
@@ -84,7 +98,20 @@ def init_pairhmm_markov_sites( seq_shapes,
         from models.simple_site_class_predict.PairHMM_markovian_sites import JointPairHMMLoadAll
         pairhmm_instance = JointPairHMMLoadAll(config = pred_config,
                                        name = 'JointPairHMMLoadAll')
-        
+    
+    ### tabulate and save the model
+    if (tabulate_file_loc is not None):
+        tab_fn = nn.tabulate(pairhmm_instance, 
+                              rngs=model_init_rngkey,
+                              console_kwargs = {'soft_wrap':True,
+                                                'width':250})
+        str_out = tab_fn(aligned_inputs = seq_shapes,
+                         t_array = dummy_t_array,
+                         sow_intermediates = False,
+                         mutable = ['params'])
+        with open(f'{tabulate_file_loc}/PAIRHMM_tabulate.txt','w') as g:
+            g.write(str_out)
+            
     init_params = pairhmm_instance.init(rngs = model_init_rngkey,
                                         aligned_inputs = seq_shapes,
                                         t_array = dummy_t_array,

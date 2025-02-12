@@ -1,0 +1,17 @@
+training_wkdir	RESULTS_dry_run
+preset_name	fit_rate_mult_only
+times_from	t_array_from_file
+exponential_dist_param	1.1158886772273318
+indel_model_type	tkf92
+num_emit_site_classes	5
+num_tkf_site_classes	1
+tkf_err	0.0001
+filenames/times	39_times.txt
+filenames/exch	LG08_exchangeability_r.npy
+loss_type	joint
+emission_alphabet_size	20
+norm_loss_by	desc_len
+seq_padding_idx	0
+align_padding_idx	-9
+base_alphabet_size	23
+full_alphabet_size	44

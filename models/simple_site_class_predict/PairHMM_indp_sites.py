@@ -228,7 +228,7 @@ class CondPairHMM(ModuleBase):
             class_logits = params_dict['get site class probabilities']['class_logits']
             class_probs = nn.softmax(class_logits)
             with open(f'{out_folder}/PARAMS_class_probs.txt','w') as g:
-                [g.write(f'{elem.item()}') for elem in class_probs]
+                [g.write(f'{elem.item()}\n') for elem in class_probs]
         
         ### emissions
         if 'get rate matrix' in params_dict.keys():
@@ -249,7 +249,7 @@ class CondPairHMM(ModuleBase):
                                             max_val = rate_mult_max_val)
     
                 with open(f'{out_folder}/PARAMS_rate_multipliers.txt','w') as g:
-                    [g.write(f'{elem.item()}') for elem in rate_mult]
+                    [g.write(f'{elem.item()}\n') for elem in rate_mult]
                 
                 
         ### transitions

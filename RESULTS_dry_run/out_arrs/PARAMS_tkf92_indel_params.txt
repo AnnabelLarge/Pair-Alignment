@@ -1,0 +1,4 @@
+insert rate, lambda: 0.35612502694129944
+deletion rate, mu: 0.35695210099220276
+extension prob, r: 0.38106662034988403	
+mean indel legnth: 1.6156827211380005	

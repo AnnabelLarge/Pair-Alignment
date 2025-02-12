@@ -199,8 +199,9 @@ class LG08RateMatFitRateMult(LG08RateMatFromFile):
         
         ### RATE MULTIPLIERS: (c,)
         if self.num_emit_site_classes > 1:
+            init_rates = 
             self.rate_mult_logits = self.param('rate_multipliers',
-                                               nn.initializers.normal(),
+                                               nn.initializers.uniform(),
                                                (self.num_emit_site_classes,),
                                                jnp.float32)
         
