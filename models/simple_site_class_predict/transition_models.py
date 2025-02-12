@@ -86,6 +86,7 @@ class CondTKF91TransitionLogprobs(ModuleBase):
         # initializing lamda, offset
         init_lam_offset_logits = self.config.get( 'init_lambda_offset_logits',
                                                 [-2, -5] )
+        init_lam_offset_logits = jnp.array(init_lam_offset_logits, dtype=float)
         self.lam_min_val, self.lam_max_val = self.config.get( 'lambda_range', 
                                                                [self.tkf_err, 3] )
         self.offs_min_val, self.offs_max_val = self.config.get( 'offset_range', 
@@ -97,8 +98,8 @@ class CondTKF91TransitionLogprobs(ModuleBase):
         # init lam: ~0.35769683
         # init offset: ~0.02017788
         self.tkf_lam_mu_logits = self.param('TKF91 lambda, mu',
-                                            lambda: init_lam_offset_logits,
-                                            (init_lam_offset_logits.shape),
+                                            lambda rng, shape, dtype: init_lam_offset_logits,
+                                            init_lam_offset_logits.shape,
                                             jnp.float32)
         
     def __call__(self,
@@ -480,6 +481,7 @@ class CondTKF92TransitionLogprobs(CondTKF91TransitionLogprobs):
         # initializing lamda, offset
         init_lam_offset_logits = self.config.get( 'init_lambda_offset_logits', 
                                                   [-2, -5] )
+        init_lam_offset_logits = jnp.array(init_lam_offset_logits, dtype=float)
         self.lam_min_val, self.lam_max_val = self.config.get( 'lambda_range', 
                                                                [self.tkf_err, 3] )
         self.offs_min_val, self.offs_max_val = self.config.get( 'offset_range', 
@@ -488,7 +490,8 @@ class CondTKF92TransitionLogprobs(CondTKF91TransitionLogprobs):
         # initializing r extension prob
         init_r_extend_logits = self.config.get( 'init_r_extend_logits',
                                                [-x/10 for x in 
-                                                range(self.num_tkf_site_classes)] )
+                                                range(1, self.num_tkf_site_classes+1)] )
+        init_r_extend_logits = jnp.array(init_r_extend_logits, dtype=float)
         self.r_extend_min_val, self.r_extend_max_val = self.config.get( 'r_range', 
                                                                 [self.tkf_err, 0.8] )
         
@@ -498,8 +501,8 @@ class CondTKF92TransitionLogprobs(CondTKF91TransitionLogprobs):
         # init lam: ~0.35769683
         # init offset: ~0.02017788
         self.tkf_lam_mu_logits = self.param('TKF92 lambda, mu',
-                                            lambda: init_lam_offset_logits,
-                                            (init_lam_offset_logits.shape),
+                                            lambda rng, shape, dtype: init_lam_offset_logits,
+                                            init_lam_offset_logits.shape,
                                             jnp.float32)
         
         # up to num_tkf_site_classes different r extension probabilities
@@ -507,8 +510,8 @@ class CondTKF92TransitionLogprobs(CondTKF91TransitionLogprobs):
         #   0.40004998, 0.38006914, 0.3601878, 0.34050342, 0.32110974
         #   0.30209476, 0.2835395, 0.26551658, 0.24808942, 0.2313115
         self.r_extend_logits = self.param('TKF92 r extension prob',
-                                          lambda: init_r_extend_logits,
-                                          (init_r_extend_logits.shape),
+                                          lambda rng, shape, dtype: init_r_extend_logits,
+                                          init_r_extend_logits.shape,
                                           jnp.float32)
             
     def __call__(self,

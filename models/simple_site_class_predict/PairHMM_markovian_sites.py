@@ -106,6 +106,7 @@ class MarkovSitesJointPairHMM(ModuleBase):
                                                   sow_intermediates = sow_intermediates)
         
         
+        
         ### probability of being in any particular class
         log_class_probs = self.class_logprobs_module()
         

@@ -19,24 +19,36 @@ def init_pairhmm_indp_sites( seq_shapes,
     """
     for independent site classses over substitution models
     """
+    preset_names = ['load_all',
+                    'fit_rate_mult_only',
+                    'fit_rate_mult_and_matrix']
+    assert pred_config['preset_name'] in preset_names, f'valid options: {preset_names}'
+    
+    
     # enforce this default
     pred_config['num_tkf_site_classes'] = 1
     
-    if pred_config['load_all_params']:
+    if pred_config['preset_name'] == 'load_all':
         from models.simple_site_class_predict.PairHMM_indp_sites import JointPairHMMLoadAll
         pairhmm_instance = JointPairHMMLoadAll(config = pred_config,
                                        name = 'JointPairHMMLoadAll')
-        
-    elif pred_config['loss_type'] in ['cond', 'conditional']:
-        from models.simple_site_class_predict.PairHMM_indp_sites import CondPairHMM
-        pairhmm_instance = CondPairHMM(config = pred_config,
-                                       name = 'CondPairHMM')
-        
-    elif pred_config['loss_type'] == 'joint':
-        from models.simple_site_class_predict.PairHMM_indp_sites import JointPairHMM
-        pairhmm_instance = JointPairHMM(config = pred_config,
-                                       name = 'JointPairHMM')
     
+    elif pred_config['preset_name'] == 'fit_rate_mult_only':
+        from models.simple_site_class_predict.PairHMM_indp_sites import JointPairHMMFitRateMult
+        pairhmm_instance = JointPairHMMFitRateMult(config = pred_config,
+                                                   name = 'JointPairHMMFitRateMult')
+    
+    elif pred_config['preset_name'] == 'fit_rate_mult_and_matrix':
+        if pred_config['loss_type'] in ['cond', 'conditional']:
+            from models.simple_site_class_predict.PairHMM_indp_sites import CondPairHMM
+            pairhmm_instance = CondPairHMM(config = pred_config,
+                                           name = 'CondPairHMM')
+        
+        elif pred_config['loss_type'] == 'joint':
+            from models.simple_site_class_predict.PairHMM_indp_sites import JointPairHMMFitBoth
+            pairhmm_instance = JointPairHMMFitBoth(config = pred_config,
+                                                   name = 'JointPairHMMFitBoth')
+        
     init_params = pairhmm_instance.init(rngs = model_init_rngkey,
                                         batch = seq_shapes,
                                         t_array = dummy_t_array,
@@ -59,6 +71,10 @@ def init_pairhmm_markov_sites( seq_shapes,
                                ):
     """
     for markovian site classses
+    
+    TODO: update with whichever indel model works best from independent
+     site modeling experiments: fitting both rate matrix and rate multiplier,
+     or just fitting rate multiplier
     """
     if not pred_config['load_all_params']:
         from models.simple_site_class_predict.PairHMM_markovian_sites import MarkovSitesJointPairHMM

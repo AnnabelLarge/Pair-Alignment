@@ -48,7 +48,7 @@ def base_hmm_load_all(indel_model_type: Literal["tkf91", "tkf92"],
     ### blocks for datamat_lst -> evolparams (except for TKF92 r, defined later)
     exchang_module = concat_feats_to_params.EvoparamsFromFile
     equilibr_module = concat_feats_to_params.GlobalEqulVecFromCounts
-    lam_mu_module = concat_feats_to_params.EvoparamsFromFile
+    lam_mu_module = concat_feats_to_params.LamMuFromFile
     
     
     ### blocks for other logprobs
@@ -61,7 +61,7 @@ def base_hmm_load_all(indel_model_type: Literal["tkf91", "tkf92"],
             transits_logprobs_module = params_to_transition_logprobs.JointTKF91TransitionLogprobs
         
         elif indel_model_type == 'tkf92':
-            r_extend_module = concat_feats_to_params.EvoparamsFromFile
+            r_extend_module = concat_feats_to_params.RExtendFromFile
             transits_logprobs_module = params_to_transition_logprobs.JointTKF92TransitionLogprobs
         
     # P(align, desc | anc)
@@ -73,7 +73,7 @@ def base_hmm_load_all(indel_model_type: Literal["tkf91", "tkf92"],
             transits_logprobs_module = params_to_transition_logprobs.CondTKF91TransitionLogprobs
         
         elif indel_model_type == 'tkf92':
-            r_extend_module = concat_feats_to_params.EvoparamsFromFile
+            r_extend_module = concat_feats_to_params.RExtendFromFile
             transits_logprobs_module = params_to_transition_logprobs.CondTKF92TransitionLogprobs
     
     
@@ -421,7 +421,7 @@ def create_all_tstates(seq_shapes,
     
     ### final prediction network
     # init
-    preset_name = pred_model_type.split('/')[-1]
+    preset_name = pred_config['preset_name']
     out = neural_hmm_params_instance(input_shapes = list_of_shapes, 
                                     dummy_t_array = dummy_t_array, 
                                     tx = tx, 

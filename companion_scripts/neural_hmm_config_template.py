@@ -174,7 +174,7 @@ if __name__ == '__main__':
     #                  'local_exch_equilibr': local_exch_equilibr,
     #                  'local_exch_equilibr_r': local_exch_equilibr_r,
     #                  'all_local': all_local }
-    preset_name = 'base_hmm_fit_indel_params'
+    preset_name = 'base_hmm_load_all'
     to_write = make_train_config( anc_model_type= None,
                                   desc_model_type= None,
                                   pred_model_type= 'neural_hmm',

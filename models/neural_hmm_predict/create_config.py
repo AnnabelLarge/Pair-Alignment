@@ -27,7 +27,8 @@ def create_config(preset_name):
         exchang_config = OrderedDict( {'load_from_file': '[STR]',
                                        'unit_norm_rate_matrix': 'true'} )
         equilibr_config = OrderedDict( {} )
-        indels_config = OrderedDict( {'load_from_file': '[STR]',
+        indels_config = OrderedDict( {'lam_mu_file': '[STR]',
+                                      'r_extend_file': '[STR]',
                                       'tkf_err': '[FLOAT=1e-4]'} )
     
     ### all global, only fit indel params
@@ -41,7 +42,8 @@ def create_config(preset_name):
     elif preset_name in ['local_exch_equilibr',
                          'local_exch_equilibr_r',
                          'all_local']:
-        exchang_config = OrderedDict( {'use_anc_emb': '[BOOL]',
+        exchang_config = OrderedDict( {'unit_norm_rate_matrix': 'false',
+                                       'use_anc_emb': '[BOOL]',
                                        'use_desc_emb': '[BOOL]',
                                        'layer_sizes': '[LIST[INTS]]',
                                        'dropout': '[FLOAT=0.0]',
@@ -79,10 +81,11 @@ def create_config(preset_name):
                                            '(if TKF92) r_range': '[min: FLOAT=tkf_err, max: FLOAT=0.8]'} )
     
     
-    return OrderedDict( {"times_from": "[ STR: ('geometric', 't_array_from_file', 'one_time_per_sample') ]",
+    return OrderedDict( {"preset_name":f"{preset_name}",
+                         "times_from": "[ STR: ('geometric', 't_array_from_file', 'one_time_per_sample') ]",
                          "exponential_dist_param": "[FLOAT]",
                          'indel_model_type': '[STR="tkf91", "tkf92"]',
-                         'use_precomputed_indices: [BOOL]',
+                         'use_precomputed_indices': '[BOOL]',
                          
                          "LINEBREAK401": "",
                          

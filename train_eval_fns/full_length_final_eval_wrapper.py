@@ -75,19 +75,11 @@ def final_eval_wrapper(dataloader,
         ### unpack briefly to get max len and number of samples in the 
         ### batch; place in some bin (this controls how many jit 
         ### compilations you do)
-        # sequences, padded in increments of chunk_size up to 
-        #   global_seq_max_length (max is NOT necessarily divisible 
-        #   by chunk_size)
-        if have_full_length_alignments:
-            batch_max_seqlen = jitted_determine_seqlen_bin(batch = batch)
-            batch_max_seqlen = batch_max_seqlen.item()
-            batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch)
-            batch_max_alignlen = batch_max_alignlen.item()
+        batch_max_seqlen = jitted_determine_seqlen_bin(batch = batch)
+        batch_max_seqlen = batch_max_seqlen.item()
+        batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch)
+        batch_max_alignlen = batch_max_alignlen.item()
             
-        else:
-            batch_max_seqlen = None
-            batch_max_seqlen = None
-        
         # eval
         eval_metrics = eval_fn_jitted(batch=batch, 
                                       all_trainstates=best_trainstates,
@@ -135,7 +127,7 @@ def final_eval_wrapper(dataloader,
 
         # model may or may not record accuracy as well    
         acc_perSamp = eval_metrics.get('acc_perSamp', None)
-        if acc_perSamp != None:
+        if acc_perSamp is not None:
             have_acc_metrics = True
             final_loglikes['generative_accuracy'] = acc_perSamp
             final_acc += acc_perSamp.mean() * wf

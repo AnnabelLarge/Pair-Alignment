@@ -299,9 +299,9 @@ class CondPairHMM(ModuleBase):
         
         
     
-class JointPairHMM(CondPairHMM):
+class JointPairHMMFitBoth(CondPairHMM):
     """
-    inherit setup, marginalize_over_times, and write_params from CondPairHMM
+    inherit marginalize_over_times, and write_params from CondPairHMM
     
     """
     config: dict
@@ -435,9 +435,55 @@ class JointPairHMM(CondPairHMM):
         log_weight = self.site_class_probability_module()
         log_weight = log_weight[None,:,None,None]
         return log_weight + joint_logprob_per_class
+
+
+class JointPairHMMFitRateMult(CondPairHMM):
+    """
+    inherit marginalize_over_times, and write_params from CondPairHMM
     
+    inherit call from JointPairHMMFitBoth
+    """
+    config: dict
+    name: str
     
-class JointPairHMMLoadAll(JointPairHMM):
+    def setup(self):
+        num_emit_site_classes = self.config['num_emit_site_classes']
+        indel_model_type = self.config['indel_model_type']
+        self.norm_loss_by = self.config['norm_loss_by']
+        self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
+        
+        ### how to score emissions from indel sites
+        if num_emit_site_classes == 1:
+            self.indel_prob_module = LogEqulVecFromCounts(config = self.config,
+                                                       name = f'get equilibrium')
+        elif num_emit_site_classes > 1:
+            self.indel_prob_module = LogEqulVecPerClass(config = self.config,
+                                                     name = f'get equilibrium')
+        
+        
+        ### rate matrix to score emissions from match sites
+        self.rate_matrix_module = LG08RateMatFitRateMult(config = self.config,
+                                                 name = f'get rate matrix')
+        
+        
+        ### now need probabilities for rate classes themselves
+        self.site_class_probability_module = SiteClassLogprobs(config = self.config,
+                                                  name = f'get site class probabilities')
+        
+        
+        ### TKF91 or TKF92
+        if indel_model_type == 'tkf91':
+            self.transitions_module = JointTKF91TransitionLogprobs(config = self.config,
+                                                     name = f'tkf91 indel model')
+        
+        elif indel_model_type == 'tkf92':
+            self.transitions_module = JointTKF92TransitionLogprobs(config = self.config,
+                                                     name = f'tkf92 indel model')
+
+
+
+    
+class JointPairHMMLoadAll(JointPairHMMFitBoth):
     """
     same as JointPairHMM, but load values (i.e. no free parameters)
     

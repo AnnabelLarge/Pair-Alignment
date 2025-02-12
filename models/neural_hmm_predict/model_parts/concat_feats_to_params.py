@@ -19,6 +19,8 @@ misc:
 ----------
 Placeholder
 EvoparamsFromFile
+LamMuExtendFromFile
+RExtendFromFile
 
 Global (one parameter set for all positions, all samples):
 -----------------------------------------------------------
@@ -91,6 +93,41 @@ class EvoparamsFromFile(ModuleBase):
              **kwargs):
         
         return self.mat
+
+
+class LamMuFromFile(EvoparamsFromFile):
+    """
+    same as above, but I have to specify the key name :(
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        load_from_file = self.config['lam_mu_file']
+
+        with open(load_from_file, 'rb') as f:
+            self.mat = jnp.load(f)
+        
+        # output is (B=1, L=1, 2)
+        self.mat = self.mat[None, None, ...]
+
+
+class RExtendFromFile(EvoparamsFromFile):
+    """
+    same as above, but I have to specify the key name :(
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        load_from_file = self.config['r_extend_file']
+
+        with open(load_from_file, 'rb') as f:
+            self.mat = jnp.load(f)
+        
+        # output is (B=1, L=1)
+        self.mat = self.mat[None, ...]
+
     
 
 ###############################################################################

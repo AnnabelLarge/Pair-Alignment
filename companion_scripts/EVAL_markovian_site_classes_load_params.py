@@ -88,14 +88,6 @@ fill_with_default_values(args)
 share_top_level_args(args)
 
 
-### needed these for larger combined training function; see if you can
-###   get rid of them
-have_acc = False
-have_time_array = True
-have_full_length_alignments = True
-
-
-
 ###########################################################################
 ### 1: SETUP   ############################################################
 ###########################################################################

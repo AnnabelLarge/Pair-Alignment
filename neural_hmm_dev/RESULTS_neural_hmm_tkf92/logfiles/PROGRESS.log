@@ -1,0 +1,8 @@
+Neural TKF92 with markovian site classes over emissions
+  - preset name: base_hmm_load_all 
+  - Loss function: joint
+  - Normalizing losses by: desc_len
+
+2: model init
+
+3: main eval loop

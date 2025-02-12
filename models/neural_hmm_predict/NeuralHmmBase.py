@@ -229,57 +229,13 @@ class NeuralHmmBase(ModuleBase):
         return out
     
     
-    def process_aligned_mats(self,
-                             prefixes,
-                             suffixes,
-                             norm_loss_by,
-                             more_attributes: dict,
-                             seq_padding_idx: int = 0,
-                             gap_tok: int = 43 ):
-        """
-        use this for three things:
-            1. generating the "true_out" for the supervised training task
-            2. extra_features is None
-            3. determining length to normalize by
-        
-        used OUTSIDE of scan function
-        """
-        ### true_out
-        # need three things: gapped ancestor, gapped descendant, and 
-        # state transitions (a -> b transitions)
-        gapped_anc_desc = suffixes[...,:1]
-        from_states = prefixes[...,2][..., None]
-        to_states = suffixes[...,2][..., None]
-        true_out = jnp.concatenate( [ gapped_anc_desc,
-                                      from_states,
-                                      to_states ],
-                                    axis = -1 )
-        
-        # no extra features
-        extra_features = None
-            
-            
-        ### length_for_normalization
-        length = jnp.where(true_out[...,1] != seq_padding_idx, 
-                           True, 
-                           False).sum(axis=1)
-        
-        if norm_loss_by == 'desc_len':
-            num_gaps = jnp.where(true_out[...,1] == gap_tok, 
-                                 True, 
-                                 False).sum(axis=1)
-            length = length - num_gaps
-        
-        return (true_out, extra_features, length)
-
-
     ###########################################################################
     ### evaluating parts of the loss in the scan chunk   ######################
     ###########################################################################
     def neg_loglike_in_scan_fn(self, 
                               forward_pass_outputs, 
                               true_out,
-                              more_attributes: dict,
+                              loss_type,
                               seq_padding_idx: int = 0):
         """
         loss of ONE alignment path, given by alignment_state
@@ -290,8 +246,6 @@ class NeuralHmmBase(ModuleBase):
             - dim2 = 2: from state (0-6) "prev_state", a
             - dim2 = 3: to_state (0-6) "curr_state", b
         """
-        loss_type = more_attributes['loss_type']
-        
         ### unpack inputs
         logprob_emit_match = forward_pass_outputs['FPO_logprob_emit_match']
         logprob_emit_indel = forward_pass_outputs['FPO_logprob_emit_indel']
@@ -357,12 +311,6 @@ class NeuralHmmBase(ModuleBase):
         intermeds_to_stack = {}
         return logprob_perSamp_perTime, intermeds_to_stack
         
-    def compile_metrics_in_scan(self,
-                                **kwargs):
-        """
-        no metrics that depend on forward pass outputs
-        """
-        return dict()
     
     ###########################################################################
     ### get final loss for the whole sequence, from scan chunks   #############
@@ -371,16 +319,13 @@ class NeuralHmmBase(ModuleBase):
                                  scan_fn_outputs,
                                  length_for_normalization,
                                  t_array,
-                                 more_attributes: dict,
+                                 exponential_dist_param,
                                  seq_padding_idx: int = 0):
         # unpack
         logprob_perSamp_perTime, scan_intermeds = scan_fn_outputs
         
         ### if using multiple timepoints, need to logsumexp across them
         if t_array.shape[0] != 1:
-            # logsumexp with marginalization constant
-            exponential_dist_param = more_attributes['exponential_dist_param'][0]
-            
             # logP(t_k) = exponential distribution
             logP_time = ( jnp.log(exponential_dist_param) - 
                           jnp.log(exponential_dist_param) * t_array )

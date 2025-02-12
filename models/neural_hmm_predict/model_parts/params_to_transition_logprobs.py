@@ -601,8 +601,8 @@ class CondTKF92TransitionLogprobs(CondTKF91TransitionLogprobs):
                                         which='scalars')
         
         ## when debugging, output more stuff
-        intermeds = {'FPO_lam': lam,
-                      'FPO_mu': mu}
+        intermeds = {'FPO_lam': lam_mu[...,0],
+                      'FPO_mu': lam_mu[...,1]}
         for key, value in out_dict.items():
             intermeds[f'FPO_{key}'] = value
         return (logprob_trans, intermeds)
@@ -663,8 +663,7 @@ class JointTKF92TransitionLogprobs(CondTKF92TransitionLogprobs):
         T = t_array.shape[0]
         B = max( [ t_array.shape[1], r_extend.shape[0] ] )
         L = r_extend.shape[1]
-        r_extend = jnp.broadcast_to( r_extend[None, :, :],
-                                           (T,B,L) )
+        r_extend = jnp.broadcast_to( r_extend[None,...], (T,B,L) )
         del T, B, L
         
         # need some extra values pre-computed
@@ -784,8 +783,8 @@ class JointTKF92TransitionLogprobs(CondTKF92TransitionLogprobs):
                                         which='scalars')
         
         ## when debugging, output more stuff
-        intermeds = {'FPO_lam': lam,
-                      'FPO_mu': mu}
+        intermeds = {'FPO_lam': lam_mu[...,0],
+                      'FPO_mu': lam_mu[...,1]}
         for key, value in out_dict.items():
             intermeds[f'FPO_{key}'] = value
         return (logprob_trans, intermeds)
