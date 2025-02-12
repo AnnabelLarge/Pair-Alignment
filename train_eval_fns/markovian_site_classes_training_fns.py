@@ -52,8 +52,7 @@ def train_one_batch(batch,
                     }
         
         aux_dict = {k:v for k,v in loss_dict.items() if k != 'loss'}
-        aux_dict = {**aux_dict, **sow_dict}
-        
+        aux_dict['pred_layer_metrics'] = sow_dict
         return loss_dict['loss'], aux_dict
     
     grad_fn = jax.value_and_grad(apply_model, has_aux=True)
@@ -87,7 +86,8 @@ def train_one_batch(batch,
                 'sum_neg_logP': aux_dict['sum_neg_logP'],
                 'ece': ece,
                 'batch_loss': batch_loss,
-                'batch_ave_perpl': jnp.mean(perplexity_perSamp) }
+                'batch_ave_perpl': jnp.mean(perplexity_perSamp),
+                'pred_layer_metrics': aux_dict['pred_layer_metrics'] }
     
     return out_dict, new_trainstate
 
@@ -126,7 +126,8 @@ def eval_one_batch(batch,
                 'sum_neg_logP': loss_dict['sum_neg_logP'],
                 'perplexity_perSamp': perplexity_perSamp,
                 'ece': ece,
-                'batch_loss': loss_dict['loss']}
+                'batch_loss': loss_dict['loss'],
+                'pred_layer_metrics': sow_dict}
     out_dict = {**out_dict, **sow_dict}
     return out_dict
 

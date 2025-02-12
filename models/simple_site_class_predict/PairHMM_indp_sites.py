@@ -10,12 +10,14 @@ from flax import linen as nn
 import jax
 import jax.numpy as jnp
 from jax.scipy.linalg import expm
+from jax.scipy.special import logsumexp
 
 from models.model_utils.BaseClasses import ModuleBase
 from models.simple_site_class_predict.emission_models import (LogEqulVecFromCounts,
                                                        LogEqulVecPerClass,
                                                        LogEqulVecFromFile,
                                                        LG08RateMatFromFile,
+                                                       LG08RateMatFitRateMult,
                                                        LG08RateMatFitBoth,
                                                        SiteClassLogprobs,
                                                        SiteClassLogprobsFromFile)
@@ -93,7 +95,7 @@ class CondPairHMM(ModuleBase):
                                 t_array[:, None,None,None,] )
         
         prob_emit_at_match = expm(to_expm)
-        logprob_emit_at_match = safe_log( jnp.where( prob_emit_at_match )
+        logprob_emit_at_match = safe_log( prob_emit_at_match )
         logprob_emit_at_match = self.apply_weighting(logprob_emit_at_indel = logprob_emit_at_indel,
                                                      logprob_emit_at_match = logprob_emit_at_match)
         
@@ -177,11 +179,11 @@ class CondPairHMM(ModuleBase):
         log_t_grid = jnp.log( t_array[1:] - t_array[:-1] )
         
         # kind of a hack, but repeat the last time array value
-        log_t_grid = jnp.concatenate( [log_t_grid, log_t_grid[-1] ], axis=0)
+        log_t_grid = jnp.concatenate( [log_t_grid, log_t_grid[-1][None] ], axis=0)
         
         logP_perSamp_perTime_withConst = ( logprob_perSamp_perTime +
-                                           logP_time +
-                                           log_t_grid )
+                                           logP_time[:,None] +
+                                           log_t_grid[:,None] )
         
         logP_perSamp_raw = logsumexp(logP_perSamp_perTime_withConst, axis=0)
         
@@ -222,10 +224,11 @@ class CondPairHMM(ModuleBase):
         ### extract   #
         ###############
         ### site class probs
-        class_logits = params_dict['get site class probabilities']['class_logits']
-        class_probs = nn.softmax(class_logits)
-        with open(f'{out_folder}/PARAMS_class_probs.txt','w') as g:
-            [g.write(f'{elem.item()}') for elem in class_probs]
+        if 'get site class probabilities' in params_dict.keys():
+            class_logits = params_dict['get site class probabilities']['class_logits']
+            class_probs = nn.softmax(class_logits)
+            with open(f'{out_folder}/PARAMS_class_probs.txt','w') as g:
+                [g.write(f'{elem.item()}') for elem in class_probs]
         
         ### emissions
         if 'get rate matrix' in params_dict.keys():
@@ -246,7 +249,7 @@ class CondPairHMM(ModuleBase):
                                             max_val = rate_mult_max_val)
     
                 with open(f'{out_folder}/PARAMS_rate_multipliers.txt','w') as g:
-                    [g.write(f'{elem.item()}') for elem in rate_multipliers]
+                    [g.write(f'{elem.item()}') for elem in rate_mult]
                 
                 
         ### transitions
@@ -437,7 +440,7 @@ class JointPairHMMFitBoth(CondPairHMM):
         return log_weight + joint_logprob_per_class
 
 
-class JointPairHMMFitRateMult(CondPairHMM):
+class JointPairHMMFitRateMult(JointPairHMMFitBoth):
     """
     inherit marginalize_over_times, and write_params from CondPairHMM
     

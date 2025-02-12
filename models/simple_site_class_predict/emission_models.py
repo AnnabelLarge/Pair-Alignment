@@ -226,7 +226,7 @@ class LG08RateMatFitRateMult(LG08RateMatFromFile):
         return self.prepare_rate_matrix(exchangeabilities = exchangeabilities,
                                    equilibrium_distributions = equl,
                                    sow_intermediates = sow_intermediates,
-                                   rate_multiplier = self.rate_multiplier)
+                                   rate_multiplier = rate_multiplier)
 
 
 class LG08RateMatFitBoth(LG08RateMatFitRateMult):

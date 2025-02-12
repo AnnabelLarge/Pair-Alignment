@@ -316,10 +316,11 @@ class MarkovSitesJointPairHMM(ModuleBase):
         ### extract   #
         ###############
         ### site class probs
-        class_logits = params_dict['get site class probabilities']['class_logits']
-        class_probs = nn.log_softmax(class_logits)
-        with open(f'{out_folder}/PARAMS_class_probs.txt','w') as g:
-            [g.write(f'{elem.item()}') for elem in class_probs]
+        if 'get site class probabilities' in params_dict.keys():
+            class_logits = params_dict['get site class probabilities']['class_logits']
+            class_probs = nn.log_softmax(class_logits)
+            with open(f'{out_folder}/PARAMS_class_probs.txt','w') as g:
+                [g.write(f'{elem.item()}') for elem in class_probs]
         
         ### emissions
         if 'get rate matrix' in params_dict.keys():

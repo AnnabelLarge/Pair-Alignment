@@ -24,7 +24,6 @@ def init_pairhmm_indp_sites( seq_shapes,
                     'fit_rate_mult_and_matrix']
     assert pred_config['preset_name'] in preset_names, f'valid options: {preset_names}'
     
-    
     # enforce this default
     pred_config['num_tkf_site_classes'] = 1
     

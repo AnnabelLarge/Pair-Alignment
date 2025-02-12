@@ -53,8 +53,8 @@ def main():
     
     
     # ### UNCOMMENT TO RUN IN SPYDER IDE
-    args.task = 'train_pairhmm_markovian_sites'
-    args.configs = 'markovian_one_class.json'
+    args.task = 'train_pairhmm_indp_sites'
+    args.configs = 'DRY-RUN.json'
     
     
     ### helper function to open a single config file and extract additional arguments
