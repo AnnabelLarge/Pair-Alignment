@@ -1,2 +1,0 @@
-insert rate, lambda: 0.34226852655410767
-deletion rate, mu: 0.3430302143096924
