@@ -1,0 +1,42 @@
+PairHMM TKF92 with independent site classes over emissions
+  - Number of site classes for substitution model: 1
+  - Loss function: joint
+  - Normalizing losses by: desc_len
+
+2: model init
+
+3: main training loop
+New best test loss at epoch 0: 5.378867149353027
+New best test loss at epoch 1: 5.377405643463135
+New best test loss at epoch 2: 5.375948429107666
+New best test loss at epoch 3: 5.374504089355469
+New best test loss at epoch 4: 5.373063087463379
+New best test loss at epoch 5: 5.371623992919922
+New best test loss at epoch 6: 5.370202541351318
+New best test loss at epoch 7: 5.368788719177246
+New best test loss at epoch 8: 5.3673834800720215
+New best test loss at epoch 9: 5.365985870361328
+
+4: post-training actions
+Regular stopping after 9 full epochs:
+
+Epoch with lowest average test loss ("best epoch"): 9
+RE-EVALUATING ALL DATA WITH BEST PARAMS:
+
+SCORING ALL TRAIN SEQS
+
+SCORING ALL TEST SEQS
+
+TRAIN SET:
+==========
+final_ave_loss: -4706.85498046875
+final_ave_loss_seqlen_normed: -5.36598539352417
+final_perplexity: 267.02679443359375
+final_ece: 0.004672853276133537
+
+TEST SET:
+==========
+final_ave_loss: -4706.85546875
+final_ave_loss_seqlen_normed: -5.36598539352417
+final_perplexity: 267.02679443359375
+final_ece: 0.004672853276133537

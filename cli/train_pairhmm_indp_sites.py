@@ -234,7 +234,6 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
             ###      and quit training                                     #
             ################################################################
             if jnp.isnan( train_metrics['batch_loss'] ):
-                breakpoint()
                 # save the argparse object by itself
                 args.epoch_idx = epoch_idx
                 with open(f'{args.model_ckpts_dir}/TRAINING_ARGPARSE.pkl', 'wb') as g:

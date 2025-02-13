@@ -164,8 +164,8 @@ class CondTKF91TransitionLogprobs(ModuleBase):
                            jnp.stack([  log_p,   log_q,   log_r,   log_d_e], axis=-1),
                            jnp.stack([log_a_f, log_b_g, log_c_h, log_mis_e], axis=-1)
                           ], axis=-2)
-        return out[:,None,...]
-        
+        return out
+    
     
     def logits_to_indel_rates(self, 
                               lam_mu_logits,
@@ -408,8 +408,7 @@ class JointTKF91TransitionLogprobs(CondTKF91TransitionLogprobs):
                            jnp.stack([  log_p,   log_q,   log_r,   log_d_e], axis=-1),
                            jnp.stack([log_a_f, log_b_g, log_c_h, log_mis_e], axis=-1)
                           ], axis=-2)
-        
-        return out[:,None,...]
+        return out
 
 
 class JointTKF91TransitionLogprobsFromFile(JointTKF91TransitionLogprobs):

@@ -196,10 +196,9 @@ class LG08RateMatFitRateMult(LG08RateMatFromFile):
         with open(exchangeabilities_file,'rb') as f:
             self.lg08_exch = jnp.load(f)
         
-        
+
         ### RATE MULTIPLIERS: (c,)
         if self.num_emit_site_classes > 1:
-            init_rates = 
             self.rate_mult_logits = self.param('rate_multipliers',
                                                nn.initializers.uniform(),
                                                (self.num_emit_site_classes,),

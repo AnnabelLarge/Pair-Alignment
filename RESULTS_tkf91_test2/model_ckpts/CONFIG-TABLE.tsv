@@ -1,5 +1,5 @@
-training_wkdir	RESULTS_dry_run
-rng_seednum	55
+training_wkdir	RESULTS_tkf91_test2
+rng_seednum	201
 data_dir	example_data
 train_dset_splits	['sevenSamp']
 test_dset_splits	['sevenSamp']
@@ -8,7 +8,7 @@ bos_eos_as_match	False
 batch_size	7
 norm_loss_by	desc_len
 loss_type	joint
-num_epochs	1
+num_epochs	10
 early_stop_cond1_atol	0.001
 early_stop_cond2_gap	3
 patience	10

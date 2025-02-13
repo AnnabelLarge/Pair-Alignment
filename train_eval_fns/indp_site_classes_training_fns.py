@@ -65,10 +65,10 @@ def train_one_batch(batch,
     ### other metrics
     # perplexity per sample
     neg_logP_length_normed = aux_dict['neg_logP_length_normed']
-    perplexity_perSamp = jnp.exp(neg_logP_length_normed) #(B,)
+    perplexity_perSamp = jnp.exp(-neg_logP_length_normed) #(B,)
     
     # exponentiated cross entropy
-    ece = jnp.exp(batch_loss)
+    ece = jnp.exp(-batch_loss)
     
     out_dict = {'neg_logP_length_normed': aux_dict['neg_logP_length_normed'],
                 'sum_neg_logP': aux_dict['sum_neg_logP'],
@@ -100,10 +100,10 @@ def eval_one_batch(batch,
     ### other metrics
     # perplexity per sample
     neg_logP_length_normed = loss_dict['neg_logP_length_normed']
-    perplexity_perSamp = jnp.exp(neg_logP_length_normed) #(B,)
+    perplexity_perSamp = jnp.exp(-neg_logP_length_normed) #(B,)
     
     # exponentiated cross entropy
-    ece = jnp.exp(loss_dict['loss'])
+    ece = jnp.exp(-loss_dict['loss'])
     
     out_dict = {'neg_logP_length_normed': loss_dict['neg_logP_length_normed'],
                 'sum_neg_logP': loss_dict['sum_neg_logP'],
