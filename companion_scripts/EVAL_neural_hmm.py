@@ -212,15 +212,15 @@ t_array = test_dset.return_time_array()
 ### eval_fn used in training loop (to monitor progress)
 # pass arguments into eval_one_batch; make a parted_eval_fn that doesn't
 #   return any intermediates
-no_returns = {'encoder_sow_outputs': False,
-              'decoder_sow_outputs': False,
-              'finalpred_sow_outputs': False,
-              'gradients': False,
-              'weights': False,
-              'ancestor_embeddings': False,
-              'descendant_embeddings': False,
-              'forward_pass_outputs': False,
-              'final_logprobs': False}
+# no_returns = {'encoder_sow_outputs': False,
+#               'decoder_sow_outputs': False,
+#               'finalpred_sow_outputs': False,
+#               'gradients': False,
+#               'weights': False,
+#               'ancestor_embeddings': False,
+#               'descendant_embeddings': False,
+#               'forward_pass_outputs': False,
+#               'final_logprobs': False}
 extra_args_for_eval = dict()
 
 # if this is a transformer model, will have extra arguments for eval funciton
@@ -230,7 +230,7 @@ if (args.anc_model_type == 'Transformer' or args.desc_model_type == 'Transformer
 parted_eval_fn = partial( eval_one_batch,
                           all_model_instances = all_model_instances,
                           norm_loss_by = args.norm_loss_by,
-                          interms_for_tboard = no_returns,
+                          interms_for_tboard = args.interms_for_tboard,
                           t_array = t_array,  
                           loss_type = args.loss_type,
                           exponential_dist_param = args.pred_config['exponential_dist_param'],
@@ -267,3 +267,4 @@ with jax.disable_jit():
                        out_arrs_dir = args.out_arrs_dir,
                        outfile_prefix = f'test-set',
                        tboard_writer = writer)
+    

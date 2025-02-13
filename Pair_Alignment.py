@@ -30,7 +30,8 @@ def main():
     
     ### which program do you want to run?
     valid_tasks = ['train_pairhmm_indp_sites',
-                   'train_pairhmm_markovian_sites']
+                   'train_pairhmm_markovian_sites',
+                   'train_neural_hmm']
     
     parser.add_argument('-task',
                         type=str,
@@ -54,7 +55,7 @@ def main():
     
     # ### UNCOMMENT TO RUN IN SPYDER IDE
     # args.task = 'train_pairhmm_indp_sites'
-    # args.configs = 'tkf91_run2.json'
+    # args.configs = 'tkf92_load_params.json'
     
     
     ### helper function to open a single config file and extract additional arguments
@@ -86,20 +87,19 @@ def main():
             from cli.train_pairhmm_markovian_sites import train_pairhmm_markovian_sites as train
             from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
 
-        elif args.pred_model_type == 'feedforward':
+        elif args.pred_model_type == 'neural_hmm':
+            from cli.train_neural_hmm import train_neural_hmm as train
             from dloaders.full_len_dset import full_len_dset as init_dataloaders
             raise NotImplementedError("make new train script")
 
-        elif args.pred_model_type == 'neural_hmm':
-            from dloaders.full_len_dset import full_len_dset as init_dataloaders
+        elif args.pred_model_type == 'feedforward':
             raise NotImplementedError("make new train script")
+            from dloaders.full_len_dset import full_len_dset as init_dataloaders
+
         
         # train model
         dload_lst = init_dataloaders(args, 'train')
         train(args, dload_lst)
-
-        # with jax.disable_jit():
-            # print('DISABLING JIT')
 
 
 if __name__ == '__main__':

@@ -43,7 +43,10 @@ def init_time_array(args):
         single_time_from_file = False
     
     elif (args.pred_model_type != 'feedforward') and (args.pred_config['times_from'] == 't_array_from_file'):
-        times_file = args.pred_config['filenames']['times']
+        try:
+            times_file = args.pred_config['filenames']['times']
+        except:
+            times_file = args.pred_config['times_file']
         
         # read file
         times_from_array = []

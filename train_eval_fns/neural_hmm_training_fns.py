@@ -23,6 +23,7 @@ from functools import partial
 # flax, jax, and optax
 import jax
 import jax.numpy as jnp
+from jax import Array
 from jax import config
 from flax import linen as nn
 import optax
@@ -45,9 +46,10 @@ def train_one_batch(batch,
                     loss_type,
                     exponential_dist_param,
                     concat_fn,
-                    gap_tok = 43,
-                    seq_padding_idx = 0,
-                    align_idx_padding = -9):
+                    update_grads: bool = True,
+                    gap_tok: int = 43,
+                    seq_padding_idx: int = 0,
+                    align_idx_padding: int = -9):
     """
     Jit-able function to apply the model to one batch of samples, evaluate loss
     and collect gradients, then update model parameters
@@ -66,6 +68,7 @@ def train_one_batch(batch,
         > norm_loss_by: what length to normalize losses by
         > interms_for_tboard: decide whether or not to output intermediate 
                              histograms and scalars
+        > update_grads: only turn off when debugging
 
     static inputs, specific to neural hmm:
         > t_array: one time array for all samples (T,)
@@ -296,39 +299,45 @@ def train_one_batch(batch,
     ###########################
     ### RECORD UPDATES MADE   #
     ###########################
-    ### get new updates and optimizer states
-    encoder_updates, new_encoder_opt_state = encoder_trainstate.tx.update(enc_gradient, 
-                                                                          encoder_trainstate.opt_state, 
-                                                                          encoder_trainstate.params)
+    if update_grads:
+        ### get new updates and optimizer states
+        encoder_updates, new_encoder_opt_state = encoder_trainstate.tx.update(enc_gradient, 
+                                                                              encoder_trainstate.opt_state, 
+                                                                              encoder_trainstate.params)
+        
+        decoder_updates, new_decoder_opt_state  = decoder_trainstate.tx.update(dec_gradient, 
+                                                                               decoder_trainstate.opt_state, 
+                                                                               decoder_trainstate.params)
+        
+        finalpred_updates, new_finalpred_opt_state  = finalpred_trainstate.tx.update(finalpred_gradient, 
+                                                                                     finalpred_trainstate.opt_state, 
+                                                                                     finalpred_trainstate.params)
+        
+        ### apply updates to parameter, trainstate object
+        # wrapper for encoder, in case I ever use batch norm
+        new_encoder_trainstate = encoder_instance.update_seq_embedder_tstate(tstate = encoder_trainstate,
+                                                            new_opt_state = new_encoder_opt_state,
+                                                            optim_updates = encoder_updates)
+        del new_encoder_opt_state
+        
+        # standard update for decoder
+        new_decoder_params = optax.apply_updates(decoder_trainstate.params, 
+                                                 decoder_updates)
+        new_decoder_trainstate = decoder_trainstate.replace(params = new_decoder_params,
+                                                            opt_state = new_decoder_opt_state)
+        del new_decoder_opt_state
+        
+        # standard update for prediction head
+        new_finalpred_params = optax.apply_updates(finalpred_trainstate.params, 
+                                                   finalpred_updates)
+        new_finalpred_trainstate = finalpred_trainstate.replace(params = new_finalpred_params,
+                                                                opt_state = new_finalpred_opt_state)
+        del new_finalpred_opt_state
     
-    decoder_updates, new_decoder_opt_state  = decoder_trainstate.tx.update(dec_gradient, 
-                                                                           decoder_trainstate.opt_state, 
-                                                                           decoder_trainstate.params)
-    
-    finalpred_updates, new_finalpred_opt_state  = finalpred_trainstate.tx.update(finalpred_gradient, 
-                                                                                 finalpred_trainstate.opt_state, 
-                                                                                 finalpred_trainstate.params)
-    
-    ### apply updates to parameter, trainstate object
-    # wrapper for encoder, in case I ever use batch norm
-    new_encoder_trainstate = encoder_instance.update_seq_embedder_tstate(tstate = encoder_trainstate,
-                                                        new_opt_state = new_encoder_opt_state,
-                                                        optim_updates = encoder_updates)
-    del new_encoder_opt_state
-    
-    # standard update for decoder
-    new_decoder_params = optax.apply_updates(decoder_trainstate.params, 
-                                             decoder_updates)
-    new_decoder_trainstate = decoder_trainstate.replace(params = new_decoder_params,
-                                                        opt_state = new_decoder_opt_state)
-    del new_decoder_opt_state
-    
-    # standard update for prediction head
-    new_finalpred_params = optax.apply_updates(finalpred_trainstate.params, 
-                                               finalpred_updates)
-    new_finalpred_trainstate = finalpred_trainstate.replace(params = new_finalpred_params,
-                                                            opt_state = new_finalpred_opt_state)
-    del new_finalpred_opt_state
+    elif not update_grads:
+        new_encoder_trainstate = encoder_trainstate
+        new_decoder_trainstate = decoder_trainstate
+        new_finalpred_trainstate = finalpred_trainstate
     
     
     ###############
@@ -379,12 +388,13 @@ def train_one_batch(batch,
                                varname_to_write = varname)
     
     # updates
-    for (varname, grad) in [('encoder_updates', encoder_updates),
-                            ('decoder_updates', decoder_updates),
-                            ('finalpred_updates', finalpred_updates)]:
-        save_to_out_dict(value_to_save = grad,
-                               flag = save_updates,
-                               varname_to_write = varname)
+    if update_grads:
+        for (varname, grad) in [('encoder_updates', encoder_updates),
+                                ('decoder_updates', decoder_updates),
+                                ('finalpred_updates', finalpred_updates)]:
+            save_to_out_dict(value_to_save = grad,
+                                   flag = save_updates,
+                                   varname_to_write = varname)
     
 
     # always returned from out_dict:
@@ -424,9 +434,9 @@ def eval_one_batch(batch,
                    loss_type,
                    exponential_dist_param,
                    concat_fn,
-                   gap_tok = 43,
-                   seq_padding_idx = 0,
-                   align_idx_padding = -9,
+                   gap_tok: int = 43,
+                   seq_padding_idx: int = 0,
+                   align_idx_padding: int = -9,
                    extra_args_for_eval: dict = dict(),
                    **kwargs):
     """
@@ -684,8 +694,8 @@ def eval_one_batch(batch,
     
     # instead of "final_logits," write whatever comes out of forward_pass_outputs
     if return_forward_pass_outputs:
-        for varname_to_write, value_to_save in intermed_dict.items():
-            if varname_to_write.startswith('FPO_'):
+        for varname_to_write, value_to_save in intermeds_to_stack.items():
+            if varname_to_write.startswith('FPO_') and isinstance(value_to_save, Array) :
                 out_dict[varname_to_write] = value_to_save
     
     # always returned from out_dict:

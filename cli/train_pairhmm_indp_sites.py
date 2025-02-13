@@ -94,7 +94,9 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
         if not args.update_grads:
             g.write('DEBUG MODE: DISABLING GRAD UPDATES\n\n')
             
-        g.write(f'PairHMM TKF92 with independent site classes over emissions\n')
+        g.write( (f'PairHMM {args.pred_config["indel_model_type"]} '+
+                  f'with independent site classes over emissions\n')
+                )
         g.write( (f'  - Number of site classes for substitution model: '+
                   f'{args.pred_config["num_emit_site_classes"]}\n' )
                 )
@@ -234,6 +236,10 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
             ###      and quit training                                     #
             ################################################################
             if jnp.isnan( train_metrics['batch_loss'] ):
+                with open(args.logfile_name,'a') as g:
+                    g.write('\n')
+                    g.write(f'NaN loss at epoch {epoch_idx}, batch {batch_idx}\n')
+                    
                 # save the argparse object by itself
                 args.epoch_idx = epoch_idx
                 with open(f'{args.model_ckpts_dir}/TRAINING_ARGPARSE.pkl', 'wb') as g:
