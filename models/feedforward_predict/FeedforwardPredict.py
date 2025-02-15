@@ -198,57 +198,10 @@ class FeedforwardPredict(ModuleBase):
         
         return {'FPO_final_logits': final_logits}
     
-    
-    def process_aligned_mats(self,
-                             prefixes,
-                             suffixes,
-                             norm_loss_by,
-                             more_attributes: dict,
-                             seq_padding_idx: int = 0,
-                             gap_tok: int = 43):
-        """
-        use this for three things:
-            1. generating the "true_out" for the supervised training task
-            2. preparing the alignment_state for use during training 
-               ("extra_features")
-            3. determining length to normalize by
-        
-        used OUTSIDE of scan function
-        """
-        add_prev_alignment_info = more_attributes['add_prev_alignment_info']
-        
-        ### true_out
-        # only need the alignment-augmented descendant; dim0=0
-        true_out = suffixes[...,0]
-        
-        
-        ### optionally, one-hot encode the alignment state as an 
-        ### extra input feature (found at dim0=1)
-        if add_prev_alignment_info:
-            extra_features = activation.one_hot( x = prefixes[...,1], 
-                                                 num_classes = 6 )
-        else:
-            extra_features = None
-            
-            
-        ### length_for_normalization
-        length = jnp.where(true_out != seq_padding_idx, 
-                           True, 
-                           False).sum(axis=1)
-        
-        if norm_loss_by == 'desc_len':
-            num_gaps = jnp.where(true_out == gap_tok, 
-                                 True, 
-                                 False).sum(axis=1)
-            length = length - num_gaps
-        
-        return (true_out, extra_features, length)
-        
 
     def neg_loglike_in_scan_fn(self, 
                                forward_pass_outputs, 
                                true_out,
-                               more_attributes: dict,
                                seq_padding_idx: int = 0):
         """
         Cross-entropy loss per position, using a chunk over alignment length
@@ -304,7 +257,6 @@ class FeedforwardPredict(ModuleBase):
     def evaluate_loss_after_scan(self, 
                                  scan_fn_outputs,
                                  length_for_normalization,
-                                 more_attributes: dict,
                                  seq_padding_idx: int = 0,
                                  **kwargs):
         # unpack; remove dummy time from sum_neg_logP

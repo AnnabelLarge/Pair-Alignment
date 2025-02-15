@@ -311,8 +311,7 @@ def create_all_tstates(seq_shapes,
                        pred_model_type: str, 
                        anc_enc_config: dict, 
                        desc_dec_config: dict, 
-                       pred_config: dict,
-                       dummy_t_array = None
+                       pred_config: dict
                        ):
     largest_seqs, largest_aligns = seq_shapes
     

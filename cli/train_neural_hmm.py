@@ -116,9 +116,6 @@ def train_neural_hmm(args, dataloader_dict: dict):
         g.write('\n')
         g.write(f'2: model init\n')
     
-    ######################
-    ### for all models   #
-    ######################
     # init the optimizer
     tx = build_optimizer(args)
     
@@ -131,14 +128,16 @@ def train_neural_hmm(args, dataloader_dict: dict):
     
     
     ### init sizes
-    global_seq_max_length = test_dset.global_seq_max_length
+    global_seq_max_length = max([training_dset.global_seq_max_length,
+                                 test_dset.global_seq_max_length])
     largest_seqs = (args.batch_size, global_seq_max_length)
     
     if args.use_scan_fns:
         max_dim1 = args.chunk_length
     
     elif not args.use_scan_fns:
-        max_dim1 = test_dset.global_align_max_length - 1
+        max_dim1 = max([training_dset.global_align_max_length,
+                        test_dset.global_align_max_length]) - 1
       
     largest_aligns = (args.batch_size, max_dim1)
     del max_dim1
@@ -221,7 +220,8 @@ def train_neural_hmm(args, dataloader_dict: dict):
                               t_array = t_array,  
                               loss_type = args.loss_type,
                               exponential_dist_param = args.pred_config['exponential_dist_param'],
-                              concat_fn = concat_fn
+                              concat_fn = concat_fn,
+                              extra_args_for_eval = extra_args_for_eval
                               )
     
     # jit compile this eval function
@@ -627,7 +627,8 @@ def train_neural_hmm(args, dataloader_dict: dict):
                               t_array = t_array,  
                               loss_type = args.loss_type,
                               exponential_dist_param = args.pred_config['exponential_dist_param'],
-                              concat_fn = concat_fn
+                              concat_fn = concat_fn,
+                              extra_args_for_eval = extra_args_for_eval
                               )
     del no_returns, extra_args_for_eval
     

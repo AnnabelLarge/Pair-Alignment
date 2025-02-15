@@ -29,9 +29,7 @@ def main():
     parser = argparse.ArgumentParser(prog='Pair_Alignment')
     
     ### which program do you want to run?
-    valid_tasks = ['train_pairhmm_indp_sites',
-                   'train_pairhmm_markovian_sites',
-                   'train_neural_hmm',
+    valid_tasks = ['train',
                    'get_pairhmm_controls',
                    'get_feedforward_controls']
     
@@ -56,7 +54,7 @@ def main():
     
     
     # ### UNCOMMENT TO RUN IN SPYDER IDE
-    # args.task = 'train_pairhmm_indp_sites'
+    # args.task = 'train'
     # args.configs = 'tkf92_load_params.json'
     
     
@@ -64,7 +62,6 @@ def main():
     def read_config_file(config_file):
         with open(config_file, 'r') as f:
             contents = json.load(f)
-            
             t_args = argparse.Namespace()
             t_args.__dict__.update(contents)
             args = parser.parse_args(namespace=t_args)
@@ -72,9 +69,9 @@ def main():
 
 
     ###########################################################################
-    ### TRAINING OPTIONS   ####################################################
+    ### TRAINING   ############################################################
     ###########################################################################
-    if args.task.startswith('train'):
+    if args.task == 'train':
         # read argparse
         assert args.configs.endswith('.json'), print("input is one JSON file")
         print(f'TRAINING WITH: {args.configs}')
@@ -92,10 +89,9 @@ def main():
         elif args.pred_model_type == 'neural_hmm':
             from cli.train_neural_hmm import train_neural_hmm as train
             from dloaders.full_len_dset import full_len_dset as init_dataloaders
-            raise NotImplementedError("make new train script")
 
         elif args.pred_model_type == 'feedforward':
-            raise NotImplementedError("make new train script")
+            from cli.train_feedforward import train_feedforward as train
             from dloaders.full_len_dset import full_len_dset as init_dataloaders
 
         
@@ -115,7 +111,7 @@ def main():
     
     # for feedforward seq2seq (conditional loss): compare to naive 
     #   frequency-based counts
-    elif args.task = 'get_feedforward_controls':
+    elif args.task == 'get_feedforward_controls':
         from cli.get_feedforward_controls import get_feedforward_controls
         get_feedforward_controls(args)
     

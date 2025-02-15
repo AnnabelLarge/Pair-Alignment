@@ -198,7 +198,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     # when to save/what to save
     best_epoch = -1
     best_test_loss = 999999
-    best_trainstates = tuple()
+    best_trainstates = all_trainstates
     
     # quit training if test loss increases for X epochs in a row
     prev_test_loss = 999999
