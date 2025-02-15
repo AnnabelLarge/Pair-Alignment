@@ -54,7 +54,9 @@ def init_time_array(args):
     return times_from_array, single_time_from_file 
         
    
-def init_counts_dset(args, task):
+def init_counts_dset(args, 
+                     task, 
+                     with_rng=True):
     """
     initialize the dataloaders
     """
@@ -62,9 +64,10 @@ def init_counts_dset(args, task):
     #########################################################
     ### set random seeds for numpy and pytorch separately   #
     #########################################################
-    torch.manual_seed(args.rng_seednum)
-    random.seed(args.rng_seednum)
-    np.random.seed(args.rng_seednum)
+    if with_rng:
+        torch.manual_seed(args.rng_seednum)
+        random.seed(args.rng_seednum)
+        np.random.seed(args.rng_seednum)
     
     
     #################################

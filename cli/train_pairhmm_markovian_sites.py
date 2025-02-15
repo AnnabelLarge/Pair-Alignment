@@ -515,17 +515,18 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     ###########################################
     ### update the logfile with final losses  #
     ###########################################
-    with open(args.logfile_name,'a') as g:
-        g.write(f'TRAIN SET:\n')
-        g.write(f'==========\n')
-        for key, val in train_summary_stats.items():
-            g.write(f'{key}: {val}\n')
-        g.write('\n')
-        
-        g.write(f'TEST SET:\n')
-        g.write(f'==========\n')
-        for key, val in test_summary_stats.items():
-            g.write(f'{key}: {val}\n')
+    to_write = {'RUN': args.training_wkdir,
+                'train_ave_{args.loss_type}_loss_seqlen_normed': train_summary_stats['final_ave_loss_seqlen_normed'],
+                'train_perplexity': train_summary_stats['final_perplexity'],
+                'train_ece': train_summary_stats['final_ece'] ,
+                'test_ave_{args.loss_type}_loss_seqlen_normed': test_summary_stats['final_ave_loss_seqlen_normed'],
+                'test_perplexity': test_summary_stats['final_perplexity'],
+                'test_ece': test_summary_stats['final_ece']
+                }
+    
+    with open(f'{args.logfile_dir}/AVE-LOSSES.tsv','w') as g:
+        for k, v in to_write.items():
+            g.write(f'{k}\t{v}\n')
             
     post_training_real_end = wall_clock_time()
     post_training_cpu_end = process_time()

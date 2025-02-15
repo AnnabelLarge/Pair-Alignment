@@ -31,7 +31,9 @@ def main():
     ### which program do you want to run?
     valid_tasks = ['train_pairhmm_indp_sites',
                    'train_pairhmm_markovian_sites',
-                   'train_neural_hmm']
+                   'train_neural_hmm',
+                   'get_pairhmm_controls',
+                   'get_feedforward_controls']
     
     parser.add_argument('-task',
                         type=str,
@@ -100,7 +102,24 @@ def main():
         # train model
         dload_lst = init_dataloaders(args, 'train')
         train(args, dload_lst)
-
-
+        
+    
+    ###########################################################################
+    ### GET CONTROLS   ########################################################
+    ###########################################################################
+    # for pairhmm and neural_hmm: compare score to pairhmm where
+    #   transition and emission matrices are derived from counts directly
+    elif args.task == 'get_pairhmm_controls':
+        from cli.get_pairhmm_controls import get_pairhmm_controls
+        get_pairhmm_controls(args)
+    
+    # for feedforward seq2seq (conditional loss): compare to naive 
+    #   frequency-based counts
+    elif args.task = 'get_feedforward_controls':
+        from cli.get_feedforward_controls import get_feedforward_controls
+        get_feedforward_controls(args)
+    
+    
+    
 if __name__ == '__main__':
     main()

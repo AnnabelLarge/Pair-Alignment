@@ -247,6 +247,7 @@ def load_aligned_mats(data_dir,
     if pred_model_type == 'feedforward':
         ins_pos = np.argwhere( zero_padded_mat[:,:,0] == gap_idx )
         zero_padded_mat[ins_pos[:,0], ins_pos[:,1], 1] += emission_alphabet_size
+        zero_padded_mat = zero_padded_mat[:,:,1:]
     
     # pairHMM: don't need alignment indices
     elif pred_model_type.startswith('pairhmm'):
