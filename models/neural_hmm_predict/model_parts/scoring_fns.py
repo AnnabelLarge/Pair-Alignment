@@ -11,45 +11,9 @@ from jax import numpy as jnp
 
 SMALLEST_FLOAT32 = jnp.finfo('float32').smallest_normal
 
-#############
-### helpers #
-#############
-def matrix_indexing_fn(logprob_mat, index_vec, offset):
-    row = index_vec[0]-offset
-    col = index_vec[1]-offset
-    return logprob_mat[row, col]
-
-vmapped_matrix_indexing = jax.vmap(matrix_indexing_fn, in_axes = (0,0, None))
-
-
-# def trans_mat_at_eos_indexing_fn(t_mat, index_vec, offset=3):
-#     """
-#     final transition probability = 1 - exp( logP(x -> ins) )
-    
-#     offset should do the following re-mapping-
-#     Match: match_tok -> 0
-#     Ins: ins_tok -> 1
-#     Del: del_tok -> 2
-#     Start: start_tok -> 3
-#     End: end_tok -> 3
-#     """
-#     row_idx = index_vec[0]-offset
-#     prob_X_to_end = 1 - jnp.exp(t_mat[row_idx, 1])
-#     prob_X_to_end = jnp.where(prob_X_to_end != 0,
-#                               prob_X_to_end,
-#                               SMALLEST_FLOAT32)
-#     logprob_X_to_end = jnp.log(prob_X_to_end)
-#     return logprob_X_to_end
-# vmapped_eos_trans_mat_indexing = jax.vmap(trans_mat_at_eos_indexing_fn,
-#                                           in_axes = (0,0,None))
-
-
-
-############################
-### main scoring functions #
-############################
 def score_transitions(alignment_state, 
-                      trans_mat, 
+                      logprob_trans_mat, 
+                      token_offset = 1,
                       padding_idx = 0):
     """
     inputs:
@@ -58,7 +22,7 @@ def score_transitions(alignment_state,
       > dim2=0: prev position's state
       > dim2=1: curr position's state (the position you're trying to predict)
       
-    trans_mat: (T, B, max_align_len-1, 4, 4) OR (T, 1, 1, 4, 4)
+    logprob_trans_mat: (T, B, max_align_len-1, 4, 4) OR (T, 1, 1, 4, 4)
     
     padding_idx: int
       > zero for align_path
@@ -73,83 +37,48 @@ def score_transitions(alignment_state,
     alignment_state = jnp.where(alignment_state == 5, 4, alignment_state)
     
     
-    ### dims
-    # batch and length from align_path_offset
+    ### reshape if needed
+    # dims
+    T = logprob_trans_mat.shape[0]
     B = alignment_state.shape[0]
     L = alignment_state.shape[1] # max_align_len - 1
+    num_possible_trans = logprob_trans_mat.shape[3] #should be equal to 4
     
-    # time and possible transitions from trans_mat
-    T = trans_mat.shape[0]
-    num_possible_trans = trans_mat.shape[3] #should be equal to 4
-    
-    
-    ########################
-    ### Sequential Scoring #
-    ########################
-    ### make new views of trans_mat for vmapped function
-    # if there's one transition matrix for all lengths, 
-    #   need to broadcast to B and L:
-    #   (T, B, 1, 4, 4) -> (T, B, L, 4, 4)
-    if trans_mat.shape[2] == 1:
-        new_shape = (T, B, L, num_possible_trans, num_possible_trans)
-        trans_mat = jnp.broadcast_to(trans_mat, new_shape)
-        del new_shape 
-    
-    # reshape: (T, B, L, 4, 4) -> (T*B*L, 4, 4)
-    new_shape = (T*B*L, num_possible_trans, num_possible_trans)
-    trans_mat_reshape = trans_mat.reshape( new_shape )
-    del new_shape
-    
-
-    ###  make new views of align_path_offset for vmapped function
-    # broadcast to times T: (B, L, 2) -> (T, B, L, 2)
-    new_shape = (T, B, L, alignment_state.shape[2])
-    alignment_state_reshape = jnp.broadcast_to(alignment_state[None,:,:,:],
-                                               new_shape)
-    del new_shape
-    
-    # reshape: (T, B, L, 2) -> (T*B*L, 2)
-    new_shape = ( T*B*L, alignment_state_reshape.shape[3] )
-    alignment_state_reshape = alignment_state_reshape.reshape( new_shape )
-    del new_shape
+    # final mat
+    final_mat_shape = (T, B, L, num_possible_trans, num_possible_trans)
+    logprob_trans_mat = jnp.broadcast_to(logprob_trans_mat, new_shape)
     
     
-    ### use vmapped function (could probably turn into vmapped take, but
-    ###    do that later)
-    # offset of 1 to map:
-    # Match: 1 -> 0
-    # Ins: 2 -> 1
-    # Del: 3 -> 2
-    # S/E: 4 -> 3
-    out_by_vmap_raw = vmapped_matrix_indexing(trans_mat_reshape, 
-                                              alignment_state_reshape,
-                                              1)
+    ### scoring
+    # get rows: T, B, L, 1, num_possible_trans
+    prev_state = alignment_state[..., 0][None, ..., None,None] - token_offset
+    interm = jnp.take_along_axis(logprob_trans_mat, 
+                                 prev_state,
+                                 axis=-2)  
     
-    # reshape back to original dims: (T*B*L, ) -> (T, B, L)
-    raw_logprobs = out_by_vmap_raw.reshape( ( T, B, L ) )
+    # get columns: T, B, L, 1, 1
+    curr_state = alignment_state[..., 1][None, ..., None,None] - token_offset
+    raw_logprobs = jnp.take_along_axis(interm, 
+                                       curr_state, 
+                                       axis=-1)  
     
-    # clean up variables
-    del trans_mat_reshape, alignment_state_reshape, out_by_vmap_raw
+    # squash to (T, B, L); mask
+    raw_logprobs = raw_logprobs[...,0,0] 
     
     
-    #####################
-    ### Mask and return #
-    #####################
-    # padding shouldn't contribute to scoring each position
-    padding_mask =  ( (alignment_state[:,:,0] != padding_idx) &
-                      (alignment_state[:,:,1] != padding_idx) )
+    ### mask and return
+    padding_mask =  ( (alignment_state[...,0] != padding_idx) &
+                      (alignment_state[...,1] != padding_idx) )
     
-    final_logprobs = jnp.where( padding_mask[None,:,:],
-                                raw_logprobs,
-                                0)
+    final_logprobs = raw_logprobs * padding_mask[None, ...]
     
     return final_logprobs
 
 
-
 def score_substitutions(true_out,
-                        subs_mat,
-                        token_offset = 3):
+                        logprob_subs_mat,
+                        token_offset = 3,
+                        padding_idx = -1):
     """
     inputs:
     -------
@@ -157,9 +86,8 @@ def score_substitutions(true_out,
       > (dim0=0): gapped ancestor seq
       > (dim0=1): gapped descendant seq
     
-    subs_mat: (T, B, max_align_len-1, alph, alph)
+    logprob_subs_mat: (T, B, max_align_len-1, alph, alph)
       > this was already broadcasted to full (T, B, max_align_len-1, alph, alph)
-        by MatchEmissionsLogprobs class
      
     token_offset: int; used to map
         A: n -> 0
@@ -173,55 +101,34 @@ def score_substitutions(true_out,
     final_logprobs: (T, B, max_align_len-1)
       
     """
-    ### dims
-    # get B and L from anc_desc_pairs
-    B = true_out.shape[0]
-    L = true_out.shape[1]
+    # get rows: T, B, L, 1, num_possible_trans
+    anc_idx = true_out[..., 0][None, ..., None,None] - token_offset
+    interm = jnp.take_along_axis(logprob_subs_mat, 
+                                 anc_idx,
+                                 axis=-2)  
     
-    # get number of times and alphabet size from subs_mat
-    T = subs_mat.shape[0]
-    alph = subs_mat.shape[3]
+    # get columns: T, B, L, 1, 1
+    desc_idx = true_out[..., 1][None, ..., None,None] - token_offset
+    raw_logprobs = jnp.take_along_axis(interm, 
+                                       desc_idx, 
+                                       axis=-1)  
     
-    
-    ### make new views of subs_mat for vmapped function
-    # reshape: (T, B, L, alph, alph) -> (T*B*L, alph, alph)
-    new_shape = (T*B*L, alph, alph)
-    subs_mat_reshaped = subs_mat.reshape( new_shape )
-    del new_shape
-    
-    
-    ### make new views of anc_desc_pairs for vmapped functions
-    # broadcast to times T: (B, L, 2) -> (T, B, L, 2)
-    new_shape = (T, B, L, true_out.shape[2])
-    true_out_reshaped = jnp.broadcast_to(true_out, new_shape)
-    del new_shape
-    
-    # reshape: (T, B, L, 2) -> (T*B*L, 2)
-    new_shape = ( T*B*L, true_out_reshaped.shape[3] )
-    true_out_reshaped = true_out_reshaped.reshape( new_shape )
-    del new_shape
+    # squash to (T, B, L); mask
+    raw_logprobs = raw_logprobs[...,0,0] 
     
     
-    ### index the substitution matrix
-    # offset of token_offset to map:
-    # A: n -> 0
-    # B: n+1 -> 1
-    # C: n+2 -> 2
-    # and so on, for rest of alphabet; usually this is 3
-    raw_logprobs = vmapped_matrix_indexing(subs_mat_reshaped,
-                                           true_out_reshaped,
-                                           token_offset)
+    ### mask and return
+    padding_mask =  ( (true_out[...,0] != padding_idx) &
+                      (true_out[...,1] != padding_idx) )
     
-    # reshape back to original dims: (T*B*L, ) -> (T, B, L)
-    final_logprobs = raw_logprobs.reshape( ( T, B, L ) )
+    final_logprobs = raw_logprobs * padding_mask[None, ...]
     
     return final_logprobs
 
 
-
 def score_indels(true_out: jnp.array, 
-                 scoring_vec: jnp.array, 
-                 which_seq: int,
+                 logprob_scoring_vec: jnp.array, 
+                 which_seq: str,
                  token_offset: int=3):
     """
     inputs:
@@ -230,9 +137,9 @@ def score_indels(true_out: jnp.array,
       > dim2=0: gapped ancestor
       > dim2=1: gapped descendant
       
-    scoring_vec: (B, max_align_len - 1, alph) OR (1, 1, alph)
+    logprob_scoring_vec: (B, max_align_len - 1, alph) OR (1, 1, alph)
     
-    which_seq: 0 to score ancestor, 1 to score descendant
+    which_seq: 'anc' to score ancestor, 'desc' to score descendant
      
     token_offset: int; used to map
         A: n -> 0
@@ -246,23 +153,95 @@ def score_indels(true_out: jnp.array,
     final_logprobs: (T, B, max_align_len - 1)
       
     """
-    residue_tokens = true_out[:,:,which_seq] - token_offset
+    ### determine which to index
+    if which_seq == 'anc':
+        which_seq = 0
     
+    elif which_seq == 'desc':
+        which_seq = 1
+    
+    else:
+        which_seq = None
+    
+    
+    ### reshape if needed
     # dims
     B = residue_tokens.shape[0]
     L = residue_tokens.shape[1]
     alph = scoring_vec.shape[2]
     
-    ### if one scoring_vec for all positions, need new view of scoring_vec 
-    ###   for take_along_axis
-    if scoring_vec.shape[1] == 1:
-        # broadcast up: (B, 1, alph) -> (B, L, alph)
-        new_shape = (B, L, alph)
-        scoring_vec = jnp.broadcast_to(scoring_vec, new_shape)
-        del new_shape
-
-    final_logprobs = jnp.take_along_axis(arr=scoring_vec, 
-                                         indices=residue_tokens[:,:,None], 
-                                         axis=-1)[:,:,0]
+    # reshape
+    new_shape = (B, L, alph)
+    logprob_scoring_vec = jnp.broadcast_to(logprob_scoring_vec, new_shape)
+    
+    
+    ### index
+    residue_tokens = true_out[:,:,which_seq] - token_offset
+    final_logprobs = jnp.take_along_axis(arr=logprob_scoring_vec, 
+                                         indices=residue_tokens[...,None], 
+                                         axis=-1)[...,0]
+    
+    
+    ### mask
+    padding_mask = (residue_tokens != padding_idx)
+    final_logprobs = final_logprobs * padding_mask[None,...]
     
     return final_logprobs
+
+
+
+
+
+
+if __name__ == '__main__':
+    import jax
+    from jax import numpy as jnp
+    import numpy as np
+    
+    
+    T = 6
+    B = 3
+    L = 5
+    alph = 4
+    
+    rngkey = jax.random.key(42)
+    
+    mat = jax.random.randint( key=rngkey,
+                              shape=(T,B,L,alph,alph),
+                              minval = 1,
+                              maxval = 1000 )
+    
+    indices = jnp.array([ [[1,2,3,4,1],
+                           [4,3,2,1,4]] ,
+                         
+                          [[2,3,4,1,0],
+                           [3,2,1,4,0]] ,
+                         
+                          [[1,0,0,0,0],
+                           [4,0,0,0,0]] ]     
+                         )
+    indices = jnp.transpose( indices,
+                             (0,2,1) )
+    
+    mask = (indices != 0)[...,0]
+    
+    
+    ### true answer by loop
+    true = np.zeros( (T,B,L) )
+    for t in range(T):
+        for b in range(B):
+            for l in range(L):
+                one_mat = mat[t,b,l,...]
+                anc_idx, desc_idx = indices[b,l,...]
+                to_fill = one_mat[anc_idx-1, desc_idx-1]
+                true[t,b,l,...] = to_fill
+    true = true * mask[None, :, :]
+    
+    
+    ### answer as-is, with existing function
+    by_func = score_substitutions(true_out = indices,
+                                  logprob_subs_mat = mat,
+                                  token_offset = 1)
+    by_func = by_func * mask[None, :, :]
+    
+    assert jnp.allclose(by_func, true) 

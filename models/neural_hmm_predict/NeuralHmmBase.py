@@ -117,22 +117,22 @@ class NeuralHmmBase(ModuleBase):
         # exchangeabilitity matrices 
         # (B, length_for_scan, H) -> (B, length_for_scan, emission_alphabet_size, emission_alphabet_size), OR
         # return (1, 1, emission_alphabet_size, emission_alphabet_size) matrix for all sites
-        exchangeability_matrices = self.generate_evolutionary_parameters(embeds_to_datamat = self.process_embeds_for_exchang,
-                                                                         datamat_to_evolparams = self.get_exchang,
-                                                                         datamat_lst = datamat_lst,
-                                                                         padding_mask = padding_mask,
-                                                                         training = training, 
-                                                                         sow_intermediates = sow_intermediates)
+        exchangeability_matrices = self.generate_evolutionary_parameters( embeds_to_datamat = self.process_embeds_for_exchang,
+                                                                          datamat_to_evolparams = self.get_exchang,
+                                                                          datamat_lst = datamat_lst,
+                                                                          padding_mask = padding_mask,
+                                                                          training = training, 
+                                                                          sow_intermediates = sow_intermediates )
         
         # logits for indel rates (lambda, mu)
         # (B, length_for_scan, H) -> (B, length_for_scan, num_indel_params ), OR
         # return  (1, 1, 2 ) matrix for all sites
-        out = self.generate_evolutionary_parameters(embeds_to_datamat = self.process_embeds_for_lam_mu,
-                                                                   datamat_to_evolparams = self.get_lam_mu,
-                                                                   datamat_lst = datamat_lst,
-                                                                   padding_mask = padding_mask,
-                                                                   training = training, 
-                                                                   sow_intermediates = sow_intermediates)
+        out = self.generate_evolutionary_parameters( embeds_to_datamat = self.process_embeds_for_lam_mu,
+                                                     datamat_to_evolparams = self.get_lam_mu,
+                                                     datamat_lst = datamat_lst,
+                                                     padding_mask = padding_mask,
+                                                     training = training, 
+                                                     sow_intermediates = sow_intermediates )
         if len(out) == 1:
             lam_mu = out
             use_approx = False
@@ -143,12 +143,12 @@ class NeuralHmmBase(ModuleBase):
         # (B, length_for_scan, H) -> (B, length_for_scan ), OR
         # return (1, 1 ) matrix for all sites, OR
         # return None (for TKF91)
-        r_extend = self.generate_evolutionary_parameters(embeds_to_datamat = self.process_embeds_for_r,
-                                                         datamat_to_evolparams = self.get_r_extend,
-                                                         datamat_lst = datamat_lst,
-                                                         padding_mask = padding_mask,
-                                                         training = training, 
-                                                         sow_intermediates = sow_intermediates)
+        r_extend = self.generate_evolutionary_parameters( embeds_to_datamat = self.process_embeds_for_r,
+                                                          datamat_to_evolparams = self.get_r_extend,
+                                                          datamat_lst = datamat_lst,
+                                                          padding_mask = padding_mask,
+                                                          training = training, 
+                                                          sow_intermediates = sow_intermediates )
         
         
         
@@ -255,14 +255,10 @@ class NeuralHmmBase(ModuleBase):
         curr_state = true_out[...,3]
         residues_in_alignment = true_out[...,:2]
         
-        T = logprob_transits.shape[0]
-        B = alignment_path.shape[0]
-        L = alignment_path.shape[1]
-        
         
         ### score transitions: (T, B, length_for_scan)
         tr = score_transitions(alignment_state = alignment_path,
-                               trans_mat = logprob_transits, 
+                               logprob_trans_mat = logprob_transits, 
                                padding_idx=seq_padding_idx)
         
         
@@ -273,27 +269,27 @@ class NeuralHmmBase(ModuleBase):
         e = jnp.zeros( (T,B,L) )
         e = e + jnp.where( curr_state == 1,
                            score_substitutions( true_out = residues_in_alignment,
-                                                subs_mat = logprob_emit_match,
+                                                logprob_subs_mat = logprob_emit_match,
                                                 token_offset = 3 ),
                            0
                            )
         
-        # insert: score with descendant tok, 1
+        # insert: score with descendant tok
         e = e + jnp.where( curr_state == 2,
                            score_indels(true_out = residues_in_alignment,
-                                            scoring_vec = logprob_emit_indel,
-                                            which_seq = 1,
-                                            token_offset = 3),
+                                        logprob_scoring_vec = logprob_emit_indel,
+                                        which_seq = 'desc',
+                                        token_offset = 3),
                            0
                            )
         
         if loss_type == 'joint':
-            # deletions: score with anc tok, 0
+            # deletions: score with anc tok
             e = e + jnp.where( curr_state == 3,
                                score_indels(true_out = residues_in_alignment,
-                                                scoring_vec = logprob_emit_indel,
-                                                which_seq = 0,
-                                                token_offset = 3),
+                                            logprob_scoring_vec = logprob_emit_indel,
+                                            which_seq = 'anc',
+                                            token_offset = 3),
                                0
                                )
         
