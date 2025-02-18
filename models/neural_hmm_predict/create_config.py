@@ -49,6 +49,7 @@ def create_config(preset_name):
                                        'dropout': '[FLOAT=0.0]',
                                        'exchange_range': '[min: FLOAT=1e-4, max: FLOAT=10]',
                                        'avg_pool': 'false',
+                                       'norm': '[BOOL = false]'
                                        } )
         
         equilibr_config = OrderedDict( {'use_anc_emb': '[BOOL]',
@@ -56,16 +57,27 @@ def create_config(preset_name):
                                        'layer_sizes': '[LIST[INTS]]',
                                        'dropout': '[FLOAT=0.0]',
                                        'avg_pool': 'false',
+                                       'norm': '[BOOL = false]'
                                        } )
         
         ### global indel params
-        if preset_name == 'local_exch_equilibr':
+        if preset_name == 'local_exch_equilibr': #, 'local_exch_equilibr_r']:
             indels_config = OrderedDict( {'manual_init': '[BOOL]',
                                           '(if manual_init) load_from_file': '[STR]',
                                           'tkf_err': '[FLOAT=1e-4]',
                                           'lamdba_range': '[min: FLOAT=tkf_err, max: FLOAT=3]',
                                           'offset_range': '[min: FLOAT=tkf_err, max: FLOAT=0.333]',
                                           '(if TKF92) r_range': '[min: FLOAT=tkf_err, max: FLOAT=0.8]'} )
+        
+        elif preset_name == 'local_exch_equilibr_r': 
+            indels_config = OrderedDict( {'manual_init': '[BOOL]',
+                                          '(if manual_init) load_from_file': '[STR]',
+                                          'tkf_err': '[FLOAT=1e-4]',
+                                          'lamdba_range': '[min: FLOAT=tkf_err, max: FLOAT=3]',
+                                          'offset_range': '[min: FLOAT=tkf_err, max: FLOAT=0.333]',
+                                          'r_range': '[min: FLOAT=tkf_err, max: FLOAT=0.8]',
+                                          'r_avg_pool': 'false',
+                                          'r_norm': '[BOOL=false]'} )
         
         ### local indel params
         elif preset_name == 'all_local':
@@ -78,7 +90,11 @@ def create_config(preset_name):
                                            'tkf_err': '[FLOAT=1e-4]',
                                            'lamdba_range': '[min: FLOAT=tkf_err, max: FLOAT=3]',
                                            'offset_range': '[min: FLOAT=tkf_err, max: FLOAT=0.333]',
-                                           '(if TKF92) r_range': '[min: FLOAT=tkf_err, max: FLOAT=0.8]'} )
+                                           'lam_offset_avg_pool': 'false',
+                                           'lam_offset_norm': '[BOOL=false]',
+                                           '(if TKF92) r_range': '[min: FLOAT=tkf_err, max: FLOAT=0.8]',
+                                           '(if TKF92) r_avg_pool': 'false',
+                                           '(if TKF92) r_norm': '[BOOL=false]'} )
     
     
     return OrderedDict( {"preset_name":f"{preset_name}",

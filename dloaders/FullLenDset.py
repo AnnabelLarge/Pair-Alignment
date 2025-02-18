@@ -126,9 +126,7 @@ def remove_excess_padding(seqs,
     """
     trim excess padding
     """
-    global_max_len = np.where(seqs != padding_tok,
-                              True,
-                              False).sum(axis=1).max()
+    global_max_len = (seqs != padding_tok).sum(axis=1).max()
     clipped_seqs = seqs[:, :global_max_len, ...]
     return clipped_seqs, global_max_len
 
@@ -639,5 +637,55 @@ class FullLenDset(Dataset):
         
         elif (times_from is None):
             return 0
+
+
+
+if __name__ == '__main__':
+    """
+    > for neural pairHMM models: d = 5
+      >> dim2 = 0: gapped ancestor
+      >> dim2 = 1: gapped descendant
+      >> dim2 = 2: categorically-encoded alignment (<pad>, M, I, D, <bos>, <eos>)
+      >> dim2 = 3: m-indices, precalculated from alignment
+      >> dim2 = 4: n-indices, precalculated from alignment
+    """
+    out = FullLenDset(data_dir = 'example_data', 
+                      split_prefixes = ['sevenSamp'], 
+                      pred_model_type = 'neural_hmm',
+                      use_scan_fns = False,
+                      times_from_array = None,
+                      single_time_from_file = False,
+                      chunk_length = 512,
+                      toss_alignments_longer_than = None)
+    
+    unaligned_seqs = np.concatenate( [tup[0][None,...] for tup in out] )
+    aligned_mats = np.concatenate( [tup[1][None,...] for tup in out] )
+    
+    B = aligned_mats.shape[0]
+    L_align = aligned_mats.shape[1]
+    
+    indexed_anc = []
+    indexed_desc = []
+    for b in range(B):
+        anc_interm = []
+        desc_interm = []
+        for l_align in range(L_align):
+            anc_idx = aligned_mats[b,l_align,3].item()
+            desc_idx = aligned_mats[b,l_align,4].item()
+            
+            anc_tok = unaligned_seqs[b,anc_idx,0].item()
+            desc_tok = unaligned_seqs[b,desc_idx,1].item()
+            
+            anc_interm.append([anc_idx, anc_tok])
+            desc_interm.append([desc_idx, desc_tok])
+        
+        indexed_anc.append(anc_interm)
+        indexed_desc.append(desc_interm)
+    
+    indexed_anc = np.array( indexed_anc )
+    indexed_desc = np.array( indexed_desc )
+    
+    
+    
     
     

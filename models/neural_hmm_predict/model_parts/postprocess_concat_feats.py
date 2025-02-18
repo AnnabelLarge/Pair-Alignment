@@ -130,7 +130,6 @@ class FeedforwardToEvoparams(SelectMask):
                  padding_mask: jnp.array,
                  training: bool, 
                  sow_intermediates: bool=False):
-        
         ### select (potentially concat) and mask padding
         datamat, concat_masking_mat = self.process_datamat_lst(datamat_lst,
                                                                padding_mask,
@@ -154,7 +153,6 @@ class FeedforwardToEvoparams(SelectMask):
             # 2.) norm (plus recording to tensorboard)
             #     shouldn't need masking after this
             datamat = self.norm(datamat, mask=concat_masking_mat)
-            del concat_masking_mat
             
             if sow_intermediates:
                 label = (f'{self.name}/'+
@@ -205,7 +203,7 @@ class FeedforwardToEvoparams(SelectMask):
                                             which=['scalars'])
                 del label
         
-        return datamat, concat_masking_mat
+        return datamat, concat_masking_mat[:,:,0][:,:,None]
     
 
 class ConvToEvoparams(SelectMask):

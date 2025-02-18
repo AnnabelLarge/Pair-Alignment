@@ -33,21 +33,21 @@ def main():
                    'get_pairhmm_controls',
                    'get_feedforward_controls']
     
-    parser.add_argument('-task',
-                        type=str,
-                        required=True,
-                        choices = valid_tasks,
-                        help='What do you want to do? Pick from: {valid_tasks}')
+    # parser.add_argument('-task',
+    #                     type=str,
+    #                     required=True,
+    #                     choices = valid_tasks,
+    #                     help='What do you want to do? Pick from: {valid_tasks}')
     
-    # needed for most options
-    parser.add_argument('-configs',
-                        type = str,
-                        help='Load configs from file or folder of files, in json format.')
+    # # needed for most options
+    # parser.add_argument('-configs',
+    #                     type = str,
+    #                     help='Load configs from file or folder of files, in json format.')
     
-    # only when resuming training
-    parser.add_argument(f'-training_wkdir',
-                        type = str,
-                        help = 'training working directory to resume from')
+    # # only when resuming training
+    # parser.add_argument(f'-training_wkdir',
+    #                     type = str,
+    #                     help = 'training working directory to resume from')
     
     # parse the arguments
     args = parser.parse_args()
@@ -55,7 +55,7 @@ def main():
     
     # ### UNCOMMENT TO RUN IN SPYDER IDE
     # args.task = 'train'
-    # args.configs = 'tkf92_load_params.json'
+    # args.configs = 'DRYRUN-CONFIG_CNN_neural_hmm.json'
     
     
     ### helper function to open a single config file and extract additional arguments
@@ -88,15 +88,20 @@ def main():
 
         elif args.pred_model_type == 'neural_hmm':
             from cli.train_neural_hmm import train_neural_hmm as train
-            from dloaders.full_len_dset import full_len_dset as init_dataloaders
+            from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
 
         elif args.pred_model_type == 'feedforward':
             from cli.train_feedforward import train_feedforward as train
-            from dloaders.full_len_dset import full_len_dset as init_dataloaders
+            from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
 
         
         # train model
         dload_lst = init_dataloaders(args, 'train')
+        
+        # print('DEBUG: DISABLING JIT!!!')
+        # print('DEBUG: DISABLING JIT!!!')
+        # print('DEBUG: DISABLING JIT!!!')
+        # with jax.disable_jit():
         train(args, dload_lst)
         
     

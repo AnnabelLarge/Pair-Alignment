@@ -20,7 +20,7 @@ def extract_embs(anc_encoded,
                  desc_encoded, 
                  extra_features,
                  idx_lst, 
-                 align_idx_padding = -9,
+                 align_idx_padding: int = -9,
                  **kwargs):
     """
     extract embeddings, according to coordinates given by idx_lst
@@ -45,9 +45,9 @@ def extract_embs(anc_encoded,
           > both of size (batch, alignment_len, hid_dim)
         - mask for alignment positions
     """
-    # get indexes needed
-    anc_idxes = idx_lst[:,:,0][...,None] #(B, L, 1)
-    desc_idxes = idx_lst[:,:,1][...,None] #(B, L, 1)
+    # get indexes needed; each are (B, L_align, 1)
+    anc_idxes = idx_lst[:,:,0][...,None]
+    desc_idxes = idx_lst[:,:,1][...,None] 
     masking_vec = ( anc_idxes != align_idx_padding )
     
     # index with jnp take

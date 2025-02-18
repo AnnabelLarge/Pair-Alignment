@@ -61,8 +61,6 @@ def fill_with_default_values(args):
             args.pred_config['num_tkf_site_classes'] = 1
         
     
-    
-    
 def enforce_valid_defaults(args):
     provided_args = list(vars(args).keys())
     
@@ -98,6 +96,8 @@ def share_top_level_args(args):
         
         args.pred_config['loss_type'] = args.loss_type
         args.pred_config['emission_alphabet_size'] = args.emission_alphabet_size
+        args.pred_config['exchang_config']['emission_alphabet_size'] = args.emission_alphabet_size
+        args.pred_config['equilibr_config']['emission_alphabet_size'] = args.emission_alphabet_size
         
 
     elif args.pred_model_type.startswith('pairhmm'):

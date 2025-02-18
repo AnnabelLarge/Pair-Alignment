@@ -46,7 +46,7 @@ def score_transitions(alignment_state,
     
     # final mat
     final_mat_shape = (T, B, L, num_possible_trans, num_possible_trans)
-    logprob_trans_mat = jnp.broadcast_to(logprob_trans_mat, new_shape)
+    logprob_trans_mat = jnp.broadcast_to(logprob_trans_mat, final_mat_shape)
     
     
     ### scoring
@@ -129,7 +129,8 @@ def score_substitutions(true_out,
 def score_indels(true_out: jnp.array, 
                  logprob_scoring_vec: jnp.array, 
                  which_seq: str,
-                 token_offset: int=3):
+                 token_offset: int=3,
+                 padding_idx: int=0):
     """
     inputs:
     -------
@@ -166,9 +167,9 @@ def score_indels(true_out: jnp.array,
     
     ### reshape if needed
     # dims
-    B = residue_tokens.shape[0]
-    L = residue_tokens.shape[1]
-    alph = scoring_vec.shape[2]
+    B = true_out.shape[0]
+    L = true_out.shape[1]
+    alph = logprob_scoring_vec.shape[-1]
     
     # reshape
     new_shape = (B, L, alph)

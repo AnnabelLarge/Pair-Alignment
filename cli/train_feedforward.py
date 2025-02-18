@@ -42,6 +42,7 @@ from utils.sequence_length_helpers import (determine_seqlen_bin,
                                            determine_alignlen_bin)
 from utils.tensorboard_recording_utils import (write_times,
                                                write_optional_outputs_during_training)
+from utils.write_timing_file import write_timing_file
 
 # specific to training this model
 from dloaders.init_full_len_dset import init_full_len_dset
@@ -62,8 +63,8 @@ def train_feedforward(args, dataloader_dict: dict):
     del err
     
     ### edit the argparse object in-place
-    enforce_valid_defaults(args)
     fill_with_default_values(args)
+    enforce_valid_defaults(args)
     share_top_level_args(args)
     
     if not args.update_grads:
@@ -238,6 +239,11 @@ def train_feedforward(args, dataloader_dict: dict):
     # rng key for train
     rngkey, training_rngkey = jax.random.split(rngkey, num=2)
     
+    # record time spent at each phase (use numpy array to store)
+    all_train_set_times = np.zeros( (args.num_epochs,2) )
+    all_eval_set_times = np.zeros( (args.num_epochs,2) )
+    all_epoch_times = np.zeros( (args.num_epochs,2) )
+    
     for epoch_idx in tqdm(range(args.num_epochs)):
         epoch_real_start = wall_clock_time()
         epoch_cpu_start = process_time()
@@ -252,8 +258,6 @@ def train_feedforward(args, dataloader_dict: dict):
         ##############################################
         for batch_idx, batch in enumerate(training_dl):
             batch_epoch_idx = epoch_idx * len(training_dl) + batch_idx
-            batch_real_start = wall_clock_time()
-            batch_cpu_start = process_time()
 
 #__4___8__12: batch level (three tabs)          
             # unpack briefly to get max len and number of samples in the 
@@ -349,7 +353,15 @@ def train_feedforward(args, dataloader_dict: dict):
                 for i, mat in enumerate( batch[:-1] ):
                     with open( f'{args.out_arrs_dir}/NAN-BATCH_matrix{i}.npy','wb' ) as g:
                         np.save(g, mat)
-                    
+                
+                # record timing so far (if any)
+                write_timing_file( outdir = args.logfile_dir,
+                                   train_times = all_train_set_times,
+                                   eval_times = all_eval_set_times,
+                                   total_times = all_epoch_times )
+                
+                
+                ### rage quit
                 raise RuntimeError( ('NaN loss detected; saved intermediates '+
                                     'and quit training') )
             
@@ -373,22 +385,30 @@ def train_feedforward(args, dataloader_dict: dict):
                                                     interms_for_tboard = args.interms_for_tboard, 
                                                     write_histograms_flag = interm_rec or final_rec)
             
-               
-            # record the CPU+system and wall-clock (real) time
-            batch_real_end = wall_clock_time()
-            batch_cpu_end = process_time()
-            write_times(cpu_start = batch_cpu_start, 
-                        cpu_end = batch_cpu_end, 
-                        real_start = batch_real_start, 
-                        real_end = batch_real_end, 
-                        tag = 'Process one training batch', 
-                        step = batch_epoch_idx, 
-                        writer_obj = writer)
-            
-            del batch_cpu_start, batch_cpu_end, batch_real_start, batch_real_end
-        
         
 #__4___8: epoch level (two tabs)
+        ### manage timing
+        # stop timer
+        train_real_end = wall_clock_time()
+        train_cpu_end = process_time()
+
+        # record the CPU+system and wall-clock (real) time
+        write_times(cpu_start = train_cpu_start, 
+                    cpu_end = train_cpu_end, 
+                    real_start = train_real_start, 
+                    real_end = train_real_end, 
+                    tag = 'Process training data', 
+                    step = epoch_idx, 
+                    writer_obj = writer)
+        
+        # also record for later
+        all_train_set_times[epoch_idx, 0] = train_real_end - train_real_start
+        all_train_set_times[epoch_idx, 1] = train_cpu_end - train_cpu_start
+        
+        del train_cpu_start, train_cpu_end
+        del train_real_start, train_real_end
+        
+        
         ##############################################################
         ### 3.3: also check current performance on held-out test set #
         ##############################################################
@@ -397,6 +417,10 @@ def train_feedforward(args, dataloader_dict: dict):
         ave_epoch_test_loss = 0
         ave_epoch_test_perpl = 0
         ave_epoch_test_acc = 0
+        
+        # start timer
+        eval_real_start = wall_clock_time()
+        eval_cpu_start = process_time()
         
         for batch_idx, batch in enumerate(test_dl):
             # unpack briefly to get max len and number of samples in the 
@@ -424,13 +448,35 @@ def train_feedforward(args, dataloader_dict: dict):
             ### add to total loss for this epoch; weight by number of
             ###   samples/valid tokens in this batch
             weight = args.batch_size / len(test_dset)
-            ave_epoch_test_loss += eval_metrics['batch_loss'] * weight
+            ave_epoch_test_loss += eval_metrics['loss'] * weight
             ave_epoch_test_perpl += jnp.mean( eval_metrics['perplexity_perSamp'] ) * weight
             ave_epoch_test_acc += jnp.mean( eval_metrics['acc_perSamp'] ) * weight
             del weight
         
             
 #__4___8: epoch level (two tabs) 
+        ### manage timing
+        # stop timer
+        eval_real_end = wall_clock_time()
+        eval_cpu_end = process_time()
+
+        # record the CPU+system and wall-clock (real) time to tensorboard
+        write_times(cpu_start = eval_cpu_start, 
+                    cpu_end = eval_cpu_end, 
+                    real_start = eval_real_start, 
+                    real_end = eval_real_end, 
+                    tag = 'Process test set data', 
+                    step = epoch_idx, 
+                    writer_obj = writer)
+        
+        # also record for later
+        all_eval_set_times[epoch_idx, 0] = eval_real_end - eval_real_start
+        all_eval_set_times[epoch_idx, 1] = eval_cpu_end - eval_cpu_start
+        
+        del eval_cpu_start, eval_cpu_end
+        del eval_real_start, eval_real_end
+        
+        
         ##########################################
         ### 3.4: record scalars to tensorboard   #
         ##########################################
@@ -546,6 +592,7 @@ def train_feedforward(args, dataloader_dict: dict):
             epoch_real_end = wall_clock_time()
             epoch_cpu_end = process_time()
             
+            # write to tensorboard
             write_times(cpu_start = epoch_cpu_start, 
                         cpu_end = epoch_cpu_end, 
                         real_start = epoch_real_start, 
@@ -555,6 +602,7 @@ def train_feedforward(args, dataloader_dict: dict):
                         writer_obj = writer)
             
             del epoch_cpu_start, epoch_cpu_end
+            del epoch_real_start, epoch_real_end
             
             # save the trainstates for later use
             best_trainstates = all_trainstates
@@ -571,7 +619,10 @@ def train_feedforward(args, dataloader_dict: dict):
         # record time spent at this epoch
         epoch_real_end = wall_clock_time()
         epoch_cpu_end = process_time()
+        all_epoch_times[epoch_idx, 0] = epoch_real_end - epoch_real_start
+        all_epoch_times[epoch_idx, 1] = epoch_cpu_end - epoch_cpu_start
         
+        # write to tensorboard
         write_times(cpu_start = epoch_cpu_start, 
                     cpu_end = epoch_cpu_end, 
                     real_start = epoch_real_start, 
@@ -580,7 +631,7 @@ def train_feedforward(args, dataloader_dict: dict):
                     step = epoch_idx, 
                     writer_obj = writer)
         
-        del epoch_cpu_start, epoch_cpu_end
+        del epoch_cpu_start, epoch_cpu_end, epoch_real_start, epoch_real_end
     
     
     ###########################################################################
@@ -592,11 +643,22 @@ def train_feedforward(args, dataloader_dict: dict):
         g.write('\n')
         g.write(f'4: post-training actions\n')
     
-    post_training_real_start = wall_clock_time()
-    post_training_cpu_start = process_time()
-    
     # don't accidentally use old trainstates or eval fn
     del all_trainstates, eval_fn_jitted
+    
+    
+    ### handle time
+    # write final timing
+    write_timing_file( outdir = args.logfile_dir,
+                       train_times = all_train_set_times,
+                       eval_times = all_eval_set_times,
+                       total_times = all_epoch_times )
+    
+    del all_train_set_times, all_eval_set_times, all_epoch_times
+
+    # new timer
+    post_training_real_start = wall_clock_time()
+    post_training_cpu_start = process_time()
     
     
     ### write to output logfile
@@ -684,11 +746,11 @@ def train_feedforward(args, dataloader_dict: dict):
     ### update the logfile with final losses  #
     ###########################################
     to_write = {'RUN': args.training_wkdir,
-                'train_ave_{args.loss_type}_loss_seqlen_normed': train_summary_stats['final_ave_loss_seqlen_normed'],
+                f'train_ave_{args.loss_type}_loss_seqlen_normed': train_summary_stats['final_ave_loss_seqlen_normed'],
                 'train_perplexity': train_summary_stats['final_perplexity'],
                 'train_ece': train_summary_stats['final_ece'],
                 'train_acc': train_summary_stats['final_acc'],
-                'test_ave_{args.loss_type}_loss_seqlen_normed': test_summary_stats['final_ave_loss_seqlen_normed'],
+                f'test_ave_{args.loss_type}_loss_seqlen_normed': test_summary_stats['final_ave_loss_seqlen_normed'],
                 'test_perplexity': test_summary_stats['final_perplexity'],
                 'test_ece': test_summary_stats['final_ece'],
                 'test_acc': test_summary_stats['final_acc']

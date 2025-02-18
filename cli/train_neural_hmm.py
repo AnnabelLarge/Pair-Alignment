@@ -31,7 +31,7 @@ import optax
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
 
-# custom function/classes imports (in order of appearance)
+# custom function/classes imports
 from train_eval_fns.build_optimizer import build_optimizer
 from utils.write_config import write_config
 from utils.edit_argparse import (enforce_valid_defaults,
@@ -42,6 +42,7 @@ from utils.sequence_length_helpers import (determine_seqlen_bin,
                                            determine_alignlen_bin)
 from utils.tensorboard_recording_utils import (write_times,
                                                write_optional_outputs_during_training)
+from utils.write_timing_file import write_timing_file
 
 # specific to training this model
 from dloaders.init_full_len_dset import init_full_len_dset
@@ -62,8 +63,8 @@ def train_neural_hmm(args, dataloader_dict: dict):
     del err
     
     ### edit the argparse object in-place
-    enforce_valid_defaults(args)
     fill_with_default_values(args)
+    enforce_valid_defaults(args)
     share_top_level_args(args)
     
     if not args.update_grads:
@@ -177,21 +178,21 @@ def train_neural_hmm(args, dataloader_dict: dict):
     
     
     ### parted and jit-compiled training_fn
-    t_array = train_dset.return_time_array()
+    t_array = training_dset.return_time_array()
     parted_train_fn = partial( train_one_batch,
                                 all_model_instances = all_model_instances,
                                 norm_loss_by = args.norm_loss_by,
                                 interms_for_tboard = args.interms_for_tboard,
-                                t_array = t_array,  
                                 loss_type = args.loss_type,
                                 exponential_dist_param = args.pred_config['exponential_dist_param'],
+                                t_array = t_array,
                                 concat_fn = concat_fn,
                                 update_grads = args.update_grads
                               )
     
     train_fn_jitted = jax.jit(parted_train_fn, 
                               static_argnames = ['max_seq_len',
-                                                  'max_align_len'])
+                                                 'max_align_len'])
     del parted_train_fn
     
     
@@ -251,6 +252,11 @@ def train_neural_hmm(args, dataloader_dict: dict):
     # rng key for train
     rngkey, training_rngkey = jax.random.split(rngkey, num=2)
     
+    # record time spent at each phase (use numpy array to store)
+    all_train_set_times = np.zeros( (args.num_epochs,2) )
+    all_eval_set_times = np.zeros( (args.num_epochs,2) )
+    all_epoch_times = np.zeros( (args.num_epochs,2) )
+    
     for epoch_idx in tqdm(range(args.num_epochs)):
         epoch_real_start = wall_clock_time()
         epoch_cpu_start = process_time()
@@ -262,10 +268,12 @@ def train_neural_hmm(args, dataloader_dict: dict):
         ##############################################
         ### 3.1: train and update model parameters   #
         ##############################################
+        # start timer
+        train_real_start = wall_clock_time()
+        train_cpu_start = process_time()
+        
         for batch_idx, batch in enumerate(training_dl):
             batch_epoch_idx = epoch_idx * len(training_dl) + batch_idx
-            batch_real_start = wall_clock_time()
-            batch_cpu_start = process_time()
 
 #__4___8__12: batch level (three tabs)          
             # unpack briefly to get max len and number of samples in the 
@@ -297,12 +305,14 @@ def train_neural_hmm(args, dataloader_dict: dict):
             
             
             ### run function to train on one batch of samples
-            rngkey_for_training_batch = jax.random.fold_in(training_rngkey, epoch_idx+batch_idx)
+            rngkey_for_training_batch = jax.random.fold_in(training_rngkey, 
+                                                           epoch_idx+batch_idx) 
+            
             out = train_fn_jitted(batch=batch, 
                                   training_rngkey=rngkey_for_training_batch, 
                                   all_trainstates=all_trainstates, 
                                   max_seq_len = batch_max_seqlen,
-                                  max_align_len = batch_max_alignlen )
+                                  max_align_len = batch_max_alignlen)
             train_metrics, all_trainstates = out
             del out
             
@@ -362,9 +372,16 @@ def train_neural_hmm(args, dataloader_dict: dict):
                     with open( f'{args.out_arrs_dir}/NAN-BATCH_matrix{i}.npy','wb' ) as g:
                         np.save(g, mat)
                     
+                # record timing so far (if any)
+                write_timing_file( outdir = args.logfile_dir,
+                                   train_times = all_train_set_times,
+                                   eval_times = all_eval_set_times,
+                                   total_times = all_epoch_times )
+                
+                ### rage quit
                 raise RuntimeError( ('NaN loss detected; saved intermediates '+
                                     'and quit training') )
-            
+                
             
 #__4___8__12: batch level (three tabs)
             ### add to recorded metrics for this epoch
@@ -384,22 +401,29 @@ def train_neural_hmm(args, dataloader_dict: dict):
                                                     interms_for_tboard = args.interms_for_tboard, 
                                                     write_histograms_flag = interm_rec or final_rec)
             
-               
-            # record the CPU+system and wall-clock (real) time
-            batch_real_end = wall_clock_time()
-            batch_cpu_end = process_time()
-            write_times(cpu_start = batch_cpu_start, 
-                        cpu_end = batch_cpu_end, 
-                        real_start = batch_real_start, 
-                        real_end = batch_real_end, 
-                        tag = 'Process one training batch', 
-                        step = batch_epoch_idx, 
-                        writer_obj = writer)
-            
-            del batch_cpu_start, batch_cpu_end, batch_real_start, batch_real_end
-        
-        
 #__4___8: epoch level (two tabs)
+        ### manage timing
+        # stop timer
+        train_real_end = wall_clock_time()
+        train_cpu_end = process_time()
+
+        # record the CPU+system and wall-clock (real) time
+        write_times(cpu_start = train_cpu_start, 
+                    cpu_end = train_cpu_end, 
+                    real_start = train_real_start, 
+                    real_end = train_real_end, 
+                    tag = 'Process training data', 
+                    step = epoch_idx, 
+                    writer_obj = writer)
+        
+        # also record for later
+        all_train_set_times[epoch_idx, 0] = train_real_end - train_real_start
+        all_train_set_times[epoch_idx, 1] = train_cpu_end - train_cpu_start
+        
+        del train_cpu_start, train_cpu_end
+        del train_real_start, train_real_end
+        
+        
         ##############################################################
         ### 3.3: also check current performance on held-out test set #
         ##############################################################
@@ -407,6 +431,10 @@ def train_neural_hmm(args, dataloader_dict: dict):
         # but right now, that's not collected
         ave_epoch_test_loss = 0
         ave_epoch_test_perpl = 0
+        
+        # start timer
+        eval_real_start = wall_clock_time()
+        eval_cpu_start = process_time()
         
         for batch_idx, batch in enumerate(test_dl):
             # unpack briefly to get max len and number of samples in the 
@@ -440,6 +468,28 @@ def train_neural_hmm(args, dataloader_dict: dict):
         
             
 #__4___8: epoch level (two tabs) 
+        ### manage timing
+        # stop timer
+        eval_real_end = wall_clock_time()
+        eval_cpu_end = process_time()
+
+        # record the CPU+system and wall-clock (real) time to tensorboard
+        write_times(cpu_start = eval_cpu_start, 
+                    cpu_end = eval_cpu_end, 
+                    real_start = eval_real_start, 
+                    real_end = eval_real_end, 
+                    tag = 'Process test set data', 
+                    step = epoch_idx, 
+                    writer_obj = writer)
+        
+        # also record for later
+        all_eval_set_times[epoch_idx, 0] = eval_real_end - eval_real_start
+        all_eval_set_times[epoch_idx, 1] = eval_cpu_end - eval_cpu_start
+        
+        del eval_cpu_start, eval_cpu_end
+        del eval_real_start, eval_real_end
+        
+        
         ##########################################
         ### 3.4: record scalars to tensorboard   #
         ##########################################
@@ -545,7 +595,10 @@ def train_neural_hmm(args, dataloader_dict: dict):
             # record time spent at this epoch
             epoch_real_end = wall_clock_time()
             epoch_cpu_end = process_time()
+            all_epoch_times[epoch_idx, 0] = epoch_real_end - epoch_real_start
+            all_epoch_times[epoch_idx, 1] = epoch_cpu_end - epoch_cpu_start
             
+            # write to tensorboard
             write_times(cpu_start = epoch_cpu_start, 
                         cpu_end = epoch_cpu_end, 
                         real_start = epoch_real_start, 
@@ -555,6 +608,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
                         writer_obj = writer)
             
             del epoch_cpu_start, epoch_cpu_end
+            del epoch_real_start, epoch_real_end
             
             # save the trainstates for later use
             best_trainstates = all_trainstates
@@ -571,7 +625,10 @@ def train_neural_hmm(args, dataloader_dict: dict):
         # record time spent at this epoch
         epoch_real_end = wall_clock_time()
         epoch_cpu_end = process_time()
+        all_epoch_times[epoch_idx, 0] = epoch_real_end - epoch_real_start
+        all_epoch_times[epoch_idx, 1] = epoch_cpu_end - epoch_cpu_start
         
+        # write to tensorboard
         write_times(cpu_start = epoch_cpu_start, 
                     cpu_end = epoch_cpu_end, 
                     real_start = epoch_real_start, 
@@ -580,7 +637,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
                     step = epoch_idx, 
                     writer_obj = writer)
         
-        del epoch_cpu_start, epoch_cpu_end
+        del epoch_cpu_start, epoch_cpu_end, epoch_real_start, epoch_real_end
     
     
     ###########################################################################
@@ -592,11 +649,22 @@ def train_neural_hmm(args, dataloader_dict: dict):
         g.write('\n')
         g.write(f'4: post-training actions\n')
     
-    post_training_real_start = wall_clock_time()
-    post_training_cpu_start = process_time()
-    
     # don't accidentally use old trainstates or eval fn
     del all_trainstates, eval_fn_jitted
+    
+    
+    ### handle time
+    # write final timing
+    write_timing_file( outdir = args.logfile_dir,
+                       train_times = all_train_set_times,
+                       eval_times = all_eval_set_times,
+                       total_times = all_epoch_times )
+    
+    del all_train_set_times, all_eval_set_times, all_epoch_times
+
+    # new timer
+    post_training_real_start = wall_clock_time()
+    post_training_cpu_start = process_time()
     
     
     ### write to output logfile
@@ -687,10 +755,10 @@ def train_neural_hmm(args, dataloader_dict: dict):
     ### update the logfile with final losses  #
     ###########################################
     to_write = {'RUN': args.training_wkdir,
-                'train_ave_{args.loss_type}_loss_seqlen_normed': train_summary_stats['final_ave_loss_seqlen_normed'],
+                f'train_ave_{args.loss_type}_loss_seqlen_normed': train_summary_stats['final_ave_loss_seqlen_normed'],
                 'train_perplexity': train_summary_stats['final_perplexity'],
                 'train_ece': train_summary_stats['final_ece'] ,
-                'test_ave_{args.loss_type}_loss_seqlen_normed': test_summary_stats['final_ave_loss_seqlen_normed'],
+                f'test_ave_{args.loss_type}_loss_seqlen_normed': test_summary_stats['final_ave_loss_seqlen_normed'],
                 'test_perplexity': test_summary_stats['final_perplexity'],
                 'test_ece': test_summary_stats['final_ece']
                 }

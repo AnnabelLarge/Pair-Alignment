@@ -234,14 +234,10 @@ class CondTKF91TransitionLogprobs(NoIndels):
                    t_array,
                    use_approx):
         ### lam * t, mu * t
-        mu_per_t = jnp.einsum('bl,tb->tbl', mu, t_array) #(T, B, L)
-        lam_per_t = jnp.einsum('bl,tb->tbl', lam, t_array) #(T, B, L)
-        
-        ### log(lam), log(mu)
-        log_lam = jnp.broadcast_to( safe_log(lam)[None,:,:],
-                                    lam_per_t.shape ) #(T, B, L)
-        log_mu = jnp.broadcast_to( safe_log(mu)[None, :, :],
-                                   mu_per_t.shape) #(T, B, L)
+        mu_per_t = jnp.einsum('bl,tb->tbl', mu, t_array) 
+        lam_per_t = jnp.einsum('bl,tb->tbl', lam, t_array) 
+        log_lam = safe_log(lam)
+        log_mu = safe_log(mu)
         
         
         ### alpha and one minus alpha IN LOG SPACE
@@ -251,7 +247,6 @@ class CondTKF91TransitionLogprobs(NoIndels):
         
         
         ### beta
-        # COME BACK HERE
         def orig_beta():
             # log( exp(-lambda * t) - exp(-mu * t) )
             term2_logsumexp = logsumexp_with_arr_lst( [-lam_per_t, -mu_per_t],
@@ -492,12 +487,14 @@ class CondTKF92TransitionLogprobs(CondTKF91TransitionLogprobs):
         
         
         ### entries in the matrix
-        # broadcast up from (B,L) -> (T,B,L)
+        # get dims
         T = t_array.shape[0]
-        B = max( [ t_array.shape[1], r_extend.shape[0] ] )
+        B = max( [ lam_mu.shape[0], r_extend.shape[0] ] )
         L = r_extend.shape[1]
-        r_extend = jnp.broadcast_to( r_extend[None, :, :],
-                                           (T,B,L) )
+        
+        # broadcast everything up to (T, B, L)
+        r_extend = jnp.broadcast_to( r_extend[None,...], (T,B,L) )
+        out_dict = {k: jnp.broadcast_to( v, (T,B,L) ) for k,v in out_dict.items()}
         del T, B, L
         
         # need log(r_extend) and log(1 - r_extend) for this
@@ -659,11 +656,14 @@ class JointTKF92TransitionLogprobs(CondTKF92TransitionLogprobs):
         
         
         ### entries in the matrix
-        # broadcast up from (B,L) -> (T,B,L)
+        # get dims
         T = t_array.shape[0]
-        B = max( [ t_array.shape[1], r_extend.shape[0] ] )
+        B = max( [ lam_mu.shape[0], r_extend.shape[0] ] )
         L = r_extend.shape[1]
+        
+        # broadcast everything up to (T, B, L)
         r_extend = jnp.broadcast_to( r_extend[None,...], (T,B,L) )
+        out_dict = {k: jnp.broadcast_to( v, (T,B,L) ) for k,v in out_dict.items()}
         del T, B, L
         
         # need some extra values pre-computed

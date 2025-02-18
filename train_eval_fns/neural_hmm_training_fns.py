@@ -93,9 +93,9 @@ def train_one_batch(batch,
     del interms_for_tboard
     
     
-    #########################
-    ### UNPACK THE INPUTS   #
-    #########################
+    ####################
+    ### UNPACK, CLIP   #
+    ####################
     ### unpack
     encoder_trainstate, decoder_trainstate, finalpred_trainstate = all_trainstates
     encoder_instance, decoder_instance, finalpred_instance = all_model_instances
@@ -121,21 +121,19 @@ def train_one_batch(batch,
     ##########################
     ### PREPARE THE INPUTS   #
     ##########################
+    ### unpack features
+    # unaligned sequences used in __call__; final size is (B, max_seq_len)
+    anc_seqs = clipped_unaligned_seqs[...,0]
+    desc_seqs = clipped_unaligned_seqs[...,1]
+    
     # split into prefixes and suffixes, to avoid confusion
     # prefixes: <s> A  B  C    the "a" in P(b | a, X, Y_{...j})
     #            |  |  |  |
     #            v  v  v  v
     # suffixes:  A  B  C <e>    the "b" in P(b | a, X, Y_{...j})
     aligned_mats_prefixes = clipped_aligned_mats[:,:-1,:]
-    unaligned_seqs_prefixes = clipped_unaligned_seqs[:,:-1,:]
     aligned_mats_suffixes = clipped_aligned_mats[:,1:,:]
     del clipped_unaligned_seqs, clipped_aligned_mats
-    
-    
-    ### unpack sequences
-    # unaligned sequences used in __call__; final size is (B, max_seq_len)
-    anc_seqs = unaligned_seqs_prefixes[...,0]
-    desc_seqs = unaligned_seqs_prefixes[...,1]
     
     # precomputed alignment indices; final size is (B, max_align_len-1, 2)
     # don't include last token, since it's not used to predict any valid input
@@ -155,7 +153,7 @@ def train_one_batch(batch,
     
     
     ### length_for_normalization
-    length = jnp.where(true_out[...,1] != seq_padding_idx, 
+    length_for_normalization = jnp.where(true_out[...,1] != seq_padding_idx, 
                        True, 
                        False).sum(axis=1)
     
@@ -163,13 +161,16 @@ def train_one_batch(batch,
         num_gaps = jnp.where(true_out[...,1] == gap_tok, 
                              True, 
                              False).sum(axis=1)
-        length = length - num_gaps
+        length_for_normalization = length_for_normalization - num_gaps
         
         
     ############################################
     ### APPLY MODEL, EVALUATE LOSS AND GRADS   #
     ############################################
-    def apply_model(encoder_params, decoder_params, finalpred_params):
+    def apply_model(encoder_params, 
+                    decoder_params, 
+                    finalpred_params, 
+                    t_array):
         ### embed with ancestor encoder
         # anc_embeddings is (B, max_seq_len-1, H)
         out = encoder_instance.apply_seq_embedder_in_training(seqs = anc_seqs,
@@ -215,7 +216,7 @@ def train_one_batch(batch,
         del out
         
         ### forward pass through prediction head
-        t_array = t_array[:,None] # turn into (T, B=1) for compatibility 
+        t_array = jnp.array( t_array[:,None] ) # turn into (T, B=1) for compatibility 
         mut = ['histograms','scalars'] if finalpred_sow_outputs else []
         out = finalpred_trainstate.apply_fn(variables = finalpred_params,
                                             datamat_lst = datamat_lst,
@@ -264,11 +265,14 @@ def train_one_batch(batch,
     
     
     ### set up the grad functions, based on above loss function
-    grad_fn = jax.value_and_grad(apply_model, argnums=[0,1,2], has_aux=True)
+    grad_fn = jax.value_and_grad(apply_model, 
+                                 argnums=[0,1,2], 
+                                 has_aux=True)
     
     (batch_loss, aux_dict), all_grads = grad_fn(encoder_trainstate.params, 
                                                 decoder_trainstate.params, 
-                                                finalpred_trainstate.params)
+                                                finalpred_trainstate.params,
+                                                t_array = t_array)
     
     enc_gradient, dec_gradient, finalpred_gradient = all_grads
     del all_grads
@@ -465,9 +469,9 @@ def eval_one_batch(batch,
     del interms_for_tboard
     
     
-    ##################################
-    ### UNPACK THE INPUTS, PREPROC   #
-    ##################################
+    ####################
+    ### UNPACK, CLIP   #
+    ####################
     ### unpack
     encoder_trainstate, decoder_trainstate, finalpred_trainstate = all_trainstates
     encoder_instance, decoder_instance, finalpred_instance = all_model_instances
@@ -487,21 +491,19 @@ def eval_one_batch(batch,
     ##########################
     ### PREPARE THE INPUTS   #
     ##########################
+    ### unpack features
+    # unaligned sequences used in __call__; final size is (B, max_seq_len)
+    anc_seqs = clipped_unaligned_seqs[...,0]
+    desc_seqs = clipped_unaligned_seqs[...,1]
+    
     # split into prefixes and suffixes, to avoid confusion
     # prefixes: <s> A  B  C    the "a" in P(b | a, X, Y_{...j})
     #            |  |  |  |
     #            v  v  v  v
     # suffixes:  A  B  C <e>    the "b" in P(b | a, X, Y_{...j})
     aligned_mats_prefixes = clipped_aligned_mats[:,:-1,:]
-    unaligned_seqs_prefixes = clipped_unaligned_seqs[:,:-1,:]
     aligned_mats_suffixes = clipped_aligned_mats[:,1:,:]
     del clipped_unaligned_seqs, clipped_aligned_mats
-    
-    
-    ### unpack sequences
-    # unaligned sequences used in __call__; final size is (B, max_seq_len)
-    anc_seqs = unaligned_seqs_prefixes[...,0]
-    desc_seqs = unaligned_seqs_prefixes[...,1]
     
     # precomputed alignment indices; final size is (B, max_align_len-1, 2)
     # don't include last token, since it's not used to predict any valid input
@@ -633,7 +635,7 @@ def eval_one_batch(batch,
     ### COMPILE FINAL DICTIONARY TO RETURN   #
     ##########################################
     ### things that always get returned
-    out_dict = {'loss': loss,
+    out_dict = {'batch_loss': loss,
                 'sum_neg_logP': loss_fn_dict['sum_neg_logP'],
                 'neg_logP_length_normed': loss_fn_dict['neg_logP_length_normed']}
     

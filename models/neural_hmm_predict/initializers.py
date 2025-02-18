@@ -140,7 +140,7 @@ def _all_global_blocks(indel_model_type: Literal["tkf91", "tkf92"],
             transits_logprobs_module = params_to_transition_logprobs.JointTKF91TransitionLogprobs
         
         elif indel_model_type == 'tkf92':
-            r_extend_module = concat_feats_to_params.EvoparamsFromFile
+            r_extend_module = concat_feats_to_params.GlobalTKF92ExtProb
             transits_logprobs_module = params_to_transition_logprobs.JointTKF92TransitionLogprobs
         
     # P(align, desc | anc)
@@ -325,7 +325,8 @@ def neural_hmm_params_instance( input_shapes,
     indel_model_type = model_config['indel_model_type']
     loss_type = model_config['loss_type']
     argsdict = initializers[preset_name]( indel_model_type = indel_model_type,
-                                          loss_type = loss_type )
+                                          loss_type = loss_type,
+                                          in_dict = None )
     
     from models.neural_hmm_predict.NeuralHmmBase import NeuralHmmBase
     finalpred_instance = NeuralHmmBase( config = model_config,
@@ -451,6 +452,7 @@ def create_all_tstates(seq_shapes,
         from models.sequence_embedders.concatenation_fns import extract_embs as concat_fn
     
     elif not pred_config['use_precomputed_indices']:
-        from models.sequence_embedders.concatenation_fns import combine_one_hot_embeddings as concat_fn
+        raise NotImplementedError('need to fix dimensional issues before using this')
+        # from models.sequence_embedders.concatenation_fns import combine_one_hot_embeddings as concat_fn
         
     return all_trainstates, all_instances, concat_fn

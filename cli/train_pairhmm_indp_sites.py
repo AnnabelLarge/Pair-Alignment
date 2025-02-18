@@ -46,6 +46,7 @@ from utils.sequence_length_helpers import (determine_seqlen_bin,
                                            determine_alignlen_bin)
 from utils.tensorboard_recording_utils import (write_times,
                                                write_optional_outputs_during_training)
+from utils.write_timing_file import write_timing_file
 
 # specific to training this model
 from models.simple_site_class_predict.initializers import init_pairhmm_indp_sites as init_pairhmm
@@ -207,9 +208,15 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     # rng key for train
     rngkey, training_rngkey = jax.random.split(rngkey, num=2)
     
+    # record time spent at each phase (use numpy array to store)
+    all_train_set_times = np.zeros( (args.num_epochs,2) )
+    all_eval_set_times = np.zeros( (args.num_epochs,2) )
+    all_epoch_times = np.zeros( (args.num_epochs,2) )
+    
     for epoch_idx in tqdm(range(args.num_epochs)):
         epoch_real_start = wall_clock_time()
         epoch_cpu_start = process_time()
+        
         ave_epoch_train_loss = 0
         ave_epoch_train_perpl = 0
         
@@ -217,10 +224,11 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
         ##############################################
         ### 3.1: train and update model parameters   #
         ##############################################
+        train_real_start = wall_clock_time()
+        train_cpu_start = process_time()
+        
         for batch_idx, batch in enumerate(training_dl):   
             batch_epoch_idx = epoch_idx * len(training_dl) + batch_idx  
-            batch_real_start = wall_clock_time()
-            batch_cpu_start = process_time() 
             
             rngkey_for_training_batch = jax.random.fold_in(training_rngkey, epoch_idx+batch_idx)
             out = train_fn_jitted(batch=batch, 
@@ -273,21 +281,30 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
                                                     interms_for_tboard = args.interms_for_tboard, 
                                                     write_histograms_flag = interm_rec or final_rec)
             
-            # record the CPU+system and wall-clock (real) time
-            batch_real_end = wall_clock_time()
-            batch_cpu_end = process_time()
-            write_times(cpu_start = batch_cpu_start, 
-                        cpu_end = batch_cpu_end, 
-                        real_start = batch_real_start, 
-                        real_end = batch_real_end, 
-                        tag = 'Process one training batch', 
-                        step = batch_epoch_idx, 
-                        writer_obj = writer)
-            
-            del batch_cpu_start, batch_cpu_end, batch_real_start, batch_real_end
-        
             
 #__4___8: epoch level (two tabs)
+        ### manage timing
+        # stop timer
+        train_real_end = wall_clock_time()
+        train_cpu_end = process_time()
+
+        # record the CPU+system and wall-clock (real) time
+        write_times(cpu_start = train_cpu_start, 
+                    cpu_end = train_cpu_end, 
+                    real_start = train_real_start, 
+                    real_end = train_real_end, 
+                    tag = 'Process training data', 
+                    step = epoch_idx, 
+                    writer_obj = writer)
+        
+        # also record for later
+        all_train_set_times[epoch_idx, 0] = train_real_end - train_real_start
+        all_train_set_times[epoch_idx, 1] = train_cpu_end - train_cpu_start
+        
+        del train_cpu_start, train_cpu_end
+        del train_real_start, train_real_end
+        
+        
         ##############################################################
         ### 3.3: also check current performance on held-out test set #
         ##############################################################
@@ -295,6 +312,10 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
         # but right now, that's not collected
         ave_epoch_test_loss = 0
         ave_epoch_test_perpl = 0
+        
+        # start timer
+        eval_real_start = wall_clock_time()
+        eval_cpu_start = process_time()
         
         for batch_idx, batch in enumerate(test_dl):
             eval_metrics = eval_fn_jitted(batch=batch, 
@@ -308,7 +329,29 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
             del weight
     
     
-#__4___8: epoch level (two tabs) 
+#__4___8: epoch level (two tabs)
+        ### manage timing
+        # stop timer
+        eval_real_end = wall_clock_time()
+        eval_cpu_end = process_time()
+
+        # record the CPU+system and wall-clock (real) time to tensorboard
+        write_times(cpu_start = eval_cpu_start, 
+                    cpu_end = eval_cpu_end, 
+                    real_start = eval_real_start, 
+                    real_end = eval_real_end, 
+                    tag = 'Process test set data', 
+                    step = epoch_idx, 
+                    writer_obj = writer)
+        
+        # also record for later
+        all_eval_set_times[epoch_idx, 0] = eval_real_end - eval_real_start
+        all_eval_set_times[epoch_idx, 1] = eval_cpu_end - eval_cpu_start
+        
+        del eval_cpu_start, eval_cpu_end
+        del eval_real_start, eval_real_end
+        
+        
         ##########################################
         ### 3.4: record scalars to tensorboard   #
         ##########################################
@@ -379,6 +422,8 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
             # record time spent at this epoch
             epoch_real_end = wall_clock_time()
             epoch_cpu_end = process_time()
+            all_epoch_times[epoch_idx, 0] = epoch_real_end - epoch_real_start
+            all_epoch_times[epoch_idx, 1] = epoch_cpu_end - epoch_cpu_start
             
             write_times(cpu_start = epoch_cpu_start, 
                         cpu_end = epoch_cpu_end, 
@@ -389,6 +434,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
                         writer_obj = writer)
             
             del epoch_cpu_start, epoch_cpu_end
+            del epoch_real_start, epoch_real_end
             
             # save the trainstates for later use
             best_trainstates = all_trainstates
@@ -403,7 +449,10 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
         # record time spent at this epoch
         epoch_real_end = wall_clock_time()
         epoch_cpu_end = process_time()
+        all_epoch_times[epoch_idx, 0] = epoch_real_end - epoch_real_start
+        all_epoch_times[epoch_idx, 1] = epoch_cpu_end - epoch_cpu_start
         
+        # write to tensorboard
         write_times(cpu_start = epoch_cpu_start, 
                     cpu_end = epoch_cpu_end, 
                     real_start = epoch_real_start, 
@@ -412,7 +461,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
                     step = epoch_idx, 
                     writer_obj = writer)
         
-        del epoch_cpu_start, epoch_cpu_end
+        del epoch_cpu_start, epoch_cpu_end, epoch_real_start, epoch_real_end
         
         
 
@@ -425,11 +474,22 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
         g.write('\n')
         g.write(f'4: post-training actions\n')
     
-    post_training_real_start = wall_clock_time()
-    post_training_cpu_start = process_time()
-    
     # don't accidentally use old trainstates or eval fn
     del all_trainstates, eval_fn_jitted
+    
+    
+    ### handle time
+    # write final timing
+    write_timing_file( outdir = args.logfile_dir,
+                       train_times = all_train_set_times,
+                       eval_times = all_eval_set_times,
+                       total_times = all_epoch_times )
+    
+    del all_train_set_times, all_eval_set_times, all_epoch_times
+
+    # new timer
+    post_training_real_start = wall_clock_time()
+    post_training_cpu_start = process_time()
     
     
     ### write to output logfile

@@ -164,7 +164,7 @@ class GlobalExchMat(ModuleBase):
         
         # init from xavier uniform
         elif not manual_init:
-            init_func = nn.initializers.glorot_uniform()
+            init_func = nn.initializers.normal()
         
         
         ### init matrix of logits
@@ -227,7 +227,7 @@ class GlobalEqulVec(ModuleBase):
         
         # init from xavier uniform
         elif not manual_init:
-            init_func = nn.initializers.glorot_uniform()
+            init_func = nn.initializers.normal()
         
         
         ### init vector of logits
@@ -299,7 +299,7 @@ class GlobalTKFLamMuRates(ModuleBase):
         
         # init from xavier uniform
         elif not manual_init:
-            init_func = nn.initializers.glorot_uniform()
+            init_func = nn.initializers.normal()
         
         
         ### init vector of logits
@@ -309,6 +309,7 @@ class GlobalTKFLamMuRates(ModuleBase):
                                  jnp.float32)[None, None, ...]
         
     def __call__(self,
+                 sow_intermediates: bool,
                  *args,
                  **kwargs):
         lam_mu, use_approx = self.logits_to_indel_rates(self.logits)
@@ -334,12 +335,12 @@ class GlobalTKFLamMuRates(ModuleBase):
           lower bounded
         """
         # lambda (1,1)
-        lam = bounded_sigmoid(x = self.logits[:,:,0],
+        lam = bounded_sigmoid(x = indel_param_logits[:,:,0],
                               min_val = self.lam_min_val,
                               max_val = self.lam_max_val)
         
         # mu (1,1)
-        offset = bounded_sigmoid(x = self.logits[:,:,1],
+        offset = bounded_sigmoid(x = indel_param_logits[:,:,1],
                                  min_val = self.offs_min_val,
                                  max_val = self.offs_max_val)
         mu = lam / ( 1 -  offset) 
@@ -378,7 +379,7 @@ class GlobalTKF92ExtProb(ModuleBase):
         
         # init from xavier uniform
         elif not manual_init:
-            init_func = nn.initializers.glorot_uniform()
+            init_func = nn.initializers.normal()
         
         
         ### init vector of logits
@@ -388,6 +389,7 @@ class GlobalTKF92ExtProb(ModuleBase):
                                  jnp.float32)
         
     def __call__(self,
+                 sow_intermediates: bool,
                  *args,
                  **kwargs):
         r_extend = bounded_sigmoid(x = self.logits,
@@ -423,18 +425,27 @@ class LocalExchMat(GlobalExchMat):
     name: str
     
     def setup(self):
-        # !!! manually set these
-        self.norm_type = 'layer'
-        self.norm = nn.LayerNorm( reduction_axes=-1,
-                                  feature_axes=-1 )
-        self.avg_pool_window = 9
-        self.use_bias = True
-        
         # load from config
         self.emission_alphabet_size = self.config['emission_alphabet_size']
         self.min_val, self.max_val = self.config.get( 'exchange_range',
                                                       (1e-4, 10) )
         self.avg_pool = self.config.get('avg_pool', False)
+        self.use_norm = self.config.get('norm', False)
+        
+        
+        ### !!! manually set these
+        if self.use_norm:
+            self.norm_type = 'layer'
+            self.norm = nn.LayerNorm( reduction_axes=-1,
+                                      feature_axes=-1 )
+        else:
+            self.norm_type = None
+            self.norm = lambda x, mask: x 
+            
+        if self.avg_pool:
+            self.avg_pool_window = 9
+        
+        self.use_bias = True
         
         
         ### projection layer; initialize with xavier (default)
@@ -538,16 +549,26 @@ class LocalEqulVec(GlobalEqulVec):
     name: str
     
     def setup(self):
-        # !!! manually set these
-        self.norm_type = 'layer'
-        self.norm = nn.LayerNorm( reduction_axes=-1,
-                                  feature_axes=-1 )
-        self.avg_pool_window = 9
-        self.use_bias = True
-        
         # load from config
         self.emission_alphabet_size = self.config['emission_alphabet_size']
-        self.avg_pool = self.config['avg_pool']
+        self.avg_pool = self.config.get('avg_pool', False)
+        self.use_norm = self.config.get('norm', False)
+        
+        
+        ### !!! manually set these
+        if self.use_norm:
+            self.norm_type = 'layer'
+            self.norm = nn.LayerNorm( reduction_axes=-1,
+                                      feature_axes=-1 )
+        else:
+            self.norm_type = None
+            self.norm = lambda x, mask: x
+            
+        if self.avg_pool:
+            self.avg_pool_window = 9
+        
+        self.use_bias = True
+        
         
         ### projection layer
         name = f'{self.name}/Project to equilibriums'
@@ -623,20 +644,29 @@ class LocalTKFLamMuRates(GlobalTKFLamMuRates):
     name: str
     
     def setup(self):
-        # !!! manually set these
-        self.norm_type = 'layer'
-        self.norm = nn.LayerNorm( reduction_axes=-1,
-                                  feature_axes=-1 )
-        self.avg_pool_window = 9
-        self.use_bias = True
-        
         # read from config
-        self.avg_pool = self.config['avg_pool']
         self.tkf_err = self.config.get('tkf_err', 1e-4)
         self.lam_min_val, self.lam_max_val = self.config.get( 'lambda_range', 
                                                                [self.tkf_err, 3] )
         self.offs_min_val, self.offs_max_val = self.config.get( 'offset_range', 
                                                                 [self.tkf_err, 0.333] )
+        self.avg_pool = self.config.get('lam_offset_avg_pool', False)
+        self.use_norm = self.config.get('lam_offset_norm', False)
+        
+        
+        ### !!! manually set these
+        if self.use_norm:
+            self.norm_type = 'layer'
+            self.norm = nn.LayerNorm( reduction_axes=-1,
+                                      feature_axes=-1 )
+        else:
+            self.norm_type = None
+            self.norm = lambda x, mask: x
+            
+        if self.avg_pool:
+            self.avg_pool_window = 9
+        
+        self.use_bias = True
         
         
         ### projection layer
@@ -712,18 +742,27 @@ class LocalTKF92ExtProb(GlobalTKF92ExtProb):
     name: str
     
     def setup(self):
-        # !!! manually set these
-        self.norm_type = 'layer'
-        self.norm = nn.LayerNorm( reduction_axes=-1,
-                                  feature_axes=-1 )
-        self.avg_pool_window = 9
-        self.use_bias = True
-        
         # read from config
-        self.avg_pool = self.config['avg_pool']
         self.tkf_err = self.config.get('tkf_err', 1e-4)
         self.r_extend_min_val, self.r_extend_max_val = self.config.get( 'r_range', 
                                                                 [self.tkf_err, 0.8] )
+        self.avg_pool = self.config.get('r_avg_pool', False)
+        self.use_norm = self.config.get('r_norm', False)
+        
+        
+        ### !!! manually set these
+        if self.use_norm:
+            self.norm_type = 'layer'
+            self.norm = nn.LayerNorm( reduction_axes=-1,
+                                      feature_axes=-1 )
+        else:
+            self.norm_type = None
+            self.norm = lambda x, mask: x
+            
+        if self.avg_pool:
+            self.avg_pool_window = 9
+        
+        self.use_bias = True
         
         
         ### projection layer
@@ -753,7 +792,7 @@ class LocalTKF92ExtProb(GlobalTKF92ExtProb):
             
         ### 2.) projection
         # (B, L_align, H) -> (B, L_align)
-        logits = jnp.self.project_to_evoparams(datamat)[...,0]
+        logits = self.project_to_evoparams(datamat)[...,0]
         
         ### 3.) activation
         r_extend = bounded_sigmoid(x = logits,

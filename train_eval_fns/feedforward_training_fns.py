@@ -84,9 +84,9 @@ def train_one_batch(batch,
     del interms_for_tboard
     
     
-    #########################
-    ### UNPACK THE INPUTS   #
-    #########################
+    ####################
+    ### UNPACK, CLIP   #
+    ####################
     ### unpack
     encoder_trainstate, decoder_trainstate, finalpred_trainstate = all_trainstates
     encoder_instance, decoder_instance, finalpred_instance = all_model_instances
@@ -101,26 +101,6 @@ def train_one_batch(batch,
     clipped_unaligned_seqs = batch_unaligned_seqs[:, :max_seq_len, :]
     clipped_aligned_mats = batch_aligned_mats[:, :max_align_len, :]
     
-    # split into prefixes and suffixes, to avoid confusion
-    # prefixes: <s> A  B  C    the "a" in P(b | a, X, Y_{...j})
-    #            |  |  |  |
-    #            v  v  v  v
-    # suffixes:  A  B  C <e>    the "b" in P(b | a, X, Y_{...j})
-    aligned_mats_prefixes = clipped_aligned_mats[:,:-1,:]
-    unaligned_seqs_prefixes = clipped_unaligned_seqs[:,:-1,:]
-    aligned_mats_suffixes = clipped_aligned_mats[:,1:,:]
-    del clipped_unaligned_seqs, clipped_aligned_mats
-    
-    
-    ### unpack sequences
-    # unaligned sequences used in __call__; final size is (B, max_seq_len)
-    anc_seqs = unaligned_seqs_prefixes[...,0]
-    desc_seqs = unaligned_seqs_prefixes[...,1]
-    
-    # precomputed alignment indices; final size is (B, max_align_len-1, 2)
-    # don't include last token, since it's not used to predict any valid input
-    align_idxes = aligned_mats_prefixes[...,-2:]
-    
     
     ### produce new keys for each network
     all_keys = jax.random.split(training_rngkey, num=4)
@@ -131,6 +111,26 @@ def train_one_batch(batch,
     ##################
     ### PREPROCESS   #
     ##################
+    ### unpack features
+    # unaligned sequences used in __call__; final size is (B, max_seq_len)
+    anc_seqs = clipped_unaligned_seqs[...,0]
+    desc_seqs = clipped_unaligned_seqs[...,1]
+    
+    # split into prefixes and suffixes, to avoid confusion
+    # prefixes: <s> A  B  C    the "a" in P(b | a, X, Y_{...j})
+    #            |  |  |  |
+    #            v  v  v  v
+    # suffixes:  A  B  C <e>    the "b" in P(b | a, X, Y_{...j})
+    aligned_mats_prefixes = clipped_aligned_mats[:,:-1,:]
+    unaligned_seqs_prefixes = clipped_unaligned_seqs[:,:-1,:]
+    aligned_mats_suffixes = clipped_aligned_mats[:,1:,:]
+    del clipped_unaligned_seqs, clipped_aligned_mats
+    
+    # precomputed alignment indices; final size is (B, max_align_len-1, 2)
+    # don't include last token, since it's not used to predict any valid input
+    align_idxes = aligned_mats_prefixes[...,-2:]
+    
+    
     ### true_out
     # only need the alignment-augmented descendant; dim0=0
     true_out = aligned_mats_suffixes[...,0]
@@ -454,9 +454,9 @@ def eval_one_batch(batch,
     del interms_for_tboard
     
     
-    ##################################
-    ### UNPACK THE INPUTS, PREPROC   #
-    ##################################
+    ####################
+    ### UNPACK, CLIP   #
+    ####################
     ### unpack
     encoder_trainstate, decoder_trainstate, finalpred_trainstate = all_trainstates
     encoder_instance, decoder_instance, finalpred_instance = all_model_instances
@@ -471,6 +471,15 @@ def eval_one_batch(batch,
     clipped_unaligned_seqs = batch_unaligned_seqs[:, :max_seq_len, :]
     clipped_aligned_mats = batch_aligned_mats[:, :max_align_len, :]
     
+    
+    ##################
+    ### PREPROCESS   #
+    ##################
+    ### unpack features
+    # unaligned sequences used in __call__; final size is (B, max_seq_len)
+    anc_seqs = clipped_unaligned_seqs[...,0]
+    desc_seqs = clipped_unaligned_seqs[...,1]
+    
     # split into prefixes and suffixes, to avoid confusion
     # prefixes: <s> A  B  C    the "a" in P(b | a, X, Y_{...j})
     #            |  |  |  |
@@ -481,20 +490,11 @@ def eval_one_batch(batch,
     aligned_mats_suffixes = clipped_aligned_mats[:,1:,:]
     del clipped_unaligned_seqs, clipped_aligned_mats
     
-    
-    ### unpack sequences
-    # unaligned sequences used in __call__; final size is (B, max_seq_len)
-    anc_seqs = unaligned_seqs_prefixes[...,0]
-    desc_seqs = unaligned_seqs_prefixes[...,1]
-    
     # precomputed alignment indices; final size is (B, max_align_len-1, 2)
     # don't include last token, since it's not used to predict any valid input
     align_idxes = aligned_mats_prefixes[...,-2:]
     
     
-    ##################
-    ### PREPROCESS   #
-    ##################
     ### true_out
     # only need the alignment-augmented descendant; dim0=0
     true_out = aligned_mats_suffixes[...,0]
@@ -622,7 +622,7 @@ def eval_one_batch(batch,
     ### COMPILE FINAL DICTIONARY TO RETURN   #
     ##########################################
     ### things that always get returned
-    out_dict = {'loss': loss,
+    out_dict = {'batch_loss': loss,
                 'sum_neg_logP': loss_fn_dict['sum_neg_logP'],
                 'neg_logP_length_normed': loss_fn_dict['neg_logP_length_normed']}
     

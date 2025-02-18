@@ -255,6 +255,11 @@ class NeuralHmmBase(ModuleBase):
         curr_state = true_out[...,3]
         residues_in_alignment = true_out[...,:2]
         
+        # get dims
+        T = logprob_emit_match.shape[0]
+        B = logprob_emit_match.shape[1]
+        L = logprob_emit_match.shape[2]
+        
         
         ### score transitions: (T, B, length_for_scan)
         tr = score_transitions(alignment_state = alignment_path,
