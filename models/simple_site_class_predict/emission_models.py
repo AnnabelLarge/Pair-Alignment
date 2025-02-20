@@ -334,7 +334,7 @@ class LG08RateMatFitBoth(LG08RateMatFitRateMult):
             
             if sow_intermediates:
                 for i in range(rate_multiplier.shape[0]):
-                    val_to_write = rate_multiplier[i].item()
+                    val_to_write = rate_multiplier[i]
                     lab = f'{self.name}/rate multiplier {i}'
                     self.sow_histograms_scalars(mat= val_to_write, 
                                                 label=lab, 

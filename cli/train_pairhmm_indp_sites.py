@@ -558,10 +558,10 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     ### update the logfile with final losses  #
     ###########################################
     to_write = {'RUN': args.training_wkdir,
-                'train_ave_{args.loss_type}_loss_seqlen_normed': train_summary_stats['final_ave_loss_seqlen_normed'],
+                f'train_ave_{args.loss_type}_loss_seqlen_normed': train_summary_stats['final_ave_loss_seqlen_normed'],
                 'train_perplexity': train_summary_stats['final_perplexity'],
                 'train_ece': train_summary_stats['final_ece'] ,
-                'test_ave_{args.loss_type}_loss_seqlen_normed': test_summary_stats['final_ave_loss_seqlen_normed'],
+                f'test_ave_{args.loss_type}_loss_seqlen_normed': test_summary_stats['final_ave_loss_seqlen_normed'],
                 'test_perplexity': test_summary_stats['final_perplexity'],
                 'test_ece': test_summary_stats['final_ece']
                 }
