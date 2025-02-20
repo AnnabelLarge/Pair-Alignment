@@ -81,7 +81,7 @@ class MarkovSitesJointPairHMM(ModuleBase):
         ### get logprob matrices   #
         ############################
         ### emissions from indels
-        logprob_emit_at_indel = self.indel_prob_module()
+        logprob_emit_at_indel = self.indel_prob_module( sow_intermediates = sow_intermediates )
         
         
         ### emissions from match sites
@@ -108,7 +108,7 @@ class MarkovSitesJointPairHMM(ModuleBase):
         
         
         ### probability of being in any particular class
-        log_class_probs = self.class_logprobs_module()
+        log_class_probs = self.class_logprobs_module(sow_intermediates = sow_intermediates)
         
         
         ######################################

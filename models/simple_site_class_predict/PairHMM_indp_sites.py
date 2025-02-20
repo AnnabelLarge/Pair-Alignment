@@ -42,16 +42,16 @@ class CondPairHMM(ModuleBase):
     name: str
     
     def setup(self):
-        num_emit_site_classes = self.config['num_emit_site_classes']
+        self.num_emit_site_classes = self.config['num_emit_site_classes']
         indel_model_type = self.config['indel_model_type']
         self.norm_loss_by = self.config['norm_loss_by']
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
         
         ### how to score emissions from indel sites
-        if num_emit_site_classes == 1:
+        if self.num_emit_site_classes == 1:
             self.indel_prob_module = LogEqulVecFromCounts(config = self.config,
                                                        name = f'get equilibrium')
-        elif num_emit_site_classes > 1:
+        elif self.num_emit_site_classes > 1:
             self.indel_prob_module = LogEqulVecPerClass(config = self.config,
                                                      name = f'get equilibrium')
         
@@ -83,39 +83,60 @@ class CondPairHMM(ModuleBase):
         # you'll need to unpack time from batch; will have to initialize a new
         # time array with shape (T, B) instead of (T,)
         
-        ### get logprob matrices
-        logprob_emit_at_indel = self.indel_prob_module()
-        rate_mat_times_rho = self.rate_matrix_module(logprob_equl = logprob_emit_at_indel,
-                                                     sow_intermediates = sow_intermediates)
+        ############################
+        ### get logprob matrices   #
+        ############################
+        ### build logprob emissions at match
+        # first, get log(equilibrium distribution): (C, alph)
+        log_equl_dist_per_class = self.indel_prob_module( sow_intermediates = sow_intermediates )
         
-        # rate_mat_times_rho: (C, alph, alph)
+        # get rate matrix times rate multiplier, per each class: (C, alph, alph)
+        rate_mat_times_rho_per_class = self.rate_matrix_module(logprob_equl = log_equl_dist_per_class,
+                                                                sow_intermediates = sow_intermediates)
+        
+        # build logprob matrix at every class
         # time: (T,)
         # output: (T, C, alph, alph)
-        to_expm = jnp.multiply( rate_mat_times_rho[None,...],
+        to_expm = jnp.multiply( rate_mat_times_rho_per_class[None,...],
                                 t_array[:, None,None,None,] )
+        prob_emit_at_match_per_class = expm(to_expm)
+        logprob_emit_at_match_per_class = safe_log( prob_emit_at_match_per_class )
         
-        prob_emit_at_match = expm(to_expm)
-        logprob_emit_at_match = safe_log( prob_emit_at_match )
-        logprob_emit_at_match = self.apply_weighting(logprob_emit_at_indel = logprob_emit_at_indel,
-                                                     logprob_emit_at_match = logprob_emit_at_match)
+        # apply weighting; LSE across classes: (T, alph, alph)
+        norm_factor = logsumexp( log_equl_dist_per_class, axis=0 )
+        log_subs_weight = log_equl_dist_per_class - norm_factor[None, :] #(C, alph)
+        weighted_logprob_mat = logprob_emit_at_match_per_class + log_subs_weight[None,:,:,None]
+        logprob_emit_at_match = logsumexp( weighted_logprob_mat, axis=1 )
+        del log_subs_weight
         
+        
+        ### build logprob emissions at indels; assumes P(C) is uniform
+        # (alph, )
+        log_ins_weight = jnp.log( 1/self.num_emit_site_classes )
+        logprob_emit_at_indel = -log_ins_weight + norm_factor
+        del log_ins_weight
+        
+        
+        ### logprob transitions is more straightforward
         # (T,4,4)
         logprob_transit = self.transitions_module(t_array = t_array,
                                                   sow_intermediates = sow_intermediates)
         
         
-        ### score
+        #############
+        ### score   #
+        #############
         # (T, B)
-        match_emit_score = jnp.einsum('tcij,bij->tb',
+        match_emit_score = jnp.einsum('tij,bij->tb',
                                       logprob_emit_at_match, 
                                       subCounts)
         # (B,)
-        ins_emit_score = jnp.einsum('ci,bi->b',
+        ins_emit_score = jnp.einsum('i,bi->b',
                                     logprob_emit_at_indel, 
                                     insCounts)
         
         # T,B)
-        transit_score = jnp.einsum('tcmn,bmn->tb', 
+        transit_score = jnp.einsum('tmn,bmn->tb', 
                                    logprob_transit, 
                                    transCounts)
         
@@ -153,21 +174,6 @@ class CondPairHMM(ModuleBase):
         
         return out
         
-    def apply_weighting(self,
-                        logprob_emit_at_indel,
-                        logprob_emit_at_match): 
-        """
-        weights determined by ancestor frequencies
-        """
-        # (C, alph)
-        equl_prob = jnp.exp( logprob_emit_at_indel )
-        
-        # weight each by pi(c|x); broadcast across rows
-        sum_per_class = equl_prob.sum(axis=0) #(alph)
-        weight = (equl_prob / sum_per_class[None,:]) #(C, alph)
-        log_weight = safe_log(weight)
-        weighted_logprob_mat = log_weight[None,:,:,None] + logprob_emit_at_match
-        return weighted_logprob_mat
     
     def marginalize_over_times(self,
                                logprob_perSamp_perTime,
@@ -195,6 +201,7 @@ class CondPairHMM(ModuleBase):
                      tstate,
                      out_folder: str):
         params_dict = tstate.params['params']
+        
         
         ##################################################
         ### use default values, if ranges aren't found   #
@@ -229,7 +236,8 @@ class CondPairHMM(ModuleBase):
             class_probs = nn.softmax(class_logits)
             with open(f'{out_folder}/PARAMS_class_probs.txt','w') as g:
                 [g.write(f'{elem.item()}\n') for elem in class_probs]
-        
+                
+                
         ### emissions
         if 'get rate matrix' in params_dict.keys():
             
@@ -358,46 +366,67 @@ class JointPairHMMFitBoth(CondPairHMM):
         # you'll need to unpack time from batch; will have to initialize a new
         # time array with shape (T, B) instead of (T,)
         
-        ### get logprob matrices
-        logprob_emit_at_indel = self.indel_prob_module()
-        rate_mat_times_rho = self.rate_matrix_module(logprob_equl = logprob_emit_at_indel,
-                                                     sow_intermediates = sow_intermediates)
+        ############################
+        ### get logprob matrices   #
+        ############################
+        ### build logprob emissions at match
+        # first, get log(equilibrium distribution): (C, alph)
+        log_equl_dist_per_class = self.indel_prob_module(sow_intermediates = sow_intermediates)
         
-        # rate_mat_times_rho: (C, alph, alph)
+        # get rate matrix times rate multiplier, per each class: (C, alph, alph)
+        rate_mat_times_rho_per_class = self.rate_matrix_module(logprob_equl = log_equl_dist_per_class,
+                                                                sow_intermediates = sow_intermediates)
+        
+        # build logprob matrix at every class
         # time: (T,)
         # output: (T, C, alph, alph)
-        to_expm = jnp.multiply( rate_mat_times_rho[None,...],
+        # come back here
+        to_expm = jnp.multiply( rate_mat_times_rho_per_class[None,...],
                                 t_array[:, None,None,None,] )
-        cond_prob_emit_at_match = expm(to_expm)
-        cond_logprob_emit_at_match = safe_log( cond_prob_emit_at_match )
-        joint_logprob_emit_at_match = cond_logprob_emit_at_match + logprob_emit_at_indel[None,:,:,None]
-        joint_logprob_emit_at_match = self.apply_weighting(joint_logprob_per_class = joint_logprob_emit_at_match)
+        cond_prob_emit_at_match_per_class = expm(to_expm)
+        cond_logprob_emit_at_match_per_class = safe_log( cond_prob_emit_at_match_per_class )
+        joint_logprob_emit_at_match_per_class = ( cond_logprob_emit_at_match_per_class + 
+                                                  log_equl_dist_per_class[None,:,:,None] )
         
+        # apply weighting; LSE across classes: (T, alph, alph)
+        log_class_probs = self.site_class_probability_module(sow_intermediates = sow_intermediates) #(C,)
+        weighted_joint_logprob_emit_at_match = ( log_class_probs[None,:,None,None] + 
+                                                 joint_logprob_emit_at_match_per_class )
+        joint_logprob_emit_at_match = logsumexp( weighted_joint_logprob_emit_at_match, axis=1 )
+        
+        
+        ### build logprob emissions at indels
+        to_logsumexp = log_equl_dist_per_class + log_class_probs[:, None] #(C, alph)
+        logprob_emit_at_indel = logsumexp( to_logsumexp, axis=0 )
+        
+        
+        ### logprob transitions is more straightforward (only one)
         # (T,4,4)
         logprob_transit = self.transitions_module(t_array = t_array,
                                                   sow_intermediates = sow_intermediates)
-        
-
+        logprob_transit = logprob_transit[:,0,...]
+    
+    
         ### score
         # (T, B)
-        match_emit_score = jnp.einsum('tcij,bij->tb',
+        match_emit_score = jnp.einsum('tij,bij->tb',
                                       joint_logprob_emit_at_match, 
                                       subCounts)
         # (B,)
-        ins_emit_score = jnp.einsum('ci,bi->b',
+        ins_emit_score = jnp.einsum('i,bi->b',
                                     logprob_emit_at_indel, 
                                     insCounts)
         # (B,)
-        del_emit_score = jnp.einsum('ci,bi->b',
+        del_emit_score = jnp.einsum('i,bi->b',
                                     logprob_emit_at_indel, 
                                     delCounts)
         
         # T,B)
-        transit_score = jnp.einsum('tcmn,bmn->tb', 
+        transit_score = jnp.einsum('tmn,bmn->tb', 
                                    logprob_transit, 
                                    transCounts)
         
-        # final score is (T,B)
+        # fcnal score is (T,B)
         logprob_perSamp_perTime = (match_emit_score + 
                                    ins_emit_score[None,:] +
                                    del_emit_score[None,:] +
@@ -427,18 +456,11 @@ class JointPairHMMFitBoth(CondPairHMM):
         loss = -jnp.mean(logprob_perSamp_length_normed)
         
         out = {'loss': loss,
-                    'sum_neg_logP': sum_neg_logP,
-                    'neg_logP_length_normed': logprob_perSamp_length_normed}
+               'sum_neg_logP': sum_neg_logP,
+               'neg_logP_length_normed': logprob_perSamp_length_normed}
         
         return out
     
-    
-    def apply_weighting(self,
-                        joint_logprob_per_class):
-        log_weight = self.site_class_probability_module()
-        log_weight = log_weight[None,:,None,None]
-        return log_weight + joint_logprob_per_class
-
 
 class JointPairHMMFitRateMult(JointPairHMMFitBoth):
     """

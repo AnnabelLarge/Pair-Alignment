@@ -118,6 +118,7 @@ def final_eval_wrapper(dataloader,
                        dataset, 
                        best_trainstates, 
                        eval_fn_jitted,
+                       save_per_sample_losses: bool,
                        logfile_dir: str,
                        out_arrs_dir: str, 
                        outfile_prefix: str, 
@@ -150,8 +151,9 @@ def final_eval_wrapper(dataloader,
         final_perplexity  += final_loglikes['perplexity'].mean() * wf
 
         # write dataframe
-        final_loglikes.to_csv((f'{logfile_dir}/{outfile_prefix}_pt{batch_idx}_'+
-                              'FINAL-LOGLIKES.tsv'), sep='\t')
+        if save_per_sample_losses:
+            final_loglikes.to_csv((f'{logfile_dir}/{outfile_prefix}_pt{batch_idx}_'+
+                                  'FINAL-LOGLIKES.tsv'), sep='\t')
     
     
     ######################

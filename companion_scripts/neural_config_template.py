@@ -147,6 +147,7 @@ def make_train_config(anc_model_type: str,
                            "final_logprobs":"[BOOL]"
                            }),
                        "save_arrs": "[BOOL]",
+                       "save_per_sample_losses": "[BOOL]",
                        "histogram_output_freq": "[INT]",
                        
                        "LINEBREAK104":"",

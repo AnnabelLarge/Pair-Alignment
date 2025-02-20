@@ -29,6 +29,7 @@ def final_eval_wrapper(dataloader,
                        eval_fn_jitted,
                        out_alph_size: int, 
                        save_arrs: bool,
+                       save_per_sample_losses: bool,
                        interms_for_tboard: dict, 
                        logfile_dir: str,
                        out_arrs_dir: str, 
@@ -133,8 +134,9 @@ def final_eval_wrapper(dataloader,
             final_acc += acc_perSamp.mean() * wf
         
         # write dataframe
-        final_loglikes.to_csv((f'{logfile_dir}/{outfile_prefix}_pt{batch_idx}_'+
-                              'FINAL-LOGLIKES.tsv'), sep='\t')
+        if save_per_sample_losses:
+            final_loglikes.to_csv((f'{logfile_dir}/{outfile_prefix}_pt{batch_idx}_'+
+                                  'FINAL-LOGLIKES.tsv'), sep='\t')
         
         
         ###############################################

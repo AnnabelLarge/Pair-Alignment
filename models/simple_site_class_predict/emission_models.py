@@ -59,15 +59,28 @@ class SiteClassLogprobs(ModuleBase):
     name: str
     
     def setup(self):
-        n_classes = self.config['num_emit_site_classes']
+        self.n_classes = self.config['num_emit_site_classes']
         
         self.class_logits = self.param('class_logits',
                                         nn.initializers.normal(),
-                                        (n_classes,),
+                                        (self.n_classes,),
                                         jnp.float32)
     
-    def __call__(self):
-        return nn.log_softmax(self.class_logits)
+    def __call__(self,
+                 sow_intermediates):
+        
+        log_class_probs = nn.log_softmax(self.class_logits)
+        
+        if sow_intermediates:
+            for i in range(log_class_probs.shape[0]):
+                val_to_write = jnp.exp( log_class_probs[i] )
+                lab = f'{self.name}/prob of class {i}'
+                self.sow_histograms_scalars(mat= val_to_write, 
+                                            label=lab, 
+                                            which='scalars')
+                del lab
+        
+        return log_class_probs
 
 
 class SiteClassLogprobsFromFile(ModuleBase):
@@ -80,7 +93,8 @@ class SiteClassLogprobsFromFile(ModuleBase):
             class_probs = jnp.load(f)
         self.log_class_probs = safe_log(class_probs)
     
-    def __call__(self):
+    def __call__(self,
+                 **kwargs):
         return self.log_class_probs
 
 
@@ -161,7 +175,6 @@ class LG08RateMatFromFile(ModuleBase):
         final = jnp.einsum( 'c,cij->cij', 
                             rate_multiplier, 
                             subst_rate_mat ) 
-        
         return final
 
 
@@ -200,7 +213,7 @@ class LG08RateMatFitRateMult(LG08RateMatFromFile):
         ### RATE MULTIPLIERS: (c,)
         if self.num_emit_site_classes > 1:
             self.rate_mult_logits = self.param('rate_multipliers',
-                                               nn.initializers.uniform(),
+                                               nn.initializers.normal(),
                                                (self.num_emit_site_classes,),
                                                jnp.float32)
         
@@ -217,6 +230,16 @@ class LG08RateMatFitRateMult(LG08RateMatFromFile):
             rate_multiplier = bounded_sigmoid(self.rate_mult_logits,
                                               min_val = self.rate_mult_min_val,
                                               max_val = self.rate_mult_max_val)
+            
+            if sow_intermediates:
+                for i in range(rate_multiplier.shape[0]):
+                    val_to_write = rate_multiplier[i]
+                    lab = f'{self.name}/rate multiplier {i}'
+                    self.sow_histograms_scalars(mat= val_to_write, 
+                                                label=lab, 
+                                                which='scalars')
+                    del lab
+
         else:
             rate_multiplier = jnp.array([1])
         
@@ -308,6 +331,16 @@ class LG08RateMatFitBoth(LG08RateMatFitRateMult):
             rate_multiplier = bounded_sigmoid(self.rate_mult_logits,
                                               min_val = self.rate_mult_min_val,
                                               max_val = self.rate_mult_max_val)
+            
+            if sow_intermediates:
+                for i in range(rate_multiplier.shape[0]):
+                    val_to_write = rate_multiplier[i].item()
+                    lab = f'{self.name}/rate multiplier {i}'
+                    self.sow_histograms_scalars(mat= val_to_write, 
+                                                label=lab, 
+                                                which='scalars')
+                    del lab
+                    
         else:
             rate_multiplier = jnp.array([1])
         
@@ -408,9 +441,20 @@ class LogEqulVecPerClass(ModuleBase):
                                  jnp.float32)
         
     def __call__(self,
+                 sow_intermediates: bool,
                  *args,
                  **kwargs):
-        return nn.log_softmax( self.logits, axis = 1 )
+        
+        out = nn.log_softmax( self.logits, axis = 1 )
+
+        if sow_intermediates:
+            lab = f'{self.name}/equilibrium dist'
+            self.sow_histograms_scalars(mat= out, 
+                                        label=lab, 
+                                        which='scalars')
+            del lab
+        
+        return out
 
 
 class LogEqulVecFromFile(ModuleBase):
@@ -422,7 +466,7 @@ class LogEqulVecFromFile(ModuleBase):
         equl_file = self.config['filenames']['equl_dist']
         
         with open(equl_file,'rb') as f:
-            prob_equilibr = jnp.load(f)
+            prob_equilibr = jnp.load(f, allow_pickle=True)
 
         self.logprob_equilibr = safe_log(prob_equilibr)
         

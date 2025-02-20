@@ -158,7 +158,7 @@ class CondTKF91TransitionLogprobs(ModuleBase):
         log_r = out_dict['log_one_minus_gamma'] + out_dict['log_one_minus_alpha']
         log_d_e = out_dict['log_one_minus_gamma']
         
-        # (T,4,4)
+        # (T,1,4,4)
         out = jnp.stack([ jnp.stack([log_a_f, log_b_g, log_c_h, log_mis_e], axis=-1),
                            jnp.stack([log_a_f, log_b_g, log_c_h, log_mis_e], axis=-1),
                            jnp.stack([  log_p,   log_q,   log_r,   log_d_e], axis=-1),
@@ -402,7 +402,7 @@ class JointTKF91TransitionLogprobs(CondTKF91TransitionLogprobs):
                  log_lam_div_mu)
         log_d_e = out_dict['log_one_minus_gamma'] + log_one_minus_lam_div_mu
         
-        #(T, 4, 4)
+        #(T, 1, 4, 4)
         out = jnp.stack([ jnp.stack([log_a_f, log_b_g, log_c_h, log_mis_e], axis=-1),
                            jnp.stack([log_a_f, log_b_g, log_c_h, log_mis_e], axis=-1),
                            jnp.stack([  log_p,   log_q,   log_r,   log_d_e], axis=-1),

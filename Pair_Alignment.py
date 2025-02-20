@@ -53,9 +53,9 @@ def main():
     args = parser.parse_args()
     
     
-    # ### UNCOMMENT TO RUN IN SPYDER IDE
-    # args.task = 'train'
-    # args.configs = 'DRYRUN-CONFIG_CNN_neural_hmm.json'
+    ### UNCOMMENT TO RUN IN SPYDER IDE
+    args.task = 'train'
+    args.configs = 'CONFIG_indp-sites.json'
     
     
     ### helper function to open a single config file and extract additional arguments
@@ -97,11 +97,6 @@ def main():
         
         # train model
         dload_lst = init_dataloaders(args, 'train')
-        
-        # print('DEBUG: DISABLING JIT!!!')
-        # print('DEBUG: DISABLING JIT!!!')
-        # print('DEBUG: DISABLING JIT!!!')
-        # with jax.disable_jit():
         train(args, dload_lst)
         
     

@@ -86,6 +86,7 @@ def make_pairhmm_train_config(load_all: bool):
                            "forward_pass_outputs":"[BOOL]",
                            }),
                        "save_arrs": "[BOOL]",
+                       "save_per_sample_losses": "[BOOL]",
                        "histogram_output_freq": "[INT]",
                        
                        "LINEBREAK104":"",

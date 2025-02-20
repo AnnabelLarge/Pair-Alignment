@@ -531,6 +531,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
                                              dataset = training_dset, 
                                              best_trainstates = best_trainstates, 
                                              eval_fn_jitted = eval_fn_jitted,
+                                             save_per_sample_losses = args.save_per_sample_losses,
                                              logfile_dir = args.logfile_dir,
                                              out_arrs_dir = args.out_arrs_dir,
                                              outfile_prefix = f'train-set')
@@ -547,6 +548,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
                                             dataset = test_dset, 
                                             best_trainstates = best_trainstates, 
                                             eval_fn_jitted = eval_fn_jitted,
+                                            save_per_sample_losses = args.save_per_sample_losses,
                                             logfile_dir = args.logfile_dir,
                                             out_arrs_dir = args.out_arrs_dir,
                                             outfile_prefix = f'test-set')

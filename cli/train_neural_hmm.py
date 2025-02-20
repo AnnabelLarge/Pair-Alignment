@@ -721,6 +721,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
                                              eval_fn_jitted = eval_fn_jitted,
                                              out_alph_size = args.full_alphabet_size,
                                              save_arrs = args.save_arrs,
+                                             save_per_sample_losses = args.save_per_sample_losses,
                                              interms_for_tboard = args.interms_for_tboard, 
                                              logfile_dir = args.logfile_dir,
                                              out_arrs_dir = args.out_arrs_dir,
@@ -744,6 +745,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
                                              eval_fn_jitted = eval_fn_jitted,
                                              out_alph_size = args.full_alphabet_size, 
                                              save_arrs = args.save_arrs,
+                                             save_per_sample_losses = args.save_per_sample_losses,
                                              interms_for_tboard = args.interms_for_tboard, 
                                              logfile_dir = args.logfile_dir,
                                              out_arrs_dir = args.out_arrs_dir,
@@ -775,8 +777,8 @@ def train_neural_hmm(args, dataloader_dict: dict):
     cpu_sys_time = post_training_cpu_end - post_training_cpu_start
     real_time = post_training_real_end - post_training_real_start
     
-    df = pd.DataFrame({'label': ['CPU+sys time', 'Real time'],
-                       'value': [cpu_sys_time, real_time]})
+    df = pd.DataFrame({'label': ['Real time', 'CPU+sys time'],
+                       'value': [real_time, cpu_sys_time]})
     markdown_table = df.to_markdown()
     writer.add_text(tag = 'Code Timing | Post-training actions',
                     text_string = markdown_table,
