@@ -237,9 +237,7 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
             # unpack briefly to get max len and number of samples in the 
             #   batch; place in some bin (this controls how many jit 
             #   compilations you do)
-            batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch)
-            batch_max_alignlen = batch_max_alignlen.item()
-                
+            batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch).item()
             
             ### run function to train on one batch of samples
             rngkey_for_training_batch = jax.random.fold_in(training_rngkey, epoch_idx+batch_idx)
@@ -330,8 +328,7 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
             # unpack briefly to get max len and number of samples in the 
             #   batch; place in some bin (this controls how many jit 
             #   compilations you do)
-            batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch)
-            batch_max_alignlen = batch_max_alignlen.item()
+            batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch).item()
                 
             eval_metrics = eval_fn_jitted(batch=batch, 
                                           all_trainstates=all_trainstates,

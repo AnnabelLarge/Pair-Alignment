@@ -907,3 +907,89 @@ class JointTKF92TransitionLogprobsFromFile(JointTKF92TransitionLogprobs):
                                         which='scalars')
         
         return self.fill_joint_tkf92(out_dict, r_extend)
+
+
+class ProbSpaceJointTKF92TransitionLogprobs(CondTKF92TransitionLogprobs):
+    """
+    inherit setup from CondTKF92TransitionLogprobs
+    inherit logits_to_indel_rates from CondTKF91TransitionLogprobs
+    
+    """
+    config: dict
+    name: str
+    
+    def __call__(self,
+                 t_array,
+                 sow_intermediates: bool):
+        out = self.logits_to_indel_rates(lam_mu_logits = self.tkf_lam_mu_logits,
+                                         lam_min_val = self.lam_min_val,
+                                         lam_max_val = self.lam_max_val,
+                                         offs_min_val = self.offs_min_val,
+                                         offs_max_val = self.offs_max_val,
+                                         tkf_err = self.tkf_err )
+        lam, mu, use_approx = out
+        del out
+        
+        r_ext_prob = bounded_sigmoid(x = self.r_extend_logits,
+                                   min_val = self.r_extend_min_val,
+                                   max_val = self.r_extend_max_val)
+        
+        
+        ###############################################
+        ### alpha, beta, gamma in probability-space   #
+        ###############################################
+        alpha = jnp.exp(-mu*t_array)
+    
+        def orig_tkf_params():
+            numerator = lam * ( jnp.exp(-lam * t_array) - jnp.exp(-mu * t_array) )
+            denom = ( mu * jnp.exp(-lam * t_array) ) - ( lam * jnp.exp(-mu * t_array) )
+            beta = numerator / denom
+            gamma = 1 - (mu * beta) / (lam * (1-alpha) )
+            return jnp.array([beta, gamma])
+            
+        def approx_tkf_params():
+            beta = ( (1 - self.tkf_err)*(mu * t_array) ) / (mu * t_array + 1)
+            gamma = 1 - (mu * t_array) / ( (1 - alpha) * (mu * t_array + 1) )
+            return jnp.array([beta, gamma])
+        
+        out = jnp.where(use_approx,
+                        approx_tkf_params(),
+                        orig_tkf_params())
+        beta, gamma = out
+        
+        
+        ##############################
+        ### fill transition matrix   #
+        ##############################
+        # M -> any
+        a = r_ext_prob + (1-r_ext_prob) * (1-beta) *    alpha  *    (lam/mu)
+        b =              (1-r_ext_prob) *    beta
+        c_h =            (1-r_ext_prob) * (1-beta) * (1-alpha) *    (lam/mu)
+        mi_to_end =      (1-r_ext_prob) * (1-beta) *             (1-(lam/mu))
+        
+        # I -> any
+        f =              (1-r_ext_prob) * (1-beta) * alpha * (lam/mu)
+        g = r_ext_prob + (1-r_ext_prob) *    beta
+        
+        # D -> any
+        p =              (1-r_ext_prob) * (1-gamma) *    alpha  *    (lam/mu)
+        q =              (1-r_ext_prob) *    gamma
+        r = r_ext_prob + (1-r_ext_prob) * (1-gamma) * (1-alpha) *    (lam/mu)
+        d_to_end =       (1-r_ext_prob) * (1-gamma) *             (1-(lam/mu))
+        
+        # start -> any
+        start_m =   (1-beta) *     alpha *    (lam/mu)
+        start_i =      beta
+        start_d =   (1-beta) * (1-alpha) *    (lam/mu)
+        start_end = (1-beta) *             (1-(lam/mu))
+        
+        
+        # out is: (T, C, 4, 4)
+        transmat = jnp.stack([ jnp.stack([a,       b,     c_h, mi_to_end], axis=-1),
+                               jnp.stack([f,       g,     c_h, mi_to_end], axis=-1),
+                               jnp.stack([p,       q,       r,  d_to_end], axis=-1),
+                               jnp.stack([start_m, start_i, start_d, start_end], axis=-1)
+                              ], axis=-2)
+        
+        return safe_log(transmat[None,...])
+    

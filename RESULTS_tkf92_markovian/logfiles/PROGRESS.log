@@ -1,7 +1,0 @@
-PairHMM TKF92 with markovian site classes over emissions
-  - Number of site classes: 1
-  - Normalizing losses by: desc_len
-
-2: model init
-
-3: main training loop

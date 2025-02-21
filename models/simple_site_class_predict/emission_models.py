@@ -68,7 +68,6 @@ class SiteClassLogprobs(ModuleBase):
     
     def __call__(self,
                  sow_intermediates):
-        
         log_class_probs = nn.log_softmax(self.class_logits)
         
         if sow_intermediates:

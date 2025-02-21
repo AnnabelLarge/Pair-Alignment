@@ -22,9 +22,8 @@ import optax
 
 from utils.tensorboard_recording_utils import (calc_stats_during_final_eval,
                                                update_stats_dict,
-                                               write_stats_to_tabular)
-
-
+       
+                                               
 def train_one_batch(batch, 
                     training_rngkey,
                     all_trainstates,  
@@ -58,9 +57,6 @@ def train_one_batch(batch,
     grad_fn = jax.value_and_grad(apply_model, has_aux=True)
     (batch_loss, aux_dict), grad = grad_fn(all_trainstates.params)
     
-    ### PROBLEM: grad is zero
-    
-
     ### only turn this off during debug
     if update_grads:
         updates, new_opt_state = all_trainstates.tx.update(grad,

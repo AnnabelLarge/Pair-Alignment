@@ -23,7 +23,18 @@ from models.simple_site_class_predict.emission_models import (LogEqulVecFromCoun
                                                        SiteClassLogprobs,
                                                        SiteClassLogprobsFromFile)
 from models.simple_site_class_predict.transition_models import (JointTKF92TransitionLogprobs,
-                                                        JointTKF92TransitionLogprobsFromFile)
+                                                        JointTKF92TransitionLogprobsFromFile,
+                                                        ProbSpaceJointTKF92TransitionLogprobs)
+
+
+# class DebugNansInfs:
+#     def __enter__(self):
+#         jax.config.update("jax_debug_nans", True)
+#         jax.config.update("jax_debug_infs", True)
+
+#     def __exit__(self, exc_type, exc_value, traceback):
+#         jax.config.update("jax_debug_nans", False)
+#         jax.config.update("jax_debug_infs", False)
 
 
 def bounded_sigmoid(x, min_val, max_val):
@@ -65,8 +76,13 @@ class MarkovSitesJointPairHMM(ModuleBase):
         
         
         ### Has to be TKF92 joint
-        self.transitions_module = JointTKF92TransitionLogprobs(config = self.config,
-                                                     name = f'tkf92 indel model')
+        # uncomment to do calculation in probability space
+        self.transitions_module = ProbSpaceJointTKF92TransitionLogprobs(config = self.config,
+                                                      name = f'tkf92 indel model')
+        
+        # # uncomment to do calculation in log space
+        # self.transitions_module = JointTKF92TransitionLogprobs(config = self.config,
+        #                                              name = f'tkf92 indel model')
     
     def __call__(self,
                  aligned_inputs,
@@ -190,7 +206,8 @@ class MarkovSitesJointPairHMM(ModuleBase):
             
             tr = tr[...,0]
             del tmp
-
+            
+            
             def main_body(in_carry):
                 # (T, C_from, A, A), (C_to) -> (T, C_from, C_to, A)
                 tr_per_class = tr[:, :, None, :] + log_class_probs[None, None, :, None]
@@ -210,7 +227,8 @@ class MarkovSitesJointPairHMM(ModuleBase):
                                               main_body(prev_alpha),
                                               end(prev_alpha) ),
                                   prev_alpha )
-                         
+            
+            
             return (new_alpha, None)
         
         ### end scan function definition, use scan
@@ -405,6 +423,11 @@ class JointPairHMMLoadAll(MarkovSitesJointPairHMM):
     
     def write_params(self, **kwargs):
         pass
+
+
+
+
+
 
 
 

@@ -91,15 +91,15 @@ def init_pairhmm_markov_sites( seq_shapes,
      or just fitting rate multiplier
     """
     if not pred_config['load_all_params']:
-        # ### uncomment for jax.lax.scan version
-        # from models.simple_site_class_predict.PairHMM_markovian_sites import MarkovSitesJointPairHMM
-        # pairhmm_instance = MarkovSitesJointPairHMM(config = pred_config,
-        #                                             name = 'JointPairHMM')
-        
-        ### uncomment to run for-loop version
-        from models.simple_site_class_predict.PairHMM_markovian_sites import WithForLoopMarkovSitesJointPairHMM
-        pairhmm_instance = WithForLoopMarkovSitesJointPairHMM(config = pred_config,
+        ### uncomment for jax.lax.scan version
+        from models.simple_site_class_predict.PairHMM_markovian_sites import MarkovSitesJointPairHMM
+        pairhmm_instance = MarkovSitesJointPairHMM(config = pred_config,
                                                     name = 'JointPairHMM')
+        
+        # ### uncomment to run for-loop version
+        # from models.simple_site_class_predict.PairHMM_markovian_sites import WithForLoopMarkovSitesJointPairHMM
+        # pairhmm_instance = WithForLoopMarkovSitesJointPairHMM(config = pred_config,
+        #                                             name = 'JointPairHMM')
     
     elif pred_config['load_all_params']:
         from models.simple_site_class_predict.PairHMM_markovian_sites import JointPairHMMLoadAll
