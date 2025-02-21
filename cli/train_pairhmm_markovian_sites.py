@@ -55,7 +55,15 @@ from train_eval_fns.markovian_site_classes_training_fns import ( train_one_batch
                                                             eval_one_batch,
                                                             final_eval_wrapper )
 
+# class DebugNansInfs:
+#     def __enter__(self):
+#         jax.config.update("jax_debug_nans", True)
+#         jax.config.update("jax_debug_infs", True)
 
+#     def __exit__(self, exc_type, exc_value, traceback):
+#         jax.config.update("jax_debug_nans", False)
+#         jax.config.update("jax_debug_infs", False)
+        
 
 def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     ###########################################################################
@@ -137,7 +145,7 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     ### init sizes
     # (B, L, 3)
     max_dim1 = test_dset.global_align_max_length 
-    largest_aligns = jnp.zeros( (args.batch_size, max_dim1, 3), dtype=int )
+    largest_aligns = jnp.empty( (args.batch_size, max_dim1, 3), dtype=int )
     del max_dim1
     
     ### fn to handle jit-compiling according to alignment length
@@ -512,7 +520,6 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
         
         # finish up logfile, regardless of early stopping or not
         g.write(f'Epoch with lowest average test loss ("best epoch"): {best_epoch}\n\n')
-        breakpoint() #TODO: WRITE LAMBDA, MU, AND POSSIBLY R
         g.write(f'RE-EVALUATING ALL DATA WITH BEST PARAMS:\n\n')
     
     del epoch_idx

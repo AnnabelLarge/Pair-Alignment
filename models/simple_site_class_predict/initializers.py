@@ -81,6 +81,7 @@ def init_pairhmm_markov_sites( seq_shapes,
                                tx, 
                                model_init_rngkey,
                                pred_config,
+                               tabulate_file_loc
                                ):
     """
     for markovian site classses
@@ -90,9 +91,15 @@ def init_pairhmm_markov_sites( seq_shapes,
      or just fitting rate multiplier
     """
     if not pred_config['load_all_params']:
-        from models.simple_site_class_predict.PairHMM_markovian_sites import MarkovSitesJointPairHMM
-        pairhmm_instance = MarkovSitesJointPairHMM(config = pred_config,
-                                                   name = 'JointPairHMM')
+        # ### uncomment for jax.lax.scan version
+        # from models.simple_site_class_predict.PairHMM_markovian_sites import MarkovSitesJointPairHMM
+        # pairhmm_instance = MarkovSitesJointPairHMM(config = pred_config,
+        #                                             name = 'JointPairHMM')
+        
+        ### uncomment to run for-loop version
+        from models.simple_site_class_predict.PairHMM_markovian_sites import WithForLoopMarkovSitesJointPairHMM
+        pairhmm_instance = WithForLoopMarkovSitesJointPairHMM(config = pred_config,
+                                                    name = 'JointPairHMM')
     
     elif pred_config['load_all_params']:
         from models.simple_site_class_predict.PairHMM_markovian_sites import JointPairHMMLoadAll
@@ -111,7 +118,7 @@ def init_pairhmm_markov_sites( seq_shapes,
                          mutable = ['params'])
         with open(f'{tabulate_file_loc}/PAIRHMM_tabulate.txt','w') as g:
             g.write(str_out)
-            
+    
     init_params = pairhmm_instance.init(rngs = model_init_rngkey,
                                         aligned_inputs = seq_shapes,
                                         t_array = dummy_t_array,

@@ -1,7 +1,7 @@
-training_wkdir	RESULTS_tkf92_one_markovian_site_class
+training_wkdir	RESULTS_tkf92_markovian
 load_all_params	False
 times_from	t_array_from_file
-exponential_dist_param	1
+exponential_dist_param	1.1158886772273318
 indel_model_type	tkf92
 num_emit_site_classes	1
 num_tkf_site_classes	1

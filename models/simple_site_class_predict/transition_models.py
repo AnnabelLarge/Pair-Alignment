@@ -62,8 +62,7 @@ def log_one_minus_x(x):
       which is log( 1 - x )
     """
     a_for_logsumexp = concat_along_new_last_axis( [jnp.zeros(x.shape), x] )
-    b_for_logsumexp = jnp.array([1, -1])
-    
+    b_for_logsumexp = jnp.array([1.0, -1.0])
     out = logsumexp(a = a_for_logsumexp,
                     b = b_for_logsumexp,
                     axis = -1)
@@ -217,6 +216,10 @@ class CondTKF91TransitionLogprobs(ModuleBase):
         
         ### alpha and one minus alpha IN LOG SPACE
         # alpha = jnp.exp(-mu_per_t); log(alpha) = -mu_per_t
+        # alpha = jnp.exp( -mu_per_t )
+        # one_minus_alpha = 1 - alpha
+        # log_alpha = jnp.log(alpha)
+        # log_one_minus_alpha = jnp.log(one_minus_alpha)
         log_alpha = -mu_per_t
         log_one_minus_alpha = log_one_minus_x(log_alpha)
         

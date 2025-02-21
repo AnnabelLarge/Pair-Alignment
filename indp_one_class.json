@@ -1,5 +1,5 @@
-{  
-    "training_wkdir": "RESULTS_tkf92_one_markovian_site_class",
+{
+    "training_wkdir": "RESULTS_tkf92_indp",
     "rng_seednum": 0,
 
     "data_dir": "example_data",
@@ -7,13 +7,13 @@
     "test_dset_splits": ["sevenSamp"],
     "toss_alignments_longer_than": null,
     "batch_size": 7,
-    "chunk_length": 512,
+    "bos_eos_as_match": false,
 
     "norm_loss_by": "desc_len",
     "loss_type": "joint",
     "update_grads": true,
 
-    "num_epochs": 1000,
+    "num_epochs": 3,
     "optimizer_config": {
         "init_value": 0.001,
         "peak_value": 0.001,
@@ -24,25 +24,28 @@
     },
     "early_stop_cond1_atol": 0.01,
     "early_stop_cond2_gap": 3,
-    "patience": 1000,
+    "patience": 3,
 
     "interms_for_tboard": {
         "finalpred_sow_outputs": false,
         "forward_pass_outputs": false
     },
     "save_arrs": false,
+    "save_per_sample_losses": false,
     "histogram_output_freq": 10000,
 
-    "pred_model_type": "pairhmm_markovian_sites",
+    "pred_model_type": "pairhmm_indp_sites",
     "pred_config": {
-        "load_all_params": false,
+        "preset_name": "fit_rate_mult_only",
         "times_from": "t_array_from_file",
-        "exponential_dist_param": 1,
+        "exponential_dist_param": 1.1158886772273318,
         "indel_model_type": "tkf92",
         "num_emit_site_classes": 1,
         "num_tkf_site_classes": 1,
         "tkf_err": 1e-4,
-        "filenames": {"times": "times_to_load.txt",
-                      "exch": "LG08_exchangeability_vec.npy"}
+        "filenames": {
+            "times": "times_to_load.txt",
+            "exch": "LG08_exchangeability_r.npy"
+        }
     }
 }

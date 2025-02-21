@@ -54,10 +54,6 @@ from train_eval_fns.indp_site_classes_training_fns import ( train_one_batch,
                                                             eval_one_batch,
                                                             final_eval_wrapper )
 
-def bounded_sigmoid(x, min_val, max_val):
-    return min_val + (max_val - min_val) / (1 + jnp.exp(-x))
-    
-
 
 def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     ###########################################################################

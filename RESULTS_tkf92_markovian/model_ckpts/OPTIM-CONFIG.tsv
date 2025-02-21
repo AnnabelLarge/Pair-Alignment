@@ -1,4 +1,4 @@
-training_wkdir	RESULTS_tkf92_one_markovian_site_class
+training_wkdir	RESULTS_tkf92_markovian
 init_value	0.001
 peak_value	0.001
 end_value	0.001

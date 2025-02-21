@@ -1,7 +1,0 @@
-training_wkdir	RESULTS_tkf92_one_indp_site_class
-init_value	0.01
-peak_value	0.01
-end_value	0.01
-warmup_steps	0
-weight_decay	0
-every_k_schedule	1
