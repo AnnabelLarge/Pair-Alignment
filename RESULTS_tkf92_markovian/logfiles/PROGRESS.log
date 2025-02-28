@@ -1,0 +1,12 @@
+PairHMM TKF92 with markovian site classes over emissions
+  - Number of site classes: 1
+  - Normalizing losses by: desc_len
+
+2: model init
+
+5: main training loop
+New best test loss at epoch 0: 5.965932846069336
+New best test loss at epoch 1: 5.965330600738525
+New best test loss at epoch 2: 5.964748859405518
+SCORING ALL TRAIN SEQS
+

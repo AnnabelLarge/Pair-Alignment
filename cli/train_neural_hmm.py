@@ -610,9 +610,6 @@ def train_neural_hmm(args, dataloader_dict: dict):
             del epoch_cpu_start, epoch_cpu_end
             del epoch_real_start, epoch_real_end
             
-            # save the trainstates for later use
-            best_trainstates = all_trainstates
-            
             # rage quit
             break
         

@@ -8,7 +8,7 @@ Created on Wed Dec 20 16:13:55 2023
 """
 import json
 import os
-import argparse 
+import argparse
 import jax
 
 
@@ -30,6 +30,7 @@ def main():
     
     ### which program do you want to run?
     valid_tasks = ['train',
+                   'DEBUG_markovian_pairhmm',
                    'get_pairhmm_controls',
                    'get_feedforward_controls']
     
@@ -54,7 +55,7 @@ def main():
     
     
     ### UNCOMMENT TO RUN IN SPYDER IDE
-    args.task = 'train'
+    args.task = 'DEBUG_markovian_pairhmm'
     args.configs = 'markovian_one_class.json'
     
     
@@ -94,10 +95,23 @@ def main():
             from cli.train_feedforward import train_feedforward as train
             from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
 
-        
         # train model
         dload_lst = init_dataloaders(args, 'train')
         train(args, dload_lst)
+    
+    
+    
+    elif args.task == 'DEBUG_markovian_pairhmm':
+        assert args.configs.endswith('.json'), print("input is one JSON file")
+        print(f'TRAINING WITH: {args.configs}')
+        args = read_config_file(args.configs)
+        
+        from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
+        from cli.DEBUG_markovian_pairhmm import train_pairhmm_markovian_sites_pure_jax as debug_train
+        
+        dload_lst = init_dataloaders(args, 'train')
+        debug_train(args, dload_lst)
+        
         
     
     ###########################################################################

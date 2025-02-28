@@ -179,7 +179,7 @@ def final_eval_wrapper(dataloader,
     ### POST EVAL LOOP   #
     ######################
     # extract whole-dataset performance
-    final_ece = jnp.exp( final_ave_loss_seqlen_normed )
+    final_ece = jnp.exp( -final_ave_loss_seqlen_normed )
     summary_stats = {'final_ave_loss':final_ave_loss, 
                      'final_ave_loss_seqlen_normed':final_ave_loss_seqlen_normed,
                      'final_perplexity':final_perplexity,
