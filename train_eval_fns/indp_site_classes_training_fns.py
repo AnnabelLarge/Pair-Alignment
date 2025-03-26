@@ -22,16 +22,25 @@ import optax
 
 def train_one_batch(batch, 
                     training_rngkey, 
-                    all_trainstates,
+                    pairhmm_trainstate,
                     t_array,
                     interms_for_tboard,
                     update_grads: bool = True,
                     **kwargs):
+    """
+    provided during part + jit:
+        - t_array
+        - interms_for_tboard
+        - update_grads
     
+    need to be specified every training loop:
+        - batch
+        - pairhmm_trainstate
+    """
     finalpred_sow_outputs = interms_for_tboard['finalpred_sow_outputs']
-    
     def apply_model(pairhmm_params):
-        loss_dict, sow_dict = all_trainstates.apply_fn(variables = pairhmm_params,
+        # in training, only evaluate joint loglike i.e. use default __call__
+        (loss_NLL, aux_dict), sow_dict = pairhmm_trainstate.apply_fn(variables = pairhmm_params,
                                           batch = batch,
                                           t_array = t_array,
                                           sow_intermediates = finalpred_sow_outputs,
@@ -41,115 +50,199 @@ def train_one_batch(batch,
                     'scalars': sow_dict.get( 'scalars', dict() )
                     }
         
-        aux_dict = {k:v for k,v in loss_dict.items() if k != 'loss'}
         aux_dict['pred_layer_metrics'] = sow_dict
-        return loss_dict['loss'], aux_dict
+        return loss_NLL, aux_dict
     
     grad_fn = jax.value_and_grad(apply_model, has_aux=True)
-    (batch_loss, aux_dict), grad = grad_fn(all_trainstates.params)
+    (batch_loss_NLL, aux_dict), grad = grad_fn(pairhmm_trainstate.params)
  
     
     ### only turn this off during debug
     if update_grads:
-        updates, new_opt_state = all_trainstates.tx.update(grad,
-                                                            all_trainstates.opt_state,
-                                                            all_trainstates.params)
-        new_params = optax.apply_updates(all_trainstates.params,
+        updates, new_opt_state = pairhmm_trainstate.tx.update(grad,
+                                                            pairhmm_trainstate.opt_state,
+                                                            pairhmm_trainstate.params)
+        new_params = optax.apply_updates(pairhmm_trainstate.params,
                                           updates)
-        new_trainstate = all_trainstates.replace(params = new_params,
+        new_trainstate = pairhmm_trainstate.replace(params = new_params,
                                                     opt_state = new_opt_state)
     else:
-        new_trainstate = all_trainstates
+        new_trainstate = pairhmm_trainstate
     
     
     ### other metrics
     # perplexity per sample
-    neg_logP_length_normed = aux_dict['neg_logP_length_normed']
-    perplexity_perSamp = jnp.exp(-neg_logP_length_normed) #(B,)
+    joint_neg_logP_length_normed = aux_dict['joint_neg_logP_length_normed']
+    joint_perplexity_perSamp = jnp.exp(joint_neg_logP_length_normed)
+    ece = jnp.exp(batch_loss_NLL)
     
-    # exponentiated cross entropy
-    ece = jnp.exp(-batch_loss)
-    
-    out_dict = {'neg_logP_length_normed': aux_dict['neg_logP_length_normed'],
-                'sum_neg_logP': aux_dict['sum_neg_logP'],
-                'ece': ece,
-                'batch_loss': batch_loss,
-                'batch_ave_perpl': jnp.mean(perplexity_perSamp),
+    out_dict = {'joint_neg_logP_length_normed': joint_neg_logP_length_normed,
+                'joint_neg_logP': aux_dict['joint_neg_logP'],
+                'joint_ece': joint_ece,
+                'batch_loss': batch_loss_NLL,
+                'batch_ave_joint_perpl': jnp.mean(joint_perplexity_perSamp),
                 'pred_layer_metrics': aux_dict['pred_layer_metrics']}
     
     return out_dict, new_trainstate
 
 
-
-def eval_one_batch(batch, 
-                   t_array,
-                    all_trainstates,
+def eval_one_batch( batch, 
+                    t_array,
+                    pairhmm_trainstate,
+                    pairhmm_instance,
                     interms_for_tboard,
+                    return_all_loglikes: bool,
                     **kwargs):
-    finalpred_sow_outputs = interms_for_tboard['finalpred_sow_outputs']
-    loss_dict, sow_dict = all_trainstates.apply_fn(variables = all_trainstates.params,
-                                      batch = batch,
-                                      t_array = t_array,
-                                      sow_intermediates = finalpred_sow_outputs,
-                                      mutable=['histograms','scalars'] if finalpred_sow_outputs else [])
+    """
+    WARNING: might have to pull trainstate and instance out of parted+jit 
+      function, if it doesn't compile correctly
     
+    could alternatively provide the function pairhmm_instance.calculate_all_loglikes
+      or pairhmm_instance.__call__ as arguments during parital+jit compilation?
+      
+    provided during part + jit:
+        - t_array
+        - interms_for_tboard
+        - pairhmm_instance
+        - update_grads
+        - (if final eval) pairhmm_trainstate
+    
+    need to be specified every training loop:
+        - batch
+        - (if training) pairhmm_trainstate
+    """
+    finalpred_sow_outputs = interms_for_tboard['finalpred_sow_outputs']
+    
+    if not return_all_loglikes:
+        (loss_NLL, aux_dict), sow_dict = pairhmm_trainstate.apply_fn(variables = pairhmm_trainstate.params,
+                                          batch = batch,
+                                          t_array = t_array,
+                                          sow_intermediates = finalpred_sow_outputs,
+                                          mutable=['histograms','scalars'] if finalpred_sow_outputs else [])
+    
+    elif return_all_loglikes:
+        aux_dict, sow_dict = pairhmm_trainstate.apply_fn(variables = pairhmm_trainstate.params,
+                                          batch = batch,
+                                          t_array = t_array,
+                                          sow_intermediates = finalpred_sow_outputs,
+                                          mutable=['histograms','scalars'] if finalpred_sow_outputs else [],
+                                          method=pairhmm_instance.calculate_all_loglikes)
+        
+        # specifically use joint prob for loss
+        loss_NLL = jnp.mean( aux_dict['joint_neg_logP_length_normed'] )
+        
+        
     sow_dict = {'histograms': sow_dict.get( 'histograms', dict() ),
                 'scalars': sow_dict.get( 'scalars', dict() )
                 }
     
-    ### other metrics
-    # perplexity per sample
-    neg_logP_length_normed = loss_dict['neg_logP_length_normed']
-    perplexity_perSamp = jnp.exp(-neg_logP_length_normed) #(B,)
+    ### joint probability metrics
+    joint_neg_logP_length_normed = aux_dict['joint_neg_logP_length_normed']
+    joint_perplexity_perSamp = jnp.exp(joint_neg_logP_length_normed)
     
-    # exponentiated cross entropy
-    ece = jnp.exp(-loss_dict['loss'])
-    
-    out_dict = {'neg_logP_length_normed': loss_dict['neg_logP_length_normed'],
-                'sum_neg_logP': loss_dict['sum_neg_logP'],
-                'perplexity_perSamp': perplexity_perSamp,
-                'ece': ece,
-                'batch_loss': loss_dict['loss'],
+    out_dict = {'joint_neg_logP': aux_dict['joint_neg_logP'],
+                'joint_neg_logP_length_normed': joint_neg_logP_length_normed,
+                'joint_perplexity_perSamp': joint_perplexity_perSamp,
                 'pred_layer_metrics': sow_dict}
+    
+    ### other metrics
+    if return_all_loglikes:
+        # cond
+        cond_neg_logP_length_normed = aux_dict['cond_neg_logP_length_normed']
+        cond_perplexity_perSamp = jnp.exp(cond_neg_logP_length_normed)
+        
+        out_dict['cond_neg_logP'] = aux_dict['cond_neg_logP']
+        out_dict['cond_neg_logP_length_normed'] = cond_neg_logP_length_normed
+        out_dict['cond_perplexity_perSamp'] = cond_perplexity_perSamp
+        
+        # anc marginal
+        anc_neg_logP_length_normed = aux_dict['anc_neg_logP_length_normed']
+        anc_perplexity_perSamp = jnp.exp(anc_neg_logP_length_normed)
+        
+        out_dict['anc_neg_logP'] = aux_dict['anc_neg_logP']
+        out_dict['anc_neg_logP_length_normed'] = anc_neg_logP_length_normed
+        out_dict['anc_perplexity_perSamp'] = anc_perplexity_perSamp
+        
+        # desc marginal
+        desc_neg_logP_length_normed = aux_dict['desc_neg_logP_length_normed']
+        desc_perplexity_perSamp = jnp.exp(desc_neg_logP_length_normed)
+        
+        out_dict['desc_neg_logP'] = aux_dict['desc_neg_logP']
+        out_dict['desc_neg_logP_length_normed'] = desc_neg_logP_length_normed
+        out_dict['desc_perplexity_perSamp'] = desc_perplexity_perSamp
+    
     return out_dict
 
 
 def final_eval_wrapper(dataloader, 
                        dataset, 
-                       best_trainstates, 
                        eval_fn_jitted,
                        save_per_sample_losses: bool,
                        logfile_dir: str,
                        out_arrs_dir: str, 
-                       outfile_prefix: str, 
+                       outfile_prefix: str,
                        **kwargs):
-    final_ave_loss = 0
-    final_ave_loss_seqlen_normed = 0
-    final_perplexity = 0
+    """
+    WARNING: might have to pull trainstate and instance out of parted+jit 
+      function; if so, then make them arguments to this final function
+    
+    eval_fn_jitted should have already been parted by providing:
+        - t_array = given time array
+        - pairhmm_trainstate = best trainstate
+        - pairhmm_instance = model instance
+        - interms_for_tboard = (value from config)
+        - return_all_loglike = True
+    """
+    
+    summary_stats = {'joint_ave_loss': 0,
+                   'joint_ave_loss_seqlen_normed': 0,
+                   'joint_perplexity': 0,
+                   
+                   'cond_ave_loss': 0,
+                   'cond_ave_loss_seqlen_normed': 0,
+                   'cond_perplexity': 0,
+                   
+                   'anc_ave_loss': 0,
+                   'anc_ave_loss_seqlen_normed': 0,
+                   'anc_perplexity': 0,
+                   
+                   'desc_ave_loss': 0,
+                   'desc_ave_loss_seqlen_normed': 0,
+                   'desc_perplexity': 0,
+                   }
     
     for batch_idx, batch in tqdm( enumerate(dataloader), total=len(dataloader) ): 
-        # eval
-        eval_metrics = eval_fn_jitted(batch=batch, 
-                                      all_trainstates=best_trainstates)
-        
+        eval_metrics = eval_fn_jitted( batch=batch )
         
         #########################################
         ### start df; record metrics per sample #
         #########################################
         final_loglikes = dataset.retrieve_sample_names(batch[-1])
-        final_loglikes['logP'] = eval_metrics['sum_neg_logP']
-        final_loglikes['logP/normlength'] = eval_metrics['neg_logP_length_normed']
-        final_loglikes['perplexity'] = eval_metrics['perplexity_perSamp']
-        final_loglikes['dataloader_idx'] = batch[-1]
         
-        num_samples_in_batch = eval_metrics['sum_neg_logP'].shape[0]
+        for prefix in ['joint','cond','anc','desc']:
+            final_loglikes[f'{prefix}_logP'] = eval_metrics[f'{prefix}_neg_logP']
+            final_loglikes[f'{prefix}_logP/normlength'] = eval_metrics[f'{prefix}_neg_logP_length_normed']
+            final_loglikes[f'{prefix}_perplexity'] = eval_metrics[f'{prefix}_perplexity_perSamp']
+        
+        final_loglikes['dataloader_idx'] = batch[-1]
+        num_samples_in_batch = eval_metrics['joint_neg_logP'].shape[0]
         
         # record mean values to buckets
         wf = ( num_samples_in_batch / len(dataset) )
-        final_ave_loss += final_loglikes['logP'].mean() * wf
-        final_ave_loss_seqlen_normed += final_loglikes['logP/normlength'].mean() * wf
-        final_perplexity  += final_loglikes['perplexity'].mean() * wf
-
+        
+        for prefix in ['joint','cond','anc','desc']:
+            to_add = final_loglikes[f'{prefix}_logP'].mean() * wf
+            summary_stats[f'{prefix}_ave_loss'] += to_add
+            del to_add
+            
+            to_add = final_loglikes[f'{prefix}_logP/normlength'].mean() * wf
+            summary_stats[f'{prefix}_ave_loss_seqlen_normed'] += to_add
+            del to_add
+            
+            to_add = final_loglikes[f'{prefix}_perplexity'].mean() * wf
+            summary_stats[f'{prefix}_perplexity'] += to_add
+            del to_add
+            
         # write dataframe
         if save_per_sample_losses:
             final_loglikes.to_csv((f'{logfile_dir}/{outfile_prefix}_pt{batch_idx}_'+
@@ -159,12 +252,11 @@ def final_eval_wrapper(dataloader,
     ######################
     ### POST EVAL LOOP   #
     ######################
-    # extract whole-dataset performance
-    final_ece = jnp.exp( final_ave_loss_seqlen_normed )
-    summary_stats = {'final_ave_loss':final_ave_loss, 
-                     'final_ave_loss_seqlen_normed':final_ave_loss_seqlen_normed,
-                     'final_perplexity':final_perplexity,
-                     'final_ece':final_ece}
+    # add ECE for all
+    for prefix in ['joint','cond','anc','desc']:
+        to_add = jnp.exp( summary_stats[f'{prefix}_ave_loss_seqlen_normed'] )
+        summary_stats[f'{prefix}_ece'] = to_add
+        del to_add
     
     return summary_stats
 
