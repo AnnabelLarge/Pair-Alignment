@@ -18,7 +18,7 @@ def init_pairhmm_indp_sites( seq_shapes,
                              tabulate_file_loc
                              ):
     """
-    for independent site classses over substitution models
+    for independent site classses over substitution models, either TKF91 or TKF92
     """
     preset_names = ['load_all',
                     'fit_rate_mult_only',
@@ -29,25 +29,19 @@ def init_pairhmm_indp_sites( seq_shapes,
     pred_config['num_tkf_site_classes'] = 1
     
     if pred_config['preset_name'] == 'load_all':
-        from models.simple_site_class_predict.PairHMM_indp_sites import JointPairHMMLoadAll
-        pairhmm_instance = JointPairHMMLoadAll(config = pred_config,
-                                       name = 'JointPairHMMLoadAll')
+        from models.simple_site_class_predict.PairHMM_indp_sites import IndpPairHMMLoadAll
+        pairhmm_instance = IndpPairHMMLoadAll(config = pred_config,
+                                       name = 'IndpPairHMMLoadAll')
     
     elif pred_config['preset_name'] == 'fit_rate_mult_only':
-        from models.simple_site_class_predict.PairHMM_indp_sites import JointPairHMMFitRateMult
-        pairhmm_instance = JointPairHMMFitRateMult(config = pred_config,
-                                                   name = 'JointPairHMMFitRateMult')
+        from models.simple_site_class_predict.PairHMM_indp_sites import IndpPairHMMFitRateMult
+        pairhmm_instance = IndpPairHMMFitRateMult(config = pred_config,
+                                                   name = 'IndpPairHMMFitRateMult')
     
     elif pred_config['preset_name'] == 'fit_rate_mult_and_matrix':
-        if pred_config['loss_type'] in ['cond', 'conditional']:
-            from models.simple_site_class_predict.PairHMM_indp_sites import CondPairHMM
-            pairhmm_instance = CondPairHMM(config = pred_config,
-                                           name = 'CondPairHMM')
-        
-        elif pred_config['loss_type'] == 'joint':
-            from models.simple_site_class_predict.PairHMM_indp_sites import JointPairHMMFitBoth
-            pairhmm_instance = JointPairHMMFitBoth(config = pred_config,
-                                                   name = 'JointPairHMMFitBoth')
+        from models.simple_site_class_predict.PairHMM_indp_sites import IndpPairHMMFitBoth
+        pairhmm_instance = IndpPairHMMFitBoth(config = pred_config,
+                                               name = 'IndpPairHMMFitBoth')
     
     ### tabulate and save the model
     if (tabulate_file_loc is not None):
@@ -92,19 +86,14 @@ def init_pairhmm_markov_sites( seq_shapes,
     """
     if not pred_config['load_all_params']:
         ### uncomment for jax.lax.scan version
-        from models.simple_site_class_predict.PairHMM_markovian_sites import MarkovSitesJointPairHMM
-        pairhmm_instance = MarkovSitesJointPairHMM(config = pred_config,
-                                                    name = 'JointPairHMM')
-        
-        # ### uncomment to run for-loop version
-        # from models.simple_site_class_predict.PairHMM_markovian_sites import WithForLoopMarkovSitesJointPairHMM
-        # pairhmm_instance = WithForLoopMarkovSitesJointPairHMM(config = pred_config,
-        #                                             name = 'JointPairHMM')
+        from models.simple_site_class_predict.PairHMM_markovian_sites import MarkovPairHMM
+        pairhmm_instance = MarkovPairHMM(config = pred_config,
+                                         name = 'MarkovPairHMM')
     
     elif pred_config['load_all_params']:
-        from models.simple_site_class_predict.PairHMM_markovian_sites import JointPairHMMLoadAll
-        pairhmm_instance = JointPairHMMLoadAll(config = pred_config,
-                                       name = 'JointPairHMMLoadAll')
+        from models.simple_site_class_predict.PairHMM_markovian_sites import MarkovPairHMMLoadAll
+        pairhmm_instance = MarkovPairHMMLoadAll(config = pred_config,
+                                                name = 'MarkovPairHMMLoadAll')
     
     ### tabulate and save the model
     if (tabulate_file_loc is not None):
@@ -130,6 +119,3 @@ def init_pairhmm_markov_sites( seq_shapes,
                                               tx=tx)
         
     return pairhmm_trainstate, pairhmm_instance
-
-    
-

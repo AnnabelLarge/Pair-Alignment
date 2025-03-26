@@ -80,7 +80,7 @@ def get_pairhmm_controls(args):
     all_del_counts = jnp.array( training_dset.delCounts.sum(axis=0) )
     
     # make probability matrices
-    transits_logprobs = safe_log( all_transits / all_transits.sum() )
+    transits_logprobs = safe_log( all_transits / all_transits.sum() ) # normalize this across rows for conditional!!!
     cond_match_logprobs = safe_log( all_cond_matches / all_cond_matches.sum() )
     ins_logprobs = safe_log( all_ins_counts / all_ins_counts.sum() )
     del_logprobs = safe_log( all_del_counts / all_del_counts.sum() )

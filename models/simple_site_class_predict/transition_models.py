@@ -5,20 +5,20 @@ Created on Sat Oct  5 14:42:28 2024
 
 @author: annabel
 
-modules:
-========
- 'CondTKF91TransitionLogprobs',
- 'CondTKF91TransitionLogprobsFromFile',
-  
- 'JointTKF91TransitionLogprobs',
- 'JointTKF91TransitionLogprobsFromFile',
+modules used for training:
+==========================
+ 'TKF91TransitionLogprobs',
+ 'TKF91TransitionLogprobsFromFile',
  
- 'CondTKF92TransitionLogprobs',
- 'CondTKF92TransitionLogprobsFromFile',
+ 'TKF92TransitionLogprobs',
+ 'TKF92TransitionLogprobsFromFile',
 
- 'JointTKF92TransitionLogprobs',
- 'JointTKF92TransitionLogprobsFromFile',
- 
+functions:
+===========
+ 'MargTKF91TransitionLogprobs'
+ 'MargTKF92TransitionLogprobs'
+ 'CondTKF92TransitionLogprobs'
+
 """
 # jumping jax and leaping flax
 from flax import linen as nn
@@ -28,53 +28,112 @@ from jax.scipy.special import logsumexp
 import pickle
 
 from models.model_utils.BaseClasses import ModuleBase
+from utils.pairhmm_helpers import (bounded_sigmoid,
+                                   safe_log,
+                                   concat_along_new_last_axis,
+                                   logsumexp_with_arr_lst,
+                                   log_one_minus_x)
 
 
 ###############################################################################
-### helper functions   ########################################################
+### single sequence and conditional FUNCTIONS   ###############################
 ###############################################################################
-def bounded_sigmoid(x, min_val, max_val):
-    return min_val + (max_val - min_val) / (1 + jnp.exp(-x))
-
-def safe_log(x):
-    return jnp.log( jnp.where( x>0, 
-                               x, 
-                               jnp.finfo('float32').smallest_normal ) )
-
-def concat_along_new_last_axis(arr_lst):
-    return jnp.concatenate( [arr[...,None] for arr in arr_lst], 
-                             axis = -1 )
-
-def logsumexp_with_arr_lst(arr_lst, coeffs = None):
+def MargTKF91TransitionLogprobs(lam,
+                                mu,
+                                **kwargs):
     """
-    concatenate a list of arrays, then use logsumexp
-    """
-    a_for_logsumexp = concat_along_new_last_axis(arr_lst)
+    one (2,2) matrix
     
-    out = logsumexp(a = a_for_logsumexp,
-                    b = coeffs,
-                    axis=-1)
-    return out
-
-def log_one_minus_x(x):
-    """
-    calculate log( exp(log(1)) - exp(log(x)) ),
-      which is log( 1 - x )
-    """
-    a_for_logsumexp = concat_along_new_last_axis( [jnp.zeros(x.shape), x] )
-    b_for_logsumexp = jnp.array([1.0, -1.0])
-    out = logsumexp(a = a_for_logsumexp,
-                    b = b_for_logsumexp,
-                    axis = -1)
     
-    return out
+    emit -> emit   |  emit -> end
+    -------------------------------
+    start -> emit  |  start -> end
+    """
+    log_lam = safe_log( lam )
+    log_mu = safe_log(mu)
+    
+    log_lam_div_mu = log_lam - log_mu
+    log_one_minus_lam_div_mu = log_one_minus_x(log_lam_div_mu)
+    
+    log_arr = jnp.array( [[log_lam_div_mu, log_one_minus_lam_div_mu],
+                          [log_lam_div_mu, log_one_minus_lam_div_mu]] )
+    return log_arr
+
+
+def MargTKF92TransitionLogprobs(lam,
+                                mu,
+                                class_probs,
+                                r_ext_prob,
+                                **kwargs):
+    C = class_probs.shape[-1]
+    
+    ### move values to log space
+    log_class_prob = safe_log(class_probs)
+    
+    log_r_ext_prob = safe_log(r_ext_prob)
+    log_one_minus_r = log_one_minus_x(log_r_ext_prob)
+    
+    log_lam = safe_log(lam)
+    log_mu = safe_log(mu)
+    log_lam_div_mu = log_lam - log_mu
+    log_one_minus_lam_div_mu = log_one_minus_x(log_lam_div_mu)
+    
+    
+    ### build cells
+    # cell 1: emit -> emit (C,C)
+    log_cell1 = (log_one_minus_r + log_lam_div_mu)[:, None] + log_class_prob[None, :]
+    
+    # cell 2: emit -> end (C,1)
+    log_cell2 = ( log_one_minus_r + log_one_minus_lam_div_mu )[:,None]
+    log_cell2 = jnp.broadcast_to( log_cell2, (C, C) )
+    
+    # cell 3: start -> emit
+    log_cell3 = ( log_lam_div_mu + log_class_prob )[None,:]
+    log_cell3 = jnp.broadcast_to( log_cell3, (C, C) ) 
+    
+    # cell 4: start -> end
+    log_cell4 = jnp.broadcast_to( log_one_minus_lam_div_mu, (C,C) )
+    
+
+    ### build matrix
+    log_single_seq_tkf92 = jnp.stack( [jnp.stack( [log_cell1, log_cell2], axis=-1 ),
+                                       jnp.stack( [log_cell3, log_cell4], axis=-1 )],
+                                     axis = -2 )
+    
+    i_idx = jnp.arange(C)
+    prev_vals = log_single_seq_tkf92[i_idx, i_idx, 0, 0]
+    new_vals = logsumexp_with_arr_lst([log_r_ext_prob, prev_vals])
+    log_single_seq_tkf92 = log_single_seq_tkf92.at[i_idx, i_idx, 0, 0].set(new_vals)
+    
+    return log_single_seq_tkf92
+
+
+def CondTransitionLogprobs(marg_matrix, joint_matrix):
+    """
+    obtain the conditional log probability by composing the joint with the marginal
+    """
+    cond_matrix = joint_matrix.at[...,[0,1,2], 0].add(-marg_matrix[..., 0,0][None,...,None])
+    cond_matrix = cond_matrix.at[...,[0,1,2], 2].add(-marg_matrix[..., 0,0][None,...,None])
+    cond_matrix = cond_matrix.at[...,3,0].add(-marg_matrix[..., 1,0][None,...])
+    cond_matrix = cond_matrix.at[...,3,2].add(-marg_matrix[..., 1,0][None,...])
+    cond_matrix = cond_matrix.at[...,[0,1,2],3].add(-marg_matrix[..., 0,1][None,...,None])
+    cond_matrix = cond_matrix.at[...,3,3].add(-marg_matrix[..., 1,1][None,...])
+    return cond_matrix
 
 
 
 ###############################################################################
-### TKF91 (conditional and joint)   ###########################################
+### TKF91   ###################################################################
 ###############################################################################
-class CondTKF91TransitionLogprobs(ModuleBase):
+class TKF91TransitionLogprobs(ModuleBase):
+    """
+    Used for calculating P(anc, desc, align)
+    
+    Returns three matrices in a dictionary: 
+        - "joint": (T, 4, 4)
+        - "marginal": (4, 4)
+        - "conditional": (T, 4, 4)
+    """
     config: dict
     name: str
     
@@ -100,7 +159,7 @@ class CondTKF91TransitionLogprobs(ModuleBase):
                                             lambda rng, shape, dtype: init_lam_offset_logits,
                                             init_lam_offset_logits.shape,
                                             jnp.float32)
-        
+   
     def __call__(self,
                  t_array,
                  sow_intermediates: bool):
@@ -135,36 +194,53 @@ class CondTKF91TransitionLogprobs(ModuleBase):
             self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_gamma']), 
                                         label=f'{self.name}/tkf_gamma', 
                                         which='scalars')
-        return self.fill_cond_tkf91(out_dict)
-    
-    
-    def fill_cond_tkf91(self,
-                        out_dict):
-        ### entries in the matrix
-        # a_f = (1-beta)*alpha;     log(a_f) = log(1-beta) + log(alpha)
-        # b_g = beta;               log(b_g) = log(beta)
-        # c_h = (1-beta)*(1-alpha); log(c_h) = log(1-beta) + log(1-alpha)
-        log_a_f = out_dict['log_one_minus_beta'] + out_dict['log_alpha']
-        log_b_g = out_dict['log_beta']
-        log_c_h = out_dict['log_one_minus_beta'] + out_dict['log_one_minus_alpha']
-        log_mis_e = out_dict['log_one_minus_beta']
-
-        # p = (1-gamma)*alpha;     log(p) = log(1-gamma) + log(alpha)
-        # q = gamma;               log(q) = log(gamma)
-        # r = (1-gamma)*(1-alpha); log(r) = log(1-gamma) + log(1-alpha)
-        log_p = out_dict['log_one_minus_gamma'] + out_dict['log_alpha']
-        log_q = out_dict['log_gamma']
-        log_r = out_dict['log_one_minus_gamma'] + out_dict['log_one_minus_alpha']
-        log_d_e = out_dict['log_one_minus_gamma']
         
-        # (T,1,4,4)
+        joint_matrix =  self.fill_joint_tkf91(out_dict)
+        
+        matrix_dict = self.return_all_matrices(lam=lam,
+                                               mu=mu,
+                                               joint_matrix=joint_matrix)
+        return matrix_dict
+        
+    
+    def fill_joint_tkf91(self, 
+                         out_dict):
+        ### entries in the matrix
+        log_lam_div_mu = out_dict['log_lam'] - out_dict['log_mu']
+        log_one_minus_lam_div_mu = log_one_minus_x(log_lam_div_mu)
+        
+        
+        # a_f = (1-beta)*alpha*(lam/mu);     log(a_f) = log(1-beta) + log(alpha) + log_lam_div_mu
+        # b_g = beta;                        log(b_g) = log(beta)
+        # c_h = (1-beta)*(1-alpha)*(lam/mu); log(c_h) = log(1-beta) + log(1-alpha) + log_lam_div_mu
+        log_a_f = (out_dict['log_one_minus_beta'] + 
+                   out_dict['log_alpha'] + 
+                   log_lam_div_mu)
+        log_b_g = out_dict['log_beta']
+        log_c_h = (out_dict['log_one_minus_beta'] + 
+                   out_dict['log_one_minus_alpha'] + 
+                   log_lam_div_mu)
+        log_mis_e = out_dict['log_one_minus_beta'] + log_one_minus_lam_div_mu
+
+        # p = (1-gamma)*alpha*(lam/mu);     log(p) = log(1-gamma) + log(alpha) + log_lam_div_mu
+        # q = gamma;                        log(q) = log(gamma)
+        # r = (1-gamma)*(1-alpha)*(lam/mu); log(r) = log(1-gamma) + log(1-alpha) + log_lam_div_mu
+        log_p = (out_dict['log_one_minus_gamma'] + 
+                 out_dict['log_alpha'] +
+                 log_lam_div_mu)
+        log_q = out_dict['log_gamma']
+        log_r = (out_dict['log_one_minus_gamma'] + 
+                 out_dict['log_one_minus_alpha'] +
+                 log_lam_div_mu)
+        log_d_e = out_dict['log_one_minus_gamma'] + log_one_minus_lam_div_mu
+        
+        #(T, 4, 4)
         out = jnp.stack([ jnp.stack([log_a_f, log_b_g, log_c_h, log_mis_e], axis=-1),
                            jnp.stack([log_a_f, log_b_g, log_c_h, log_mis_e], axis=-1),
                            jnp.stack([  log_p,   log_q,   log_r,   log_d_e], axis=-1),
                            jnp.stack([log_a_f, log_b_g, log_c_h, log_mis_e], axis=-1)
                           ], axis=-2)
         return out
-    
     
     def logits_to_indel_rates(self, 
                               lam_mu_logits,
@@ -175,6 +251,11 @@ class CondTKF91TransitionLogprobs(ModuleBase):
                               tkf_err):
         """
         assumes idx=0 is lambda, idx=1 is for calculating mu
+        
+        TODO:
+        tkf_err: \epsilon = 1 - (lam/mu), so you're directly setting the 
+          probability of no ancestor sequence... there should be a smarter
+          way to initialize this
         """
         # lambda
         lam = bounded_sigmoid(x = lam_mu_logits[0],
@@ -199,12 +280,11 @@ class CondTKF91TransitionLogprobs(ModuleBase):
                    use_approx,
                    tkf_err,
                    num_classes):
-        # T, C
-        t_array = jnp.broadcast_to( t_array[:,None],
-                                    (t_array.shape[0],
-                                     num_classes) 
-                                    )
+        """
+        lam and mu are single integers
         
+        output alpha, beta, gamma, etc. all have shape (T,)
+        """
         ### lam * t, mu * t
         mu_per_t = mu * t_array
         lam_per_t = lam * t_array
@@ -278,147 +358,33 @@ class CondTKF91TransitionLogprobs(ModuleBase):
         
         return out_dict
     
-        
     
-class CondTKF91TransitionLogprobsFromFile(CondTKF91TransitionLogprobs):
-    """
-    inherit tkf_params and fill_cond_tkf91 from CondTKF91TransitionLogprobs
-    """
-    config: dict
-    name: str
+    def return_all_matrices(self,
+                            lam,
+                            mu,
+                            joint_matrix):
+        # output is: (4, 4)
+        marginal_matrix = MargTKF91TransitionLogprobs(lam=lam,
+                                                      mu=mu)
+        
+        # output is same as joint: (T, 4, 4)
+        cond_matrix = CondTransitionLogprobs(marg_matrix=marginal_matrix, 
+                                             joint_matrix=joint_matrix)
+        
+        return {'joint': joint_matrix,
+                'marginal': marginal_matrix,
+                'conditional': cond_matrix}
     
-    def setup(self):
-        ### unpack config
-        self.tkf_err = self.config.get('tkf_err', 1e-4)
-        in_file = self.config['filenames']['tkf_params_file']
-        
-        with open(in_file,'rb') as f:
-            self.tkf_lam_mu = jnp.load(f)
-            
-    def __call__(self,
-                 t_array,
-                 sow_intermediates: bool):
-        lam = self.tkf_lam_mu[...,0]
-        mu = self.tkf_lam_mu[...,1]
-        use_approx = False
-        
-        # get alpha, beta, gamma
-        out_dict = self.tkf_params(lam = lam, 
-                                   mu = mu, 
-                                   t_array = t_array,
-                                   use_approx = use_approx,
-                                   tkf_err = self.tkf_err,
-                                   num_classes = 1)
-        
-        # record values
-        if sow_intermediates:
-            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_alpha']), 
-                                        label=f'{self.name}/tkf_alpha', 
-                                        which='scalars')
-            
-            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_beta']), 
-                                        label=f'{self.name}/tkf_beta', 
-                                        which='scalars')
-            
-            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_gamma']), 
-                                        label=f'{self.name}/tkf_gamma', 
-                                        which='scalars')
-        
-        return self.fill_cond_tkf91(out_dict)
-        
-    
-    
-class JointTKF91TransitionLogprobs(CondTKF91TransitionLogprobs):
-    """
-    inherit logits_to_indel_rates, tkf_params, and setup 
-      from CondTKF91TransitionLogprobs
-    """
-    config: dict
-    name: str
-   
-    def __call__(self,
-                 t_array,
-                 sow_intermediates: bool):
-        out = self.logits_to_indel_rates(lam_mu_logits = self.tkf_lam_mu_logits,
-                                         lam_min_val = self.lam_min_val,
-                                         lam_max_val = self.lam_max_val,
-                                         offs_min_val = self.offs_min_val,
-                                         offs_max_val = self.offs_max_val,
-                                         tkf_err = self.tkf_err )
-        lam, mu, use_approx = out
-        del out
-        
-        # get alpha, beta, gamma
-        # only one class for TKF91
-        out_dict = self.tkf_params(lam = lam, 
-                                   mu = mu, 
-                                   t_array = t_array,
-                                   use_approx = use_approx,
-                                   tkf_err = self.tkf_err,
-                                   num_classes = 1)
-        
-        # record values
-        if sow_intermediates:
-            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_alpha']), 
-                                        label=f'{self.name}/tkf_alpha', 
-                                        which='scalars')
-            
-            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_beta']), 
-                                        label=f'{self.name}/tkf_beta', 
-                                        which='scalars')
-            
-            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_gamma']), 
-                                        label=f'{self.name}/tkf_gamma', 
-                                        which='scalars')
-        
-        return self.fill_joint_tkf91(out_dict)
-        
-    
-    def fill_joint_tkf91(self, 
-                         out_dict):
-        ### entries in the matrix
-        log_lam_div_mu = out_dict['log_lam'] - out_dict['log_mu']
-        log_one_minus_lam_div_mu = log_one_minus_x(log_lam_div_mu)
-        
-        
-        # a_f = (1-beta)*alpha*(lam/mu);     log(a_f) = log(1-beta) + log(alpha) + log_lam_div_mu
-        # b_g = beta;                        log(b_g) = log(beta)
-        # c_h = (1-beta)*(1-alpha)*(lam/mu); log(c_h) = log(1-beta) + log(1-alpha) + log_lam_div_mu
-        log_a_f = (out_dict['log_one_minus_beta'] + 
-                   out_dict['log_alpha'] + 
-                   log_lam_div_mu)
-        log_b_g = out_dict['log_beta']
-        log_c_h = (out_dict['log_one_minus_beta'] + 
-                   out_dict['log_one_minus_alpha'] + 
-                   log_lam_div_mu)
-        log_mis_e = out_dict['log_one_minus_beta'] + log_one_minus_lam_div_mu
-
-        # p = (1-gamma)*alpha*(lam/mu);     log(p) = log(1-gamma) + log(alpha) + log_lam_div_mu
-        # q = gamma;                        log(q) = log(gamma)
-        # r = (1-gamma)*(1-alpha)*(lam/mu); log(r) = log(1-gamma) + log(1-alpha) + log_lam_div_mu
-        log_p = (out_dict['log_one_minus_gamma'] + 
-                 out_dict['log_alpha'] +
-                 log_lam_div_mu)
-        log_q = out_dict['log_gamma']
-        log_r = (out_dict['log_one_minus_gamma'] + 
-                 out_dict['log_one_minus_alpha'] +
-                 log_lam_div_mu)
-        log_d_e = out_dict['log_one_minus_gamma'] + log_one_minus_lam_div_mu
-        
-        #(T, 1, 4, 4)
-        out = jnp.stack([ jnp.stack([log_a_f, log_b_g, log_c_h, log_mis_e], axis=-1),
-                           jnp.stack([log_a_f, log_b_g, log_c_h, log_mis_e], axis=-1),
-                           jnp.stack([  log_p,   log_q,   log_r,   log_d_e], axis=-1),
-                           jnp.stack([log_a_f, log_b_g, log_c_h, log_mis_e], axis=-1)
-                          ], axis=-2)
-        return out
 
 
-class JointTKF91TransitionLogprobsFromFile(JointTKF91TransitionLogprobs):
+class TKF91TransitionLogprobsFromFile(TKF91TransitionLogprobs):
     """
-    inherit fill_joint_tkf91 from JointTKF91TransitionLogprobs
-    inherit tkf_params from CondTKF91TransitionLogprobs
+    inherit fill_joint_tkf91, tkf_params from TKF91TransitionLogprobs
     
+    Returns three matrices in a dictionary: 
+        - "joint": (T, 4, 4)
+        - "marginal": (4, 4)
+        - "conditional": (T, 4, 4)
     """
     config: dict
     name: str
@@ -459,18 +425,27 @@ class JointTKF91TransitionLogprobsFromFile(JointTKF91TransitionLogprobs):
             self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_gamma']), 
                                         label=f'{self.name}/tkf_gamma', 
                                         which='scalars')
+    
+        joint_matrix =  self.fill_joint_tkf91(out_dict)
         
-        return self.fill_joint_tkf91(out_dict)
+        matrix_dict = self.return_all_matrices(lam=lam,
+                                               mu=mu,
+                                               joint_matrix=joint_matrix)
+        return matrix_dict
         
     
     
 ###############################################################################
-### TKF92 (conditional and joint)   ###########################################
+### TKF92   ###################################################################
 ###############################################################################
-class CondTKF92TransitionLogprobs(CondTKF91TransitionLogprobs):
+class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
     """
-    inherit logits_to_indel_rates and tkf_params from CondTKF91TransitionLogprobs
+    inherit logits_to_indel_rates, tkf_params from TKF91TransitionLogprobs
     
+    Returns three matrices in a dictionary: 
+        - "joint": (T, C, C, 4, 4)
+        - "marginal": (C, C, 4, 4)
+        - "conditional": (T, C, C, 4, 4)
     """
     config: dict
     name: str
@@ -480,7 +455,7 @@ class CondTKF92TransitionLogprobs(CondTKF91TransitionLogprobs):
         self.tkf_err = self.config.get('tkf_err', 1e-4)
         self.num_tkf_site_classes = self.config['num_tkf_site_classes']
         
-        # initializing lamda, offset
+        ### initializing lamda, offset
         init_lam_offset_logits = self.config.get( 'init_lambda_offset_logits', 
                                                   [-2, -5] )
         init_lam_offset_logits = jnp.array(init_lam_offset_logits, dtype=float)
@@ -489,7 +464,8 @@ class CondTKF92TransitionLogprobs(CondTKF91TransitionLogprobs):
         self.offs_min_val, self.offs_max_val = self.config.get( 'offset_range', 
                                                                 [self.tkf_err, 0.333] )
         
-        # initializing r extension prob
+        
+        ### initializing r extension prob
         init_r_extend_logits = self.config.get( 'init_r_extend_logits',
                                                [-x/10 for x in 
                                                 range(1, self.num_tkf_site_classes+1)] )
@@ -515,10 +491,12 @@ class CondTKF92TransitionLogprobs(CondTKF91TransitionLogprobs):
                                           lambda rng, shape, dtype: init_r_extend_logits,
                                           init_r_extend_logits.shape,
                                           jnp.float32)
-            
+    
     def __call__(self,
                  t_array,
+                 class_probs,
                  sow_intermediates: bool):
+        # lam, mu are of size () (i.e. just floats)
         out = self.logits_to_indel_rates(lam_mu_logits = self.tkf_lam_mu_logits,
                                          lam_min_val = self.lam_min_val,
                                          lam_max_val = self.lam_max_val,
@@ -528,11 +506,12 @@ class CondTKF92TransitionLogprobs(CondTKF91TransitionLogprobs):
         lam, mu, use_approx = out
         del out
         
+        # r_extend is of size (C,)
         r_extend = bounded_sigmoid(x = self.r_extend_logits,
                                    min_val = self.r_extend_min_val,
                                    max_val = self.r_extend_max_val)
         
-        # get alpha, beta, gamma
+        # get alpha, beta, gamma; these are of size (T,)
         out_dict = self.tkf_params(lam = lam, 
                                    mu = mu, 
                                    t_array = t_array,
@@ -554,313 +533,124 @@ class CondTKF92TransitionLogprobs(CondTKF91TransitionLogprobs):
                                         label=f'{self.name}/tkf_gamma', 
                                         which='scalars')
     
-        return self.fill_cond_tkf92(out_dict, r_extend)
-    
-    def fill_cond_tkf92(self,
-                        out_dict,
-                        r_extend):
-        T = out_dict['log_alpha'].shape[0]
+        # (T, C_from, C_to, S_from=4, S_to=4)
+        joint_matrix =  self.fill_joint_tkf92(out_dict, 
+                                              r_extend,
+                                              class_probs)
         
-        ### entries in the matrix
-        log_r_extend = jnp.broadcast_to( safe_log(r_extend)[None,...],
-                                         (T,
-                                          r_extend.shape[0])
-                                         )
-                                         
-        log_one_minus_r_extend = log_one_minus_x(log_r_extend)
+        matrix_dict = self.return_all_matrices(lam=lam,
+                                               mu=mu,
+                                               joint_matrix=joint_matrix)
+        return matrix_dict
         
-        # a = r_extend + (1-r_extend)*(1-beta)*alpha
-        # log(a) = logsumexp([r_extend, 
-        #                     log(1-r_extend) + log(1-beta) + log(alpha)
-        #                     ]
-        #                    )
-        log_a_second_half = ( log_one_minus_r_extend + 
-                              out_dict['log_one_minus_beta'] +
-                              out_dict['log_alpha'] )
-        log_a = logsumexp_with_arr_lst([log_r_extend, log_a_second_half])
-        
-        # b = (1-r_extend)*beta
-        # log(b) = log(1-r_extend) + log(beta)
-        log_b = log_one_minus_r_extend + out_dict['log_beta']
-        
-        # c_h = (1-r_extend)*(1-beta)*(1-alpha)
-        # log(c_h) = log(1-r_extend) + log(1-beta) + log(1-alpha)
-        log_c_h = ( log_one_minus_r_extend +
-                    out_dict['log_one_minus_beta'] +
-                    out_dict['log_one_minus_alpha'] )
-        
-        # m_e = (1-r_extend) * (1-beta)
-        # log(mi_e) = log(1-r_extend) + log(1-beta)
-        log_mi_e = log_one_minus_r_extend + out_dict['log_one_minus_beta']
-
-        # f = (1-r_extend)*(1-beta)*alpha
-        # log(f) = log(1-r_extend) +log(1-beta) +log(alpha)
-        log_f = ( log_one_minus_r_extend +
-                  out_dict['log_one_minus_beta'] +
-                  out_dict['log_alpha'] )
-        
-        # g = r_extend + (1-r_extend)*beta
-        # log(g) = logsumexp([r_extend, 
-        #                     log(1-r_extend) + log(beta)
-        #                     ]
-        #                    )
-        log_g_second_half = log_one_minus_r_extend + out_dict['log_beta']
-        log_g = logsumexp_with_arr_lst([log_r_extend, log_g_second_half])
-        
-        # h and log(h) are the same as c and log(c) 
-
-        # p = (1-r_extend)*(1-gamma)*alpha
-        # log(p) = log(1-r_extend) + log(1-gamma) +log(alpha)
-        log_p = ( log_one_minus_r_extend +
-                  out_dict['log_one_minus_gamma'] +
-                  out_dict['log_alpha'] )
-
-        # q = (1-r_extend)*gamma
-        # log(q) = log(1-r_extend) + log(gamma)
-        log_q = log_one_minus_r_extend + out_dict['log_gamma']
-
-        # r = r_extend + (1-r_extend)*(1-gamma)*(1-alpha)
-        # log(r) = logsumexp([r_extend, 
-        #                     log(1-r_extend) + log(1-gamma) + log(1-alpha)
-        #                     ]
-        #                    )
-        log_r_second_half = ( log_one_minus_r_extend +
-                              out_dict['log_one_minus_gamma'] +
-                              out_dict['log_one_minus_alpha'] )
-        log_r = logsumexp_with_arr_lst([log_r_extend, log_r_second_half])
-        
-        # d_e = (1-r_extend) * (1-gamma)
-        # log(d_e) = log(1-r_extend) + log(1-gamma)
-        log_d_e = log_one_minus_r_extend + out_dict['log_one_minus_gamma']
-        
-        # final row; same as TKF91 final row
-        log_s_m = out_dict['log_one_minus_beta'] + out_dict['log_alpha']
-        log_s_i = out_dict['log_beta']
-        log_s_d = out_dict['log_one_minus_beta'] + out_dict['log_one_minus_alpha']
-        log_s_e = out_dict['log_one_minus_beta']
-        
-        #(T, C, 4, 4)
-        return jnp.stack([ jnp.stack([  log_a,   log_b, log_c_h, log_mi_e], axis=-1),
-                           jnp.stack([  log_f,   log_g, log_c_h, log_mi_e], axis=-1),
-                           jnp.stack([  log_p,   log_q,   log_r,  log_d_e], axis=-1),
-                           jnp.stack([log_s_m, log_s_i, log_s_d,  log_s_e], axis=-1)
-                          ], axis=-2)
-
-    
-class CondTKF92TransitionLogprobsFromFile(CondTKF92TransitionLogprobs):
-    """
-    inherit setup and fill_cond_tkf92 from CondTKF92TransitionLogprobs
-    inherit tkf_params from CondTKF91TransitionLogprobs
-    """
-    config: dict
-    name: str
-    
-    def setup(self):
-        ### unpack config
-        self.tkf_err = self.config.get('tkf_err', 1e-4)
-        in_file = self.config['filenames']['tkf_params_file']
-        
-        with open(in_file,'rb') as f:
-            in_dict = pickle.load(f)
-            self.tkf_lam_mu = in_dict['lam_mu']
-            self.r_extend = in_dict['r_extend']
-        
-    def __call__(self,
-                 t_array,
-                 sow_intermediates: bool):
-        lam = self.tkf_lam_mu[0]
-        mu = self.tkf_lam_mu[1]
-        r_extend = self.r_extend
-        num_site_classes = r_extend.shape[0]
-        use_approx = False
-        
-        # get alpha, beta, gamma
-        out_dict = self.tkf_params(lam = lam, 
-                                   mu = mu, 
-                                   t_array = t_array,
-                                   use_approx = use_approx,
-                                   tkf_err = self.tkf_err,
-                                   num_classes = num_site_classes)
-        
-        # record values
-        if sow_intermediates:
-            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_alpha']), 
-                                        label=f'{self.name}/tkf_alpha', 
-                                        which='scalars')
-            
-            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_beta']), 
-                                        label=f'{self.name}/tkf_beta', 
-                                        which='scalars')
-            
-            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_gamma']), 
-                                        label=f'{self.name}/tkf_gamma', 
-                                        which='scalars')
-        
-        return self.fill_cond_tkf92(out_dict, r_extend)
-    
-
-class JointTKF92TransitionLogprobs(CondTKF92TransitionLogprobs):
-    """
-    inherit setup from CondTKF92TransitionLogprobs
-    inherit logits_to_indel_rates, tkf_params from CondTKF91TransitionLogprobs
-    
-    """
-    config: dict
-    name: str
-    
-    def __call__(self,
-                 t_array,
-                 sow_intermediates: bool):
-        out = self.logits_to_indel_rates(lam_mu_logits = self.tkf_lam_mu_logits,
-                                         lam_min_val = self.lam_min_val,
-                                         lam_max_val = self.lam_max_val,
-                                         offs_min_val = self.offs_min_val,
-                                         offs_max_val = self.offs_max_val,
-                                         tkf_err = self.tkf_err )
-        lam, mu, use_approx = out
-        del out
-        
-        r_extend = bounded_sigmoid(x = self.r_extend_logits,
-                                   min_val = self.r_extend_min_val,
-                                   max_val = self.r_extend_max_val)
-        
-        # get alpha, beta, gamma
-        out_dict = self.tkf_params(lam = lam, 
-                                   mu = mu, 
-                                   t_array = t_array,
-                                   use_approx = use_approx,
-                                   tkf_err = self.tkf_err,
-                                   num_classes = r_extend.shape[0])
-        
-        # record values
-        if sow_intermediates:
-            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_alpha']), 
-                                        label=f'{self.name}/tkf_alpha', 
-                                        which='scalars')
-            
-            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_beta']), 
-                                        label=f'{self.name}/tkf_beta', 
-                                        which='scalars')
-            
-            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_gamma']), 
-                                        label=f'{self.name}/tkf_gamma', 
-                                        which='scalars')
-    
-        return self.fill_joint_tkf92(out_dict, r_extend)
-    
     
     def fill_joint_tkf92(self,
                         out_dict,
-                        r_extend):
+                        r_extend,
+                        class_probs):
+        """
+        final output shape: (T, C_from, C_to, S_from=4, S_to=4)
+        """
+        ### need joint TKF91 for this (which already contains lam/mu terms)
+        log_U = self.fill_cond_tkf91(out_dict)
+        
+        # dims
+        T = out_dict['log_alpha'].shape[0]
+        C = class_probs.shape[0] #site classes
+        S = U.shape[-1] #hidden states (like start, M, I, D, and end)
+        
+        # converted log values and broadcast to (T,C)
+        used_tkf_approx = out_dict.pop('used_tkf_approx')
+        out_dict = {k: jnp.broadcast_to(v[None,None], (T,C)) for k,v in out_dict.items()}
         log_lam_div_mu = out_dict['log_lam'] - out_dict['log_mu']
         log_one_minus_lam_div_mu = log_one_minus_x(log_lam_div_mu)
-        T = out_dict['log_alpha'].shape[0]
         
-        ### entries in the matrix
-        log_r_extend = jnp.broadcast_to( safe_log(r_extend)[None,...],
-                                         (T,
-                                          r_extend.shape[0])
-                                         )
+        log_r_extend = jnp.broadcast_to( safe_log(r_extend)[None,...], (T,C) )
         log_one_minus_r_extend = log_one_minus_x(log_r_extend)
         
-        # a = r_extend + (1-r_extend)*(1-beta)*alpha*(lam/mu)
-        # log(a) = logsumexp([r_extend, 
-        #                     log(1-r_extend) + log(1-beta) + log(alpha) + log(lam/mu)
-        #                     ]
-        #                    )
-        log_a_second_half = ( log_one_minus_r_extend + 
-                              out_dict['log_one_minus_beta'] +
-                              out_dict['log_alpha'] +
-                              log_lam_div_mu )
-        log_a = logsumexp_with_arr_lst([log_r_extend, log_a_second_half])
-        
-        # b = (1-r_extend)*beta
-        # log(b) = log(1-r_extend) + log(beta)
-        log_b = log_one_minus_r_extend + out_dict['log_beta']
-        
-        # c_h = (1-r_extend)*(1-beta)*(1-alpha)*(lam/mu)
-        # log(c_h) = log(1-r_extend) + log(1-beta) + log(1-alpha) + log(lam/mu)
-        log_c_h = ( log_one_minus_r_extend +
-                    out_dict['log_one_minus_beta'] +
-                    out_dict['log_one_minus_alpha'] +
-                    log_lam_div_mu )
-        
-        # m_e = (1-r_extend) * (1-beta) * (1- (lam/mu))
-        # log(mi_e) = log(1-r_extend) + log(1-beta) + log(1- (lam/mu))
-        log_mi_e = ( log_one_minus_r_extend + 
-                     out_dict['log_one_minus_beta'] +
-                     log_one_minus_lam_div_mu )
-
-        # f = (1-r_extend)*(1-beta)*alpha*(lam/mu)
-        # log(f) = log(1-r_extend) +log(1-beta) +log(alpha) + lam/mu
-        log_f = ( log_one_minus_r_extend +
-                  out_dict['log_one_minus_beta'] +
-                  out_dict['log_alpha'] +
-                  log_lam_div_mu )
-        
-        # g = r_extend + (1-r_extend)*beta
-        # log(g) = logsumexp([r_extend, 
-        #                     log(1-r_extend) + log(beta)
-        #                     ]
-        #                    )
-        log_g_second_half = log_one_minus_r_extend + out_dict['log_beta']
-        log_g = logsumexp_with_arr_lst([log_r_extend, log_g_second_half])
-        
-        # h and log(h) are the same as c and log(c) 
-
-        # p = (1-r_extend)*(1-gamma)*alpha*(lam/mu)
-        # log(p) = log(1-r_extend) + log(1-gamma) +log(alpha) + log(lam/mu)
-        log_p = ( log_one_minus_r_extend +
-                  out_dict['log_one_minus_gamma'] +
-                  out_dict['log_alpha'] +
-                  log_lam_div_mu )
-
-        # q = (1-r_extend)*gamma
-        # log(q) = log(1-r_extend) + log(gamma)
-        log_q = log_one_minus_r_extend + out_dict['log_gamma']
-
-        # r = r_extend + (1-r_extend)*(1-gamma)*(1-alpha)*(lam/mu)
-        # log(r) = logsumexp([r_extend, 
-        #                     log(1-r_extend) + log(1-gamma) + log(1-alpha) + log(lam/mu)
-        #                     ]
-        #                    )
-        log_r_second_half = ( log_one_minus_r_extend +
-                              out_dict['log_one_minus_gamma'] +
-                              out_dict['log_one_minus_alpha'] +
-                              log_lam_div_mu )
-        log_r = logsumexp_with_arr_lst([log_r_extend, log_r_second_half])
-        
-        # d_e = (1-r_extend) * (1-gamma) * (1 - (lam/mu))
-        # log(d_e) = log(1-r_extend) + log(1-gamma) +log(1 - (lam/mu))
-        log_d_e = ( log_one_minus_r_extend + 
-                    out_dict['log_one_minus_gamma'] +
-                    log_one_minus_lam_div_mu )
-        
-        # final row 
-        log_s_m = ( out_dict['log_one_minus_beta'] + 
-                    out_dict['log_alpha'] + 
-                    log_lam_div_mu )
-        log_s_i = out_dict['log_beta']
-        log_s_d = ( out_dict['log_one_minus_beta'] + 
-                    out_dict['log_one_minus_alpha'] + 
-                    log_lam_div_mu)
-        log_s_e = out_dict['log_one_minus_beta'] + log_one_minus_lam_div_mu
+        log_class_probs = jnp.broadcast_to( safe_log(class_probs)[None,...], (T,C) )
         
         
-        #(T, C, 4, 4)
-        return jnp.stack([ jnp.stack([  log_a,   log_b, log_c_h, log_mi_e], axis=-1),
-                           jnp.stack([  log_f,   log_g, log_c_h, log_mi_e], axis=-1),
-                           jnp.stack([  log_p,   log_q,   log_r,  log_d_e], axis=-1),
-                           jnp.stack([log_s_m, log_s_i, log_s_d,  log_s_e], axis=-1)
-                          ], axis=-2)
-
-
-class JointTKF92TransitionLogprobsFromFile(JointTKF92TransitionLogprobs):
-    """
-    inherit fill_joint_tkf92 from JointTKF92TransitionLogprobs
-    inherit setup from CondTKF92TransitionLogprobs
-    inherit logits_to_indel_rates, tkf_params from CondTKF91TransitionLogprobs
+        ### entries in the matrix
+        # (1-r_c) U(i,j) for all (MID -> MIDE transitions), 
+        #   U(i,j) for all start -> MIDE transitions
+        # (T, C, S_from, S_to)
+        operation_mask = jnp.ones( log_U.shape, dtype=bool )
+        operation_mask = operation_mask.at[:, -1, :].set(False)
+        operation_mask = jnp.broadcast_to( operation_mask[:, None, :, :], 
+                                           (T,C,S,S) )
+        log_tkf92_rate_mat = jnp.where( operation_mask,
+                                        log_one_minus_r[:,:,None,None] + log_U[:, None, :, :],
+                                        jnp.broadcast_to( log_U[:, None, :, :], (T,C,S,S) ) )
+        del operation_mask
     
+        # duplicate each C times and stack across C_to dimension 
+        # (T, C_from, C_to, S_from, S_to)
+        log_tkf92_rate_mat = jnp.broadcast_to( log_tkf92_rate_mat[:,:,None,:,:], 
+                                               (T,C,C,S,S) )
+    
+        # multiply by P(c) across all C_to (not including transitions that 
+        #   end with <end>)
+        operation_mask = jnp.ones( log_U.shape, dtype=bool )
+        operation_mask = operation_mask.at[:, :, -1].set(False)
+        operation_mask = jnp.broadcast_to( operation_mask[:, None, None, :, :], 
+                                           (T,C,C,S,S) )
+        log_tkf92_rate_mat = jnp.where( operation_mask,
+                                        log_tkf92_rate_mat + log_class_prob[:, None, :, None, None],
+                                        log_tkf92_rate_mat )
+        del operation_mask
+        
+        # at MID: where class_from == class_to and state_from == state_to, 
+        #   add factor of r
+        #   THIS ASSUMES START AND END TRANSITIONS ARE AFTER MID
+        #   that is, S_from=3 means start, and S_to=3 means end
+        i_idx, j_idx = jnp.meshgrid(jnp.arange(C), jnp.arange(S-1), indexing="ij")
+        i_idx = i_idx.flatten()
+        j_idx = j_idx.flatten()
+
+        # add r to specific locations
+        prev_vals = log_tkf92_rate_mat[:, i_idx, i_idx, j_idx, j_idx].reshape( (T, C, S-1) )
+        r_to_add = jnp.broadcast_to( log_r_ext_prob[None,:,None], prev_vals.shape)
+        new_vals = logsumexp_with_arr_lst([r_to_add, prev_vals]).reshape(T, -1)
+        del prev_vals, r_to_add
+
+        # Now scatter these back in one shot
+        #(T, C, 4, 4)
+        log_tkf92_rate_mat = log_tkf92_rate_mat.at[:, i_idx, i_idx, j_idx, j_idx].set(new_vals)
+        
+        return log_tkf92_rate_mat
+    
+    
+    def return_all_matrices(self,
+                            lam,
+                            mu,
+                            class_probs,
+                            r_ext_prob,
+                            joint_matrix):
+        # output is: (C, C, 4, 4)
+        marginal_matrix = MargTKF92TransitionLogprobs(lam=lam,
+                                                      mu=mu,
+                                                      class_probs=class_probs,
+                                                      r_ext_prob=r_ext_prob)
+        
+        # output is: (T, C, C, 4, 4)
+        cond_matrix = CondTransitionLogprobs(marg_matrix=marginal_matrix, 
+                                             joint_matrix=joint_matrix)
+        
+        return {'joint': joint_matrix,
+                'marginal': marginal_matrix,
+                'conditional': cond_matrix}
+        
+
+class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
+    """
+    inherit logits_to_indel_rates, tkf_params from TKF91TransitionLogprobs
+    inherit fill_joint_tkf92 from TKF92TransitionLogprobs
+    
+    Returns three matrices in a dictionary: 
+        - "joint": (T, C, C, 4, 4)
+        - "marginal": (C, C, 4, 4)
+        - "conditional": (T, C, C, 4, 4)
     """
     config: dict
     name: str
@@ -906,90 +696,13 @@ class JointTKF92TransitionLogprobsFromFile(JointTKF92TransitionLogprobs):
                                         label=f'{self.name}/tkf_gamma', 
                                         which='scalars')
         
-        return self.fill_joint_tkf92(out_dict, r_extend)
-
-
-class ProbSpaceJointTKF92TransitionLogprobs(CondTKF92TransitionLogprobs):
-    """
-    inherit setup from CondTKF92TransitionLogprobs
-    inherit logits_to_indel_rates from CondTKF91TransitionLogprobs
-    
-    """
-    config: dict
-    name: str
-    
-    def __call__(self,
-                 t_array,
-                 sow_intermediates: bool):
-        out = self.logits_to_indel_rates(lam_mu_logits = self.tkf_lam_mu_logits,
-                                         lam_min_val = self.lam_min_val,
-                                         lam_max_val = self.lam_max_val,
-                                         offs_min_val = self.offs_min_val,
-                                         offs_max_val = self.offs_max_val,
-                                         tkf_err = self.tkf_err )
-        lam, mu, use_approx = out
-        del out
+        # (T, C_from, C_to, S_from=4, S_to=4)
+        joint_matrix =  self.fill_joint_tkf92(out_dict, 
+                                              r_extend,
+                                              class_probs)
         
-        r_ext_prob = bounded_sigmoid(x = self.r_extend_logits,
-                                   min_val = self.r_extend_min_val,
-                                   max_val = self.r_extend_max_val)
-        
-        
-        ###############################################
-        ### alpha, beta, gamma in probability-space   #
-        ###############################################
-        alpha = jnp.exp(-mu*t_array)
-    
-        def orig_tkf_params():
-            numerator = lam * ( jnp.exp(-lam * t_array) - jnp.exp(-mu * t_array) )
-            denom = ( mu * jnp.exp(-lam * t_array) ) - ( lam * jnp.exp(-mu * t_array) )
-            beta = numerator / denom
-            gamma = 1 - (mu * beta) / (lam * (1-alpha) )
-            return jnp.array([beta, gamma])
-            
-        def approx_tkf_params():
-            beta = ( (1 - self.tkf_err)*(mu * t_array) ) / (mu * t_array + 1)
-            gamma = 1 - (mu * t_array) / ( (1 - alpha) * (mu * t_array + 1) )
-            return jnp.array([beta, gamma])
-        
-        out = jnp.where(use_approx,
-                        approx_tkf_params(),
-                        orig_tkf_params())
-        beta, gamma = out
-        
-        
-        ##############################
-        ### fill transition matrix   #
-        ##############################
-        # M -> any
-        a = r_ext_prob + (1-r_ext_prob) * (1-beta) *    alpha  *    (lam/mu)
-        b =              (1-r_ext_prob) *    beta
-        c_h =            (1-r_ext_prob) * (1-beta) * (1-alpha) *    (lam/mu)
-        mi_to_end =      (1-r_ext_prob) * (1-beta) *             (1-(lam/mu))
-        
-        # I -> any
-        f =              (1-r_ext_prob) * (1-beta) * alpha * (lam/mu)
-        g = r_ext_prob + (1-r_ext_prob) *    beta
-        
-        # D -> any
-        p =              (1-r_ext_prob) * (1-gamma) *    alpha  *    (lam/mu)
-        q =              (1-r_ext_prob) *    gamma
-        r = r_ext_prob + (1-r_ext_prob) * (1-gamma) * (1-alpha) *    (lam/mu)
-        d_to_end =       (1-r_ext_prob) * (1-gamma) *             (1-(lam/mu))
-        
-        # start -> any
-        start_m =   (1-beta) *     alpha *    (lam/mu)
-        start_i =      beta
-        start_d =   (1-beta) * (1-alpha) *    (lam/mu)
-        start_end = (1-beta) *             (1-(lam/mu))
-        
-        
-        # out is: (T, C, 4, 4)
-        transmat = jnp.stack([ jnp.stack([a,       b,     c_h, mi_to_end], axis=-1),
-                               jnp.stack([f,       g,     c_h, mi_to_end], axis=-1),
-                               jnp.stack([p,       q,       r,  d_to_end], axis=-1),
-                               jnp.stack([start_m, start_i, start_d, start_end], axis=-1)
-                              ], axis=-2)
-        
-        return safe_log(transmat[None,...])
+        matrix_dict = self.return_all_matrices(lam=lam,
+                                               mu=mu,
+                                               joint_matrix=joint_matrix)
+        return matrix_dict
     

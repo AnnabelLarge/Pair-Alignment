@@ -1,7 +1,0 @@
-RUN	RESULTS_tkf92_markovian
-train_ave_joint_loss_seqlen_normed	-5.964748382568359
-train_perplexity	482.2752990722656
-train_ece	389.45501708984375
-test_ave_joint_loss_seqlen_normed	-5.964748382568359
-test_perplexity	482.2752990722656
-test_ece	389.45501708984375

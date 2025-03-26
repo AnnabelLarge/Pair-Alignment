@@ -24,19 +24,15 @@ modules:
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
-from jax.scipy.linalg import expm
 
 from models.model_utils.BaseClasses import ModuleBase
+from utils.pairhmm_helpers import (bounded_sigmoid,
+                                   safe_log)
 
 
-def safe_log(x):
-    return jnp.log( jnp.where( x>0, 
-                               x, 
-                               jnp.finfo('float32').smallest_normal ) )
-
-def bounded_sigmoid(x, min_val, max_val):
-    return min_val + (max_val - min_val) / (1 + jnp.exp(-x))
-
+########################################
+### helpers only for emission models   #
+########################################
 def bounded_sigmoid_inverse(y, min_val, max_val, eps=1e-4):
     """
     note: this is only for logit initialization; jnp.clip has bad 
@@ -185,6 +181,10 @@ class LG08RateMatFitRateMult(LG08RateMatFromFile):
     exchanegabilities come from LG08 substitution model
     rate multipliers fit with gradient updates
     
+    rate matrix is normalized to one substitution, THEN multiplied by a scalar 
+      multiple; first hidden site class has rate of 1, then subsequent ones 
+      are fit with gradient descent (rho = [1, rate2, rate3, ...])
+    
     params: 
         - rate_mult_logits( C, )
     
@@ -209,11 +209,12 @@ class LG08RateMatFitRateMult(LG08RateMatFromFile):
             self.lg08_exch = jnp.load(f)
         
 
-        ### RATE MULTIPLIERS: (c,)
+        ### RATE MULTIPLIERS: (c-1,)
         if self.num_emit_site_classes > 1:
+            # first class automatically has rate multiplier of one
             self.rate_mult_logits = self.param('rate_multipliers',
                                                nn.initializers.normal(),
-                                               (self.num_emit_site_classes,),
+                                               (self.num_emit_site_classes-1,),
                                                jnp.float32)
         
     def __call__(self,
@@ -226,18 +227,22 @@ class LG08RateMatFitRateMult(LG08RateMatFromFile):
         
         # rate multiplier
         if self.num_emit_site_classes > 1:
-            rate_multiplier = bounded_sigmoid(self.rate_mult_logits,
-                                              min_val = self.rate_mult_min_val,
-                                              max_val = self.rate_mult_max_val)
+            subsequent_rate_multipliers = bounded_sigmoid(self.rate_mult_logits,
+                                                          min_val = self.rate_mult_min_val,
+                                                          max_val = self.rate_mult_max_val)
             
             if sow_intermediates:
-                for i in range(rate_multiplier.shape[0]):
-                    val_to_write = rate_multiplier[i]
-                    lab = f'{self.name}/rate multiplier {i}'
+                for i in range(subsequent_rate_multipliers.shape[0]):
+                    val_to_write = subsequent_rate_multipliers[i]
+                    lab = f'{self.name}/rate multiplier for class {i}'
                     self.sow_histograms_scalars(mat= val_to_write, 
                                                 label=lab, 
                                                 which='scalars')
                     del lab
+            
+            rate_multiplier = jnp.concatenate( [jnp.array([1]), 
+                                                subsequent_rate_multipliers],
+                                               axis=0 )
 
         else:
             rate_multiplier = jnp.array([1])
@@ -259,6 +264,10 @@ class LG08RateMatFitBoth(LG08RateMatFitRateMult):
     exchanegabilities come from LG08 substitution model, but are updated with
       gradient updates
     rate multipliers fit with gradient updates
+    
+    rate matrix is normalized to one substitution, THEN multiplied by a scalar 
+      multiple; first hidden site class has rate of 1, then subsequent ones 
+      are fit with gradient descent (rho = [1, rate2, rate3, ...])
     
     params: 
         - exchangeabilities_logits ( alph, alph )
@@ -310,11 +319,12 @@ class LG08RateMatFitBoth(LG08RateMatFitRateMult):
         self.exchangeabilities_logits = (upper_tri_exchang + upper_tri_exchang.T)
         
             
-        ### RATE MULTIPLIERS: (c,)
+        ### RATE MULTIPLIERS: (c-1,)
         if self.num_emit_site_classes > 1:
+            # first class automatically has rate multiplier of one
             self.rate_mult_logits = self.param('rate_multipliers',
                                                nn.initializers.normal(),
-                                               (self.num_emit_site_classes,),
+                                               (self.num_emit_site_classes-1,),
                                                jnp.float32)
         
     def __call__(self,
@@ -327,18 +337,22 @@ class LG08RateMatFitBoth(LG08RateMatFitRateMult):
         
         # rate multiplier
         if self.num_emit_site_classes > 1:
-            rate_multiplier = bounded_sigmoid(self.rate_mult_logits,
-                                              min_val = self.rate_mult_min_val,
-                                              max_val = self.rate_mult_max_val)
+            subsequent_rate_multipliers = bounded_sigmoid(self.rate_mult_logits,
+                                                          min_val = self.rate_mult_min_val,
+                                                          max_val = self.rate_mult_max_val)
             
             if sow_intermediates:
-                for i in range(rate_multiplier.shape[0]):
-                    val_to_write = rate_multiplier[i]
-                    lab = f'{self.name}/rate multiplier {i}'
+                for i in range(subsequent_rate_multipliers.shape[0]):
+                    val_to_write = subsequent_rate_multipliers[i]
+                    lab = f'{self.name}/rate multiplier for class {i}'
                     self.sow_histograms_scalars(mat= val_to_write, 
                                                 label=lab, 
                                                 which='scalars')
                     del lab
+                
+            rate_multiplier = jnp.concatenate( [jnp.array([1]), 
+                                                subsequent_rate_multipliers],
+                                               axis=0 )
                     
         else:
             rate_multiplier = jnp.array([1])
@@ -410,11 +424,12 @@ class PerClassRateMat(LG08RateMatFitBoth):
         self.exchangeabilities_logits = (upper_tri_exchang + upper_tri_exchang.T)
         
         
-        ### RATE MULTIPLIERS: (c,)
+        ### RATE MULTIPLIERS: (c-1,)
         if self.num_emit_site_classes > 1:
+            # first class automatically has rate multiplier of one
             self.rate_mult_logits = self.param('rate_multipliers',
                                                nn.initializers.normal(),
-                                               (self.num_emit_site_classes,),
+                                               (self.num_emit_site_classes-1,),
                                                jnp.float32)
         
     
