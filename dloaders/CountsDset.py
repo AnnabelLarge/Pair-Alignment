@@ -41,6 +41,7 @@ Data to be read:
 
 6. metadata.tsv: [PANDAS DATAFRAME]
     metadata about each sample
+    NOTE: lengths here do not include sentinel tokens
 
 
 """
@@ -123,8 +124,12 @@ class CountsDset(Dataset):
                             'ancestor',
                             'descendant',
                             'pfam', 
-                            'alignment_len', 
-                            'desc_seq_len']
+                            'anc_seq_len', 
+                            'desc_seq_len',
+                            'alignment_len',
+                            'num_matches',
+                            'num_ins',
+                            'num_del']
             meta_df =  pd.read_csv( f'./{data_dir}/{split}_metadata.tsv', 
                                     sep='\t', 
                                     index_col=0,
@@ -237,11 +242,6 @@ class CountsDset(Dataset):
         self.names_df = pd.concat(metadata_list, axis=0)
         self.names_df = self.names_df.reset_index(drop=True)
         
-        # add 1 for eos tokens 
-        #   (don't add anything for <bos> tokens, since you never predict that)
-        self.names_df['desc_seq_len'] += 1
-        self.names_df['alignment_len'] += 1
-    
         del metadata_list
         
         

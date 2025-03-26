@@ -284,7 +284,7 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
             final_rec = (batch_idx == len(training_dl)) & (epoch_idx == args.num_epochs)
             
             write_optional_outputs_during_training(writer_obj = writer, 
-                                                    pairhmm_trainstate = pairhmm_trainstate,
+                                                    all_trainstates = pairhmm_trainstate,
                                                     global_step = batch_epoch_idx, 
                                                     dict_of_values = train_metrics, 
                                                     interms_for_tboard = args.interms_for_tboard, 
@@ -335,12 +335,13 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
             eval_metrics = eval_fn_jitted(batch=batch, 
                                           pairhmm_trainstate=pairhmm_trainstate,
                                           max_align_len=batch_max_alignlen)
+            batch_loss = jnp.mean( eval_metrics['joint_neg_logP_length_normed'] )
             
 #__4___8__12: batch level (three tabs)
             ### add to total loss for this epoch; weight by number of
             ###   samples/valid tokens in this batch
             weight = args.batch_size / len(test_dset)
-            ave_epoch_test_loss += eval_metrics['batch_loss'] * weight
+            ave_epoch_test_loss += batch_loss * weight
             ave_epoch_test_perpl += jnp.mean( eval_metrics['joint_perplexity_perSamp'] ) * weight
             del weight    
         

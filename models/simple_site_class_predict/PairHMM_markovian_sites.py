@@ -510,7 +510,7 @@ class MarkovPairHMM(ModuleBase):
         
         
         ### conditional comes from joint / anc
-        cond_neg_logP = - (-joint_neg_logP / -anc_neg_logP)
+        cond_neg_logP = - (-joint_neg_logP - -anc_neg_logP)
         
         
         ### normalize all

@@ -56,8 +56,8 @@ Data to be read:
     - (dim2=3): n indexes (indices for descendant alignment)
 
 3. Pandas dataframe of metadata
-   > note: alignment length in this dataframe does NOT include extra 
-     <bos>, <eos> tokens
+   > note: alignment length in this dataframe does NOT include 
+     sentinel tokens
 
 4 (optional) different times to associate with each pair
   > plain .tsv file with two columns; no header and no index
@@ -275,7 +275,8 @@ def load_metadata(data_dir,
                     'ancestor',
                     'descendant',
                     'pfam', 
-                    'desc_seq_len', 
+                    'anc_seq_len', 
+                    'desc_seq_len',
                     'alignment_len',
                     'num_matches',
                     'num_ins',
@@ -285,11 +286,6 @@ def load_metadata(data_dir,
                      sep='\t', 
                      index_col=0,
                      usecols=cols_to_keep) 
-    
-    # add 1 for eos tokens 
-    #   (don't add anything for <bos> tokens, since you never predict that)
-    df['desc_seq_len'] += 1
-    df['alignment_len'] += 1
     
     if (idxes_to_keep is not None):
         df = df.iloc[idxes_to_keep]

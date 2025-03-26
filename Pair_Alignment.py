@@ -29,34 +29,31 @@ def main():
     parser = argparse.ArgumentParser(prog='Pair_Alignment')
     
     ### which program do you want to run?
-    valid_tasks = ['train',
-                   'DEBUG_markovian_pairhmm',
-                   'get_pairhmm_controls',
-                   'get_feedforward_controls']
+    valid_tasks = ['train']
     
-    # parser.add_argument('-task',
-    #                     type=str,
-    #                     required=True,
-    #                     choices = valid_tasks,
-    #                     help='What do you want to do? Pick from: {valid_tasks}')
+    parser.add_argument('-task',
+                        type=str,
+                        required=True,
+                        choices = valid_tasks,
+                        help='What do you want to do? Pick from: {valid_tasks}')
     
-    # # needed for most options
-    # parser.add_argument('-configs',
-    #                     type = str,
-    #                     help='Load configs from file or folder of files, in json format.')
+    # needed for most options
+    parser.add_argument('-configs',
+                        type = str,
+                        help='Load configs from file or folder of files, in json format.')
     
-    # # only when resuming training
-    # parser.add_argument(f'-training_wkdir',
-    #                     type = str,
-    #                     help = 'training working directory to resume from')
+    # only when resuming training
+    parser.add_argument(f'-training_wkdir',
+                        type = str,
+                        help = 'training working directory to resume from')
     
     # parse the arguments
     args = parser.parse_args()
     
     
-    ### UNCOMMENT TO RUN IN SPYDER IDE
-    args.task = 'DEBUG_markovian_pairhmm'
-    args.configs = 'markovian_one_class.json'
+    # ### UNCOMMENT TO RUN IN SPYDER IDE
+    # args.task = 'train'
+    # args.configs = 'tkf92_load_params.json'
     
     
     ### helper function to open a single config file and extract additional arguments
@@ -99,37 +96,17 @@ def main():
         dload_lst = init_dataloaders(args, 'train')
         train(args, dload_lst)
     
-    
-    
-    elif args.task == 'DEBUG_markovian_pairhmm':
-        assert args.configs.endswith('.json'), print("input is one JSON file")
-        print(f'TRAINING WITH: {args.configs}')
-        args = read_config_file(args.configs)
+    # elif args.task == 'DEBUG_markovian_pairhmm':
+    #     assert args.configs.endswith('.json'), print("input is one JSON file")
+    #     print(f'TRAINING WITH: {args.configs}')
+    #     args = read_config_file(args.configs)
         
-        from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
-        from cli.DEBUG_markovian_pairhmm import train_pairhmm_markovian_sites_pure_jax as debug_train
+    #     from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
+    #     from cli.DEBUG_markovian_pairhmm import train_pairhmm_markovian_sites_pure_jax as debug_train
         
-        dload_lst = init_dataloaders(args, 'train')
-        debug_train(args, dload_lst)
+    #     dload_lst = init_dataloaders(args, 'train')
+    #     debug_train(args, dload_lst)
         
-        
-    
-    ###########################################################################
-    ### GET CONTROLS   ########################################################
-    ###########################################################################
-    # for pairhmm and neural_hmm: compare score to pairhmm where
-    #   transition and emission matrices are derived from counts directly
-    elif args.task == 'get_pairhmm_controls':
-        from cli.get_pairhmm_controls import get_pairhmm_controls
-        get_pairhmm_controls(args)
-    
-    # for feedforward seq2seq (conditional loss): compare to naive 
-    #   frequency-based counts
-    elif args.task == 'get_feedforward_controls':
-        from cli.get_feedforward_controls import get_feedforward_controls
-        get_feedforward_controls(args)
-    
-    
     
 if __name__ == '__main__':
     main()

@@ -97,7 +97,6 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
         g.write( (f'  - Number of site classes for substitution model: '+
                   f'{args.pred_config["num_emit_site_classes"]}\n' )
                 )
-        g.write(f'  - Loss function: {args.loss_type}\n')
         g.write(f'  - Normalizing losses by: {args.norm_loss_by}\n')
     
     
@@ -272,7 +271,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
             final_rec = (batch_idx == len(training_dl)) & (epoch_idx == args.num_epochs)
             
             write_optional_outputs_during_training( writer_obj = writer, 
-                                                    pairhmm_trainstate = pairhmm_trainstate,
+                                                    all_trainstates = pairhmm_trainstate,
                                                     global_step = batch_epoch_idx, 
                                                     dict_of_values = train_metrics, 
                                                     interms_for_tboard = args.interms_for_tboard, 
@@ -317,11 +316,12 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
         for batch_idx, batch in enumerate(test_dl):
             eval_metrics = eval_fn_jitted(batch=batch, 
                                           pairhmm_trainstate=pairhmm_trainstate)
+            batch_loss = jnp.mean( eval_metrics['joint_neg_logP_length_normed'] )
             
             ### add to total loss for this epoch; weight by number of
             ###   samples/valid tokens in this batch
             weight = args.batch_size / len(test_dset)
-            ave_epoch_test_loss += eval_metrics['batch_loss'] * weight
+            ave_epoch_test_loss += batch_loss * weight
             ave_epoch_test_perpl += jnp.mean( eval_metrics['joint_perplexity_perSamp'] ) * weight
             del weight
     
@@ -500,7 +500,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     
     
     ### un-transform parameters and write to numpy arrays
-    all_model_instances.write_params(tstate = best_pairhmm_trainstate,
+    pairhmm_instance.write_params(tstate = best_pairhmm_trainstate,
                                      out_folder = args.out_arrs_dir,
                                      pred_config = args.pred_config)
     

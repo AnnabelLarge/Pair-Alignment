@@ -552,23 +552,17 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         final output shape: (T, C_from, C_to, S_from=4, S_to=4)
         """
         ### need joint TKF91 for this (which already contains lam/mu terms)
-        log_U = self.fill_cond_tkf91(out_dict)
+        log_U = self.fill_joint_tkf91(out_dict)
         
         # dims
         T = out_dict['log_alpha'].shape[0]
         C = class_probs.shape[0] #site classes
-        S = U.shape[-1] #hidden states (like start, M, I, D, and end)
+        S = log_U.shape[-1] #hidden states (like start, M, I, D, and end)
         
         # converted log values and broadcast to (T,C)
-        used_tkf_approx = out_dict.pop('used_tkf_approx')
-        out_dict = {k: jnp.broadcast_to(v[None,None], (T,C)) for k,v in out_dict.items()}
-        log_lam_div_mu = out_dict['log_lam'] - out_dict['log_mu']
-        log_one_minus_lam_div_mu = log_one_minus_x(log_lam_div_mu)
-        
-        log_r_extend = jnp.broadcast_to( safe_log(r_extend)[None,...], (T,C) )
-        log_one_minus_r_extend = log_one_minus_x(log_r_extend)
-        
-        log_class_probs = jnp.broadcast_to( safe_log(class_probs)[None,...], (T,C) )
+        log_r_ext_prob = jnp.broadcast_to( safe_log(r_extend)[None,...], (T,C) )
+        log_one_minus_r = log_one_minus_x(log_r_ext_prob)
+        log_class_prob = jnp.broadcast_to( safe_log(class_probs)[None,...], (T,C) )
         
         
         ### entries in the matrix
@@ -610,7 +604,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
 
         # add r to specific locations
         prev_vals = log_tkf92_rate_mat[:, i_idx, i_idx, j_idx, j_idx].reshape( (T, C, S-1) )
-        r_to_add = jnp.broadcast_to( log_r_ext_prob[None,:,None], prev_vals.shape)
+        r_to_add = jnp.broadcast_to( log_r_ext_prob[:,None], prev_vals.shape)
         new_vals = logsumexp_with_arr_lst([r_to_add, prev_vals]).reshape(T, -1)
         del prev_vals, r_to_add
 
@@ -667,6 +661,7 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
     
     def __call__(self,
                  t_array,
+                 class_probs,
                  sow_intermediates: bool):
         lam = self.tkf_lam_mu[0]
         mu = self.tkf_lam_mu[1]
@@ -703,6 +698,8 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
         
         matrix_dict = self.return_all_matrices(lam=lam,
                                                mu=mu,
+                                               class_probs=class_probs,
+                                               r_ext_prob=r_extend,
                                                joint_matrix=joint_matrix)
         return matrix_dict
     

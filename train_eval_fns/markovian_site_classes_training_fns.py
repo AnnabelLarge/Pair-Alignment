@@ -70,7 +70,7 @@ def train_one_batch(batch,
     # perplexity per sample
     joint_neg_logP_length_normed = aux_dict['joint_neg_logP_length_normed']
     joint_perplexity_perSamp = jnp.exp(joint_neg_logP_length_normed)
-    ece = jnp.exp(batch_loss_NLL)
+    joint_ece = jnp.exp(batch_loss_NLL)
     
     out_dict = {'joint_neg_logP_length_normed': joint_neg_logP_length_normed,
                 'joint_neg_logP': aux_dict['joint_neg_logP'],

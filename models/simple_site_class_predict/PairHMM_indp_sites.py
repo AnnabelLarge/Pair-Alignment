@@ -244,7 +244,7 @@ class IndpPairHMMFitBoth(ModuleBase):
         anc_neg_logP = -(anc_marg_emit_score + anc_marg_transit_score)
         anc_neg_logP_length_normed = anc_neg_logP / anc_len
         
-        out['anc_sum_neg_logP'] = anc_sum_neg_logP
+        out['anc_neg_logP'] = anc_neg_logP
         out['anc_neg_logP_length_normed'] = anc_neg_logP_length_normed
         
         
@@ -273,14 +273,14 @@ class IndpPairHMMFitBoth(ModuleBase):
         desc_neg_logP = -(desc_marg_emit_score + desc_marg_transit_score)
         desc_neg_logP_length_normed = desc_neg_logP / desc_len
             
-        out['desc_sum_neg_logP'] = desc_sum_neg_logP
+        out['desc_neg_logP'] = desc_neg_logP
         out['desc_neg_logP_length_normed'] = desc_neg_logP_length_normed
                 
         
         #####################################################
         ### calculate conditional from joint and marginal   #
         #####################################################
-        cond_neg_logP = -( -out['joint_neg_logP'] / -anc_neg_logP )
+        cond_neg_logP = -( -out['joint_neg_logP'] - -anc_neg_logP )
         
         if self.norm_loss_by == 'desc_len':
             cond_neg_logP_length_normed = cond_neg_logP / desc_len
@@ -476,6 +476,7 @@ class IndpPairHMMFitBoth(ModuleBase):
                                                            sow_intermediates = sow_intermediates)
             all_transit_matrices['joint'] = all_transit_matrices['joint'][:,0,0,...]
             all_transit_matrices['conditional'] = all_transit_matrices['conditional'][:,0,0,...]
+            all_transit_matrices['marginal'] = all_transit_matrices['marginal'][0,0,...]
             
         out_dict = {'logprob_emit_at_indel': logprob_emit_at_indel,
                     'joint_logprob_emit_at_match': joint_logprob_emit_at_match,
@@ -583,7 +584,7 @@ class IndpPairHMMFitRateMult(IndpPairHMMFitBoth):
     
     def setup(self):
         num_emit_site_classes = self.config['num_emit_site_classes']
-        indel_model_type = self.config['indel_model_type']
+        self.indel_model_type = self.config['indel_model_type']
         self.norm_loss_by = self.config['norm_loss_by']
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
         
@@ -607,11 +608,11 @@ class IndpPairHMMFitRateMult(IndpPairHMMFitBoth):
         
         
         ### TKF91 or TKF92
-        if indel_model_type == 'tkf91':
+        if self.indel_model_type == 'tkf91':
             self.transitions_module = TKF91TransitionLogprobs(config = self.config,
                                                      name = f'tkf91 indel model')
         
-        elif indel_model_type == 'tkf92':
+        elif self.indel_model_type == 'tkf92':
             self.transitions_module = TKF92TransitionLogprobs(config = self.config,
                                                      name = f'tkf92 indel model')
 
@@ -632,7 +633,7 @@ class IndpPairHMMLoadAll(IndpPairHMMFitBoth):
     
     def setup(self):
         num_emit_site_classes = self.config['num_emit_site_classes']
-        indel_model_type = self.config['indel_model_type']
+        self.indel_model_type = self.config['indel_model_type']
         self.norm_loss_by = self.config['norm_loss_by']
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
         
@@ -653,11 +654,11 @@ class IndpPairHMMLoadAll(IndpPairHMMFitBoth):
         
         ### TKF91 or TKF92
         ### make sure you're loading from a model file here
-        if indel_model_type == 'tkf91':
+        if self.indel_model_type == 'tkf91':
             self.transitions_module = TKF91TransitionLogprobsFromFile(config = self.config,
                                                      name = f'tkf91 indel model')
         
-        elif indel_model_type == 'tkf92':
+        elif self.indel_model_type == 'tkf92':
             self.transitions_module = TKF92TransitionLogprobsFromFile(config = self.config,
                                                      name = f'tkf92 indel model')
             

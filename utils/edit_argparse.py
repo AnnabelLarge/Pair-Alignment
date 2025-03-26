@@ -94,14 +94,12 @@ def share_top_level_args(args):
         args.anc_enc_config['seq_padding_idx'] = args.seq_padding_idx
         args.desc_dec_config['seq_padding_idx'] = args.seq_padding_idx
         
-        args.pred_config['loss_type'] = args.loss_type
         args.pred_config['emission_alphabet_size'] = args.emission_alphabet_size
         args.pred_config['exchang_config']['emission_alphabet_size'] = args.emission_alphabet_size
         args.pred_config['equilibr_config']['emission_alphabet_size'] = args.emission_alphabet_size
         
 
     elif args.pred_model_type.startswith('pairhmm'):
-        args.pred_config['loss_type'] = args.loss_type
         args.pred_config['emission_alphabet_size'] = args.emission_alphabet_size
     
     args.pred_config['norm_loss_by'] = args.norm_loss_by
