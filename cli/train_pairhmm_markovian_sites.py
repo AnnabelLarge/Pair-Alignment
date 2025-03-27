@@ -516,6 +516,12 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
                                      pred_config = args.pred_config)
     
     
+    ### save the argparse object by itself
+    args.epoch_idx = best_epoch
+    with open(f'{args.model_ckpts_dir}/TRAINING_ARGPARSE.pkl', 'wb') as g:
+        pickle.dump(args, g)
+        
+    
     ### jit compile new eval function
     t_array = test_dset.return_time_array()
     parted_eval_fn = partial( eval_one_batch,
