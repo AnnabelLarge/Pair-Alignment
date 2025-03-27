@@ -53,15 +53,19 @@ class ModuleBase(nn.Module):
                          reduce_fn = lambda a, b: b)
     
     def summary_stats(self, mat, key_prefix):
-        perc_zeros = (mat==0).sum() / mat.size
-        mean_without_zeros = mat.sum() / (mat!=0).sum()
+        if mat.size == 1:
+            out_dict = {f'{key_prefix}': jnp.squeeze(mat)}
         
-        out_dict = {f'{key_prefix}/MAX': mat.max(),
-                    f'{key_prefix}/MIN': mat.min(),
-                    f'{key_prefix}/MEAN': mat.mean(),
-                    f'{key_prefix}/VAR': mat.var(),
-                    f'{key_prefix}/MEAN-WITHOUT-ZEROS': mean_without_zeros,
-                    f'{key_prefix}/PERC-ZEROS': perc_zeros}
+        else:
+            perc_zeros = (mat==0).sum() / mat.size
+            mean_without_zeros = mat.sum() / (mat!=0).sum()
+            
+            out_dict = {f'{key_prefix}/MAX': mat.max(),
+                        f'{key_prefix}/MIN': mat.min(),
+                        f'{key_prefix}/MEAN': mat.mean(),
+                        f'{key_prefix}/VAR': mat.var(),
+                        f'{key_prefix}/MEAN-WITHOUT-ZEROS': mean_without_zeros,
+                        f'{key_prefix}/PERC-ZEROS': perc_zeros}
         
         return out_dict
     

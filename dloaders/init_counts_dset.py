@@ -56,30 +56,21 @@ def init_time_array(args):
    
 def init_counts_dset(args, 
                      task, 
-                     with_rng=True):
+                     training_argparse=None):
     """
     initialize the dataloaders
     """
-    
-    #########################################################
-    ### set random seeds for numpy and pytorch separately   #
-    #########################################################
-    if with_rng:
-        torch.manual_seed(args.rng_seednum)
-        random.seed(args.rng_seednum)
-        np.random.seed(args.rng_seednum)
-    
-    
     #################################
     ### training-specific options   #
     #################################
     if task in ['train', 
                 'resume_train']:
+        torch.manual_seed(args.rng_seednum)
+        random.seed(args.rng_seednum)
+        np.random.seed(args.rng_seednum)
+        
         only_test = False
-
-        # misc params, time array
         times_from_array, single_time_from_file = init_time_array(args)
-        pred_model_type = args.pred_model_type
     
     
     #############################
@@ -87,17 +78,7 @@ def init_counts_dset(args,
     #############################
     elif task in ['eval']:
         only_test = True
-
-        # load the training argparse
-        training_argparse_filename = (f'{args.training_wkdir}/'+
-                                      f'model_ckpts/TRAINING_ARGPARSE.pkl')
-        
-        with open(training_argparse_filename,'rb') as g:
-            training_argparse = pickle.load(g)
-        
-        # use values from training argparse to set values
         times_from_array, single_time_from_file = init_time_array(training_argparse)
-        pred_model_type = training_argparse.pred_model_type
     
     
     #################

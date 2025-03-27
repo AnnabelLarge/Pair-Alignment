@@ -5,8 +5,7 @@ Created on Fri Feb  7 12:33:01 2025
 
 @author: annabel
 
-Load parameters and evaluate likelihoods for markovian
-  site class model
+train a pair hmm, under markovian site class model assumption
 
 """
 # general python
@@ -42,28 +41,17 @@ from utils.edit_argparse import (enforce_valid_defaults,
                                  fill_with_default_values,
                                  share_top_level_args)
 from utils.setup_training_dir import setup_training_dir
-from utils.sequence_length_helpers import (determine_seqlen_bin, 
-                                           determine_alignlen_bin)
+from utils.sequence_length_helpers import determine_alignlen_bin
 from utils.tensorboard_recording_utils import (write_times,
                                                write_optional_outputs_during_training)
 from utils.write_timing_file import write_timing_file
 
 # specific to training this model
-from dloaders.init_full_len_dset import init_full_len_dset
 from models.simple_site_class_predict.initializers import init_pairhmm_markov_sites as init_pairhmm
 from train_eval_fns.markovian_site_classes_training_fns import ( train_one_batch,
                                                             eval_one_batch,
                                                             final_eval_wrapper )
 
-# class DebugNansInfs:
-#     def __enter__(self):
-#         jax.config.update("jax_debug_nans", True)
-#         jax.config.update("jax_debug_infs", True)
-
-#     def __exit__(self, exc_type, exc_value, traceback):
-#         jax.config.update("jax_debug_nans", False)
-#         jax.config.update("jax_debug_infs", False)
-        
 
 def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     ###########################################################################

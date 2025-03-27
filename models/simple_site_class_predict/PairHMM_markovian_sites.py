@@ -12,6 +12,7 @@ MarkovPairHMMLoadAll
 
 """
 import pickle
+import numpy as np
 
 # jumping jax and leaping flax
 from flax import linen as nn
@@ -606,7 +607,12 @@ class MarkovPairHMM(ModuleBase):
                                                     min_val = exchange_min_val,
                                                     max_val = exchange_max_val)
                 
-                with open(f'{out_folder}/PARAMS_exchangeabilities.npy','wb') as g:
+                np.savetxt( f'{out_folder}/PARAMS_exchangeabilities.tsv', 
+                            np.array(exchangeabilities), 
+                            fmt = '%.4f',
+                            delimiter= '\t' )
+                
+                with open(f'{out_folder}/PARAMS-ARR_exchangeabilities.npy','wb') as g:
                     jnp.save(g, exchangeabilities)
                 
             if 'rate_multipliers' in params_dict['get rate matrix']:
@@ -617,60 +623,53 @@ class MarkovPairHMM(ModuleBase):
     
                 with open(f'{out_folder}/PARAMS_rate_multipliers.txt','w') as g:
                     [g.write(f'{elem.item()}\n') for elem in rate_mult]
+        
+        if 'get equilibrium' in params_dict.keys():
+            equl_logits = params_dict['get equilibrium']['Equilibrium distr.']
+            equl_dist = nn.softmax( equl_logits, axis=1 )
+            
+            np.savetxt( f'{out_folder}/PARAMS_equilibriums.tsv', 
+                        np.array(equl_dist), 
+                        fmt = '%.4f',
+                        delimiter= '\t' )
+            
+            with open(f'{out_folder}/PARAMS-ARR_equilibriums.npy','wb') as g:
+                jnp.save(g, equl_dist)
                 
                 
         ### transitions
-        # tkf91
-        if 'tkf91 indel model' in params_dict.keys():
-            lam_mu_logits = params_dict['tkf91 indel model']['TKF91 lambda, mu']
-            
-            lam = bounded_sigmoid(x = lam_mu_logits[0],
-                                  min_val = lam_min_val,
-                                  max_val = lam_max_val)
-            
-            offset = bounded_sigmoid(x = lam_mu_logits[1],
-                                     min_val = offs_min_val,
-                                     max_val = offs_max_val)
-            mu = lam / ( 1 -  offset) 
-            
-            with open(f'{out_folder}/PARAMS_tkf91_indel_params.txt','w') as g:
-                g.write(f'insert rate, lambda: {lam}\n')
-                g.write(f'deletion rate, mu: {mu}\n')
-            
-        # tkf92
-        elif 'tkf92 indel model' in params_dict.keys():
-            # also need range for r values
-            out = read_pred_config( 'r_range', (pred_config['tkf_err'], 0.8) )
-            r_extend_min_val, r_extend_max_val = out
-            del out
+        # also need range for r values
+        out = read_pred_config( 'r_range', (pred_config['tkf_err'], 0.8) )
+        r_extend_min_val, r_extend_max_val = out
+        del out
+    
+        lam_mu_logits = params_dict['tkf92 indel model']['TKF92 lambda, mu']
+    
+        lam = bounded_sigmoid(x = lam_mu_logits[0],
+                              min_val = lam_min_val,
+                              max_val = lam_max_val)
         
-            lam_mu_logits = params_dict['tkf92 indel model']['TKF92 lambda, mu']
+        offset = bounded_sigmoid(x = lam_mu_logits[1],
+                                 min_val = offs_min_val,
+                                 max_val = offs_max_val)
+        mu = lam / ( 1 -  offset) 
         
-            lam = bounded_sigmoid(x = lam_mu_logits[0],
-                                  min_val = lam_min_val,
-                                  max_val = lam_max_val)
-            
-            offset = bounded_sigmoid(x = lam_mu_logits[1],
-                                     min_val = offs_min_val,
-                                     max_val = offs_max_val)
-            mu = lam / ( 1 -  offset) 
-            
-            r_extend_logits = params_dict['tkf92 indel model']['TKF92 r extension prob']
-            r_extend = bounded_sigmoid(x = r_extend_logits,
-                                       min_val = r_extend_min_val,
-                                       max_val = r_extend_max_val)
-            
-            mean_indel_lengths = 1 / (1 - r_extend)
-            
-            with open(f'{out_folder}/PARAMS_tkf92_indel_params.txt','w') as g:
-                g.write(f'insert rate, lambda: {lam}\n')
-                g.write(f'deletion rate, mu: {mu}\n')
-                g.write(f'extension prob, r: ')
-                [g.write(f'{elem}\t') for elem in r_extend]
-                g.write('\n')
-                g.write(f'mean indel length: ')
-                [g.write(f'{elem}\t') for elem in mean_indel_lengths]
-                g.write('\n')
+        r_extend_logits = params_dict['tkf92 indel model']['TKF92 r extension prob']
+        r_extend = bounded_sigmoid(x = r_extend_logits,
+                                   min_val = r_extend_min_val,
+                                   max_val = r_extend_max_val)
+        
+        mean_indel_lengths = 1 / (1 - r_extend)
+        
+        with open(f'{out_folder}/PARAMS_tkf92_indel_params.txt','w') as g:
+            g.write(f'insert rate, lambda: {lam}\n')
+            g.write(f'deletion rate, mu: {mu}\n')
+            g.write(f'extension prob, r: ')
+            [g.write(f'{elem}\t') for elem in r_extend]
+            g.write('\n')
+            g.write(f'mean indel length: ')
+            [g.write(f'{elem}\t') for elem in mean_indel_lengths]
+            g.write('\n')
                 
         
     def _get_scoring_matrices( self,

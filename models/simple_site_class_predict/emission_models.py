@@ -234,7 +234,7 @@ class LG08RateMatFitRateMult(LG08RateMatFromFile):
             if sow_intermediates:
                 for i in range(subsequent_rate_multipliers.shape[0]):
                     val_to_write = subsequent_rate_multipliers[i]
-                    lab = f'{self.name}/rate multiplier for class {i}'
+                    lab = f'{self.name}/rate multiplier for class {i+1}'
                     self.sow_histograms_scalars(mat= val_to_write, 
                                                 label=lab, 
                                                 which='scalars')
@@ -362,7 +362,7 @@ class LG08RateMatFitBoth(LG08RateMatFitRateMult):
                                             min_val = self.exchange_min_val,
                                             max_val = self.exchange_max_val)
         
-        if (sow_intermediates):
+        if sow_intermediates:
             self.sow_histograms_scalars(mat = exchangeabilities, 
                                         label = 'exchangeabilities', 
                                         which='scalars')
@@ -462,11 +462,12 @@ class LogEqulVecPerClass(ModuleBase):
         out = nn.log_softmax( self.logits, axis = 1 )
 
         if sow_intermediates:
-            lab = f'{self.name}/equilibrium dist'
-            self.sow_histograms_scalars(mat= out, 
-                                        label=lab, 
-                                        which='scalars')
-            del lab
+            for c in range(out.shape[0]):
+                lab = f'{self.name}/equilibrium dist for class {c}'
+                self.sow_histograms_scalars(mat= jnp.exp(out[c,...]), 
+                                            label=lab, 
+                                            which='scalars')
+                del lab
         
         return out
 

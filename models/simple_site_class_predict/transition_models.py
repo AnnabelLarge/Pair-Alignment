@@ -178,8 +178,7 @@ class TKF91TransitionLogprobs(ModuleBase):
                                    mu = mu, 
                                    t_array = t_array,
                                    use_approx = use_approx,
-                                   tkf_err = self.tkf_err,
-                                   num_classes = 1)
+                                   tkf_err = self.tkf_err)
         
         # record values
         if sow_intermediates:
@@ -193,6 +192,14 @@ class TKF91TransitionLogprobs(ModuleBase):
             
             self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_gamma']), 
                                         label=f'{self.name}/tkf_gamma', 
+                                        which='scalars')
+            
+            self.sow_histograms_scalars(mat= lam, 
+                                        label=f'{self.name}/lam', 
+                                        which='scalars')
+            
+            self.sow_histograms_scalars(mat= mu, 
+                                        label=f'{self.name}/mu', 
                                         which='scalars')
         
         joint_matrix =  self.fill_joint_tkf91(out_dict)
@@ -278,8 +285,7 @@ class TKF91TransitionLogprobs(ModuleBase):
                    mu,
                    t_array,
                    use_approx,
-                   tkf_err,
-                   num_classes):
+                   tkf_err):
         """
         lam and mu are single integers
         
@@ -409,23 +415,8 @@ class TKF91TransitionLogprobsFromFile(TKF91TransitionLogprobs):
                                    mu = mu, 
                                    t_array = t_array,
                                    use_approx = use_approx,
-                                   tkf_err = self.tkf_err,
-                                   num_classes = 1)
+                                   tkf_err = self.tkf_err)
         
-        # record values
-        if sow_intermediates:
-            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_alpha']), 
-                                        label=f'{self.name}/tkf_alpha', 
-                                        which='scalars')
-            
-            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_beta']), 
-                                        label=f'{self.name}/tkf_beta', 
-                                        which='scalars')
-            
-            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_gamma']), 
-                                        label=f'{self.name}/tkf_gamma', 
-                                        which='scalars')
-    
         joint_matrix =  self.fill_joint_tkf91(out_dict)
         
         matrix_dict = self.return_all_matrices(lam=lam,
@@ -516,11 +507,18 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
                                    mu = mu, 
                                    t_array = t_array,
                                    use_approx = use_approx,
-                                   tkf_err = self.tkf_err,
-                                   num_classes = r_extend.shape[0])
+                                   tkf_err = self.tkf_err)
         
         # record values
         if sow_intermediates:
+            self.sow_histograms_scalars(mat= lam, 
+                                        label=f'{self.name}/lam', 
+                                        which='scalars')
+            
+            self.sow_histograms_scalars(mat= mu, 
+                                        label=f'{self.name}/mu', 
+                                        which='scalars')
+            
             self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_alpha']), 
                                         label=f'{self.name}/tkf_alpha', 
                                         which='scalars')
@@ -532,14 +530,21 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
             self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_gamma']), 
                                         label=f'{self.name}/tkf_gamma', 
                                         which='scalars')
+            
+            for c in range(r_extend.shape[0]):
+                self.sow_histograms_scalars(mat= r_extend[c], 
+                                            label=f'{self.name}/r_extend_class_{c}', 
+                                            which='scalars')
     
         # (T, C_from, C_to, S_from=4, S_to=4)
-        joint_matrix =  self.fill_joint_tkf92(out_dict, 
-                                              r_extend,
-                                              class_probs)
+        joint_matrix =  self.fill_joint_tkf92(out_dict=out_dict, 
+                                              r_extend=r_extend,
+                                              class_probs=class_probs)
         
         matrix_dict = self.return_all_matrices(lam=lam,
                                                mu=mu,
+                                               class_probs=class_probs,
+                                               r_ext_prob = r_extend,
                                                joint_matrix=joint_matrix)
         return matrix_dict
         
@@ -674,22 +679,7 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
                                    mu = mu, 
                                    t_array = t_array,
                                    use_approx = use_approx,
-                                   tkf_err = self.tkf_err,
-                                   num_classes = num_site_classes)
-        
-        # record values
-        if sow_intermediates:
-            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_alpha']), 
-                                        label=f'{self.name}/tkf_alpha', 
-                                        which='scalars')
-            
-            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_beta']), 
-                                        label=f'{self.name}/tkf_beta', 
-                                        which='scalars')
-            
-            self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_gamma']), 
-                                        label=f'{self.name}/tkf_gamma', 
-                                        which='scalars')
+                                   tkf_err = self.tkf_err)
         
         # (T, C_from, C_to, S_from=4, S_to=4)
         joint_matrix =  self.fill_joint_tkf92(out_dict, 

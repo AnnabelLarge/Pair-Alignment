@@ -357,6 +357,11 @@ class IndpPairHMMFitBoth(ModuleBase):
                                                     min_val = exchange_min_val,
                                                     max_val = exchange_max_val)
                 
+                np.savetxt( f'{out_folder}/PARAMS_exchangeabilities.tsv', 
+                            np.array(exchangeabilities), 
+                            fmt = '%.4f',
+                            delimiter= '\t' )
+                
                 with open(f'{out_folder}/PARAMS_exchangeabilities.npy','wb') as g:
                     jnp.save(g, exchangeabilities)
                 
@@ -368,7 +373,18 @@ class IndpPairHMMFitBoth(ModuleBase):
     
                 with open(f'{out_folder}/PARAMS_rate_multipliers.txt','w') as g:
                     [g.write(f'{elem.item()}\n') for elem in rate_mult]
-                
+        
+        if 'get equilibrium' in params_dict.keys():
+            equl_logits = params_dict['get equilibrium']['Equilibrium distr.']
+            equl_dist = nn.softmax( equl_logits, axis=1 )
+            
+            np.savetxt( f'{out_folder}/PARAMS_equilibriums.tsv', 
+                        np.array(equl_dist), 
+                        fmt = '%.4f',
+                        delimiter= '\t' )
+            
+            with open(f'{out_folder}/PARAMS-ARR_equilibriums.npy','wb') as g:
+                jnp.save(g, equl_dist)
                 
         ### transitions
         # tkf91

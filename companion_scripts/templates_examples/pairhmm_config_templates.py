@@ -56,7 +56,6 @@ def make_pairhmm_train_config(load_all: bool):
                        "LINEBREAK101":"",
                        
                        "norm_loss_by": "[STR='desc_len', 'align_len']",
-                       "(if not feedforward) loss_type": "[STR='joint','cond']",
                        
                        "LINEBREAK102":"",
                        
@@ -85,8 +84,8 @@ def make_pairhmm_train_config(load_all: bool):
                            "finalpred_sow_outputs":"[BOOL]",
                            "forward_pass_outputs":"[BOOL]",
                            }),
-                       "save_arrs": "[BOOL]",
                        "save_per_sample_losses": "[BOOL]",
+                       "update_grads": "[BOOL]"
                        "histogram_output_freq": "[INT]",
                        
                        "LINEBREAK104":"",

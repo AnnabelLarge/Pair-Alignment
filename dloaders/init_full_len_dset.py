@@ -64,36 +64,34 @@ def init_time_array(args):
         
    
     
-def init_full_len_dset(args, task):
+def init_full_len_dset( args, 
+                        task,
+                        training_argparse=None ):
     """
     initialize the dataloaders
     """
-    #########################################################
-    ### set random seeds for numpy and pytorch separately   #
-    #########################################################
-    torch.manual_seed(args.rng_seednum)
-    random.seed(args.rng_seednum)
-    np.random.seed(args.rng_seednum)
-    
-    
     #################################
     ### training-specific options   #
     #################################
     if task in ['train', 
                 'resume_train']:
+        torch.manual_seed(args.rng_seednum)
+        random.seed(args.rng_seednum)
+        np.random.seed(args.rng_seednum)    
         only_test = False
-
+        
+        pred_model_type = args.pred_model_type
+        
         # if using a feedforward prediction head, enforce this value
-        if args.pred_model_type == 'feedforward':
+        if pred_model_type == 'feedforward':
             args.times_from = None
         
         # if using markovian pairhmm, enforce this value
-        if args.pred_model_type.startswith('pairhmm'):
+        if pred_model_type.startswith('pairhmm'):
             args.use_scan_fns = False
         
         # misc params, time array
         times_from_array, single_time_from_file = init_time_array(args)
-        pred_model_type = args.pred_model_type
     
     
     #############################
@@ -102,17 +100,19 @@ def init_full_len_dset(args, task):
     elif task in ['eval']:
         only_test = True
 
-        ### load the training argparse
-        training_argparse_filename = (f'{args.training_wkdir}/'+
-                                      f'model_ckpts/TRAINING_ARGPARSE.pkl')
-        
-        with open(training_argparse_filename,'rb') as g:
-            training_argparse = pickle.load(g)
-        
-        
         ### use values from training argparse to set values
-        times_from_array, single_time_from_file = init_time_array(training_argparse)
         pred_model_type = training_argparse.pred_model_type
+        
+        # if using a feedforward prediction head, enforce this value
+        if pred_model_type == 'feedforward':
+            args.times_from = None
+        
+        # if using markovian pairhmm, enforce this value
+        if pred_model_type.startswith('pairhmm'):
+            args.use_scan_fns = False
+        
+        times_from_array, single_time_from_file = init_time_array(training_argparse)
+        
     
     
     #################
@@ -122,7 +122,7 @@ def init_full_len_dset(args, task):
     assert type(args.test_dset_splits) == list
     test_dset = FullLenDset( data_dir = args.data_dir, 
                              split_prefixes = args.test_dset_splits,
-                             pred_model_type = args.pred_model_type,
+                             pred_model_type = pred_model_type,
                              use_scan_fns = args.use_scan_fns,
                              times_from_array = times_from_array,
                              single_time_from_file = single_time_from_file,
@@ -140,7 +140,7 @@ def init_full_len_dset(args, task):
         assert type(args.train_dset_splits) == list
         training_dset = FullLenDset( data_dir = args.data_dir, 
                                      split_prefixes = args.train_dset_splits,
-                                     pred_model_type = args.pred_model_type,
+                                     pred_model_type = pred_model_type,
                                      use_scan_fns = args.use_scan_fns,
                                      times_from_array = times_from_array,
                                      single_time_from_file = single_time_from_file,

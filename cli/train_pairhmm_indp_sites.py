@@ -5,8 +5,7 @@ Created on Fri Feb  7 12:33:01 2025
 
 @author: annabel
 
-Load parameters and evaluate likelihoods for an independent
-  site class model
+train a pair hmm, under independent site class model assumption
 
 """
 # general python
@@ -42,8 +41,6 @@ from utils.edit_argparse import (enforce_valid_defaults,
                                  fill_with_default_values,
                                  share_top_level_args)
 from utils.setup_training_dir import setup_training_dir
-from utils.sequence_length_helpers import (determine_seqlen_bin, 
-                                           determine_alignlen_bin)
 from utils.tensorboard_recording_utils import (write_times,
                                                write_optional_outputs_during_training)
 from utils.write_timing_file import write_timing_file
@@ -90,16 +87,15 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     with open(args.logfile_name,'w') as g:
         if not args.update_grads:
             g.write('DEBUG MODE: DISABLING GRAD UPDATES\n\n')
-            
-        g.write( (f'PairHMM {args.pred_config["indel_model_type"]} '+
-                  f'with independent site classes over emissions\n')
-                )
-        g.write( (f'  - Number of site classes for substitution model: '+
+        
+        g.write( f'PairHMM with independent site classes over emissions\n' )
+        g.write( f'Indel model: {args.pred_config["indel_model_type"]}\n' )
+        g.write( (f'  - Number of site classes for emissions: '+
                   f'{args.pred_config["num_emit_site_classes"]}\n' )
                 )
-        g.write(f'  - Normalizing losses by: {args.norm_loss_by}\n')
-    
-    
+        g.write( f'  - Normalizing losses by: {args.norm_loss_by}\n' )
+        
+        
     ### save updated config, provide filename for saving model parameters
     finalpred_save_model_filename = args.model_ckpts_dir + '/'+ f'FINAL_PRED.pkl'
     write_config(args = args, out_dir = args.model_ckpts_dir)
