@@ -32,29 +32,29 @@ def main():
     valid_tasks = ['train',
                    'eval']
     
-    # parser.add_argument('-task',
-    #                     type=str,
-    #                     required=True,
-    #                     choices = valid_tasks,
-    #                     help='What do you want to do? Pick from: {valid_tasks}')
+    parser.add_argument('-task',
+                     type=str,
+                     required=True,
+                     choices = valid_tasks,
+                     help='What do you want to do? Pick from: {valid_tasks}')
     
-    # # needed for most options
-    # parser.add_argument('-configs',
-    #                     type = str,
-    #                     help='Load configs from file or folder of files, in json format.')
+    # needed for most options
+    parser.add_argument('-configs',
+                     type = str,
+                     help='Load configs from file or folder of files, in json format.')
     
-    # # only when resuming training
-    # parser.add_argument(f'-training_wkdir',
-    #                     type = str,
-    #                     help = 'training working directory to resume from')
+    # only when resuming training
+    parser.add_argument(f'-training_wkdir',
+                     type = str,
+                     help = 'training working directory to resume from')
     
     # parse the arguments
     args = parser.parse_args()
     
     
-    ### UNCOMMENT TO RUN IN SPYDER IDE
-    args.task = 'eval'
-    args.configs = 'indp_sites_tkf92_eval.json'
+    # ### UNCOMMENT TO RUN IN SPYDER IDE
+    # args.task = 'eval'
+    # args.configs = 'indp_sites_tkf92_eval.json'
     
     
     ### helper function to open a single config file and extract additional arguments
