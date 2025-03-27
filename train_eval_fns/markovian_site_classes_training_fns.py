@@ -181,9 +181,22 @@ def final_eval_wrapper(dataloader,
         - return_all_loglike = True
     """
     
-    final_ave_loss = 0
-    final_ave_loss_seqlen_normed = 0
-    final_perplexity = 0
+    summary_stats = {'joint_ave_loss': 0,
+                   'joint_ave_loss_seqlen_normed': 0,
+                   'joint_perplexity': 0,
+                   
+                   'cond_ave_loss': 0,
+                   'cond_ave_loss_seqlen_normed': 0,
+                   'cond_perplexity': 0,
+                   
+                   'anc_ave_loss': 0,
+                   'anc_ave_loss_seqlen_normed': 0,
+                   'anc_perplexity': 0,
+                   
+                   'desc_ave_loss': 0,
+                   'desc_ave_loss_seqlen_normed': 0,
+                   'desc_perplexity': 0,
+                   }
     
     for batch_idx, batch in tqdm( enumerate(dataloader), total=len(dataloader) ): 
         batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch)

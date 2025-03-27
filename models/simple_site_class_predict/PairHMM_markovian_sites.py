@@ -157,7 +157,8 @@ class MarkovPairHMM(ModuleBase):
         # use C_prev=0 for start class (but it doesn't matter, because the 
         # transition probability is the same for all C_prev)
         curr_state = aligned_inputs[:, 1, 2] # B
-        init_trans_logprob = joint_transit[:, 0, :, -1, curr_state-1]
+        start_any = joint_transit[:, 0, :, -1, :]
+        init_trans_logprob = start_any[...,curr_state-1]
         
         # carry value; (T, C_curr, B)
         init_alpha = init_emission_logprob + init_trans_logprob
@@ -192,7 +193,7 @@ class MarkovPairHMM(ModuleBase):
             
             def end(in_carry):
                 # if end, then curr_state = -1 (<end>)
-                tr_per_class = joint_transit[..., prev_state-1, -1]
+                tr_per_class = joint_transit[..., -1, prev_state-1, -1]
                 return tr_per_class + in_carry
             
             
@@ -271,6 +272,8 @@ class MarkovPairHMM(ModuleBase):
         
         Calculate joint and sequence marginals in one jax.lax.scan operation
         """
+        L_align = aligned_inputs.shape[1]
+        
         # get lengths; subtract two to remove <bos> and <eos>
         align_len = (aligned_inputs[...,0] != 0).sum(axis=1) - 2
         anc_len = ( (aligned_inputs[...,0] !=0) & (aligned_inputs[...,0] !=43) ).sum(axis=1) - 2
@@ -306,7 +309,8 @@ class MarkovPairHMM(ModuleBase):
         # initial state is 4 (<start>); take the last row
         # use C_prev=0 for start class (but it doesn't matter, because the 
         # transition probability is the same for all C_prev)
-        init_joint_tr = joint_transit[:, 0, :, -1, curr_state-1]
+        start_any = joint_transit[:, 0, :, -1, :]
+        init_joint_tr = start_any[...,curr_state-1]
         
         # carry value; (T, C_curr, B)
         init_joint_alpha = init_joint_e + init_joint_tr
@@ -407,7 +411,7 @@ class MarkovPairHMM(ModuleBase):
             def main_body(joint_carry, anc_carry, desc_carry):
                 # P(anc, desc, align)
                 joint_tr_per_class = joint_transit[..., prev_state-1, curr_state-1]                
-                joint_out = e + logsumexp(joint_carry[:, :, None, :] + joint_tr_per_class, axis=1)
+                joint_out = joint_e + logsumexp(joint_carry[:, :, None, :] + joint_tr_per_class, axis=1)
                 
                 # P(anc)
                 anc_first_tr = marginal_transit[0,:,1,0][...,None]
@@ -430,7 +434,7 @@ class MarkovPairHMM(ModuleBase):
             def end(joint_carry, anc_carry, desc_carry):
                 # note for all: if end, then curr_state = -1 (<end>)
                 # P(anc, desc, align)
-                joint_tr_per_class = joint_transit[..., prev_state-1, -1]
+                joint_tr_per_class = joint_transit[..., -1, prev_state-1, -1]
                 joint_out = joint_tr_per_class + joint_carry
                 
                 # P(anc)
@@ -485,7 +489,7 @@ class MarkovPairHMM(ModuleBase):
             return (out_dict, None)
     
         ### scan over remaining length
-        idx_arr = jnp.array( [i for i in range(2, L)] )
+        idx_arr = jnp.array( [i for i in range(2, L_align)] )
         out_dict,_ = jax.lax.scan( f = scan_fn,
                                    init = init_dict,
                                    xs = idx_arr,

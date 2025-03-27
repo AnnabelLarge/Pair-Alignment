@@ -96,16 +96,6 @@ def main():
         dload_lst = init_dataloaders(args, 'train')
         train(args, dload_lst)
     
-    # elif args.task == 'DEBUG_markovian_pairhmm':
-    #     assert args.configs.endswith('.json'), print("input is one JSON file")
-    #     print(f'TRAINING WITH: {args.configs}')
-    #     args = read_config_file(args.configs)
-        
-    #     from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
-    #     from cli.DEBUG_markovian_pairhmm import train_pairhmm_markovian_sites_pure_jax as debug_train
-        
-    #     dload_lst = init_dataloaders(args, 'train')
-    #     debug_train(args, dload_lst)
         
     
 if __name__ == '__main__':

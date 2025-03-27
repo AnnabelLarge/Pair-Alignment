@@ -604,7 +604,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
 
         # add r to specific locations
         prev_vals = log_tkf92_rate_mat[:, i_idx, i_idx, j_idx, j_idx].reshape( (T, C, S-1) )
-        r_to_add = jnp.broadcast_to( log_r_ext_prob[:,None], prev_vals.shape)
+        r_to_add = jnp.broadcast_to( log_r_ext_prob[...,None], prev_vals.shape)
         new_vals = logsumexp_with_arr_lst([r_to_add, prev_vals]).reshape(T, -1)
         del prev_vals, r_to_add
 

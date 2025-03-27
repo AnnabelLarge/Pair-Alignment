@@ -203,7 +203,7 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     # when to save/what to save
     best_epoch = -1
     best_test_loss = 999999
-    best_pairhmm_trainstates = pairhmm_trainstate
+    best_pairhmm_trainstate = pairhmm_trainstate
     
     # quit training if test loss increases for X epochs in a row
     prev_test_loss = 999999
