@@ -25,6 +25,9 @@ main methods for all models:
            P(desc) and P(anc); use this during final eval; is also
            jit compatible
 """
+import numpy as np
+import pickle
+
 # jumping jax and leaping flax
 from flax import linen as nn
 import jax
