@@ -544,7 +544,7 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
         g.write(f'SCORING ALL TRAIN SEQS\n\n')
         
     train_summary_stats = final_eval_wrapper(dataloader = training_dl, 
-                                             dataset = test_dset, 
+                                             dataset = training_dset, 
                                              eval_fn_jitted = eval_fn_jitted,
                                              save_per_sample_losses = args.save_per_sample_losses,
                                              jitted_determine_alignlen_bin = jitted_determine_alignlen_bin,

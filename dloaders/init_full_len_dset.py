@@ -118,7 +118,11 @@ def init_full_len_dset( args,
     #################
     ### LOAD DATA   #
     #################
-    print(f'Test dset: {args.test_dset_splits}')
+    # test data
+    print('Test dset:')
+    for s in args.test_dset_splits:
+        print(s)
+    print()
     assert type(args.test_dset_splits) == list
     test_dset = FullLenDset( data_dir = args.data_dir, 
                              split_prefixes = args.test_dset_splits,
@@ -136,7 +140,11 @@ def init_full_len_dset( args,
     
     # training data
     if not only_test:
-        print(f'Training dset: {args.train_dset_splits}')
+        print('Training dset:')
+        for s in args.train_dset_splits:
+            print(s)
+        print()
+        
         assert type(args.train_dset_splits) == list
         training_dset = FullLenDset( data_dir = args.data_dir, 
                                      split_prefixes = args.train_dset_splits,
