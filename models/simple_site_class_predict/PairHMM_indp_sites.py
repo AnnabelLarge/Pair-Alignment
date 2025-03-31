@@ -5,6 +5,17 @@ Created on Wed Feb  5 04:33:00 2025
 
 @author: annabel
 
+IN THE FUTURE: if you want to let protein models use generalizable 
+emission functions:
+	'protein_emission_models.LG08RateMatFromFile' ->
+        replace with 'general_emission_models.RateMatFromFile'
+        
+	'protein_emission_models.LG08RateMatFitRateMult' ->
+        replace with 'general_emission_models.RateMatFitRateMult'
+        
+	'protein_emission_models.LG08RateMatFitBoth' ->
+        replace with 'general_emission_models.RateMatFitBoth'
+
 
 models here:
 ============
@@ -36,7 +47,7 @@ from jax.scipy.linalg import expm
 from jax.scipy.special import logsumexp
 
 from models.model_utils.BaseClasses import ModuleBase
-from models.simple_site_class_predict.emission_models import (LogEqulVecFromCounts,
+from models.simple_site_class_predict.protein_emission_models import (LogEqulVecFromCounts,
                                                        LogEqulVecPerClass,
                                                        LogEqulVecFromFile,
                                                        LG08RateMatFromFile,
@@ -232,8 +243,9 @@ class IndpPairHMMFitBoth(ModuleBase):
                                          anc_emitCounts)
         
         # use only transitions that end with match (0) and del (2)
-        anc_emit_to_emit = ( transCounts[...,0].sum( (-1) ) + 
-                             transCounts[...,2].sum( (-1) ) ) - 1
+        anc_emit_to_emit = ( transCounts[...,0].sum( axis=-1 ) + 
+                             transCounts[...,2].sum( axis=-1 ) ) - 1
+        
         anc_transCounts = jnp.stack( [jnp.stack( [anc_emit_to_emit, 
                                                   jnp.ones(anc_emit_to_emit.shape[0])], 
                                                 axis=-1 ),
@@ -261,8 +273,8 @@ class IndpPairHMMFitBoth(ModuleBase):
                                          desc_emitCounts)
         
         # use only transitions that end with match (0) and ins (1)
-        desc_emit_to_emit = ( transCounts[...,0].sum( (-1) ) + 
-                              transCounts[...,1].sum( (-1) ) ) - 1
+        desc_emit_to_emit = ( transCounts[...,0].sum( axis=-1 ) + 
+                              transCounts[...,1].sum( axis=-1 ) ) - 1
         desc_transCounts = jnp.stack( [jnp.stack( [desc_emit_to_emit, 
                                                   jnp.ones(desc_emit_to_emit.shape[0])], 
                                                 axis=-1 ),

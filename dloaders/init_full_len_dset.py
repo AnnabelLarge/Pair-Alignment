@@ -70,6 +70,8 @@ def init_full_len_dset( args,
     """
     initialize the dataloaders
     """
+    emission_alphabet_size = 4 if 'hky85' in args.pred_config['preset_name'] else 20
+
     #################################
     ### training-specific options   #
     #################################
@@ -129,13 +131,13 @@ def init_full_len_dset( args,
                              pred_model_type = pred_model_type,
                              use_scan_fns = args.use_scan_fns,
                              times_from_array = times_from_array,
+                             emission_alphabet_size=emission_alphabet_size,
                              single_time_from_file = single_time_from_file,
                              chunk_length = args.chunk_length,
                              toss_alignments_longer_than = args.toss_alignments_longer_than,
                              seq_padding_idx = 0,
                              align_padding_idx = -9,
-                             gap_idx = 43,
-                             emission_alphabet_size = 20
+                             gap_idx = 43
                              )
     
     # training data
@@ -151,13 +153,13 @@ def init_full_len_dset( args,
                                      pred_model_type = pred_model_type,
                                      use_scan_fns = args.use_scan_fns,
                                      times_from_array = times_from_array,
+                                     emission_alphabet_size=emission_alphabet_size,
                                      single_time_from_file = single_time_from_file,
                                      chunk_length = args.chunk_length,
                                      toss_alignments_longer_than = args.toss_alignments_longer_than,
                                      seq_padding_idx = 0,
                                      align_padding_idx = -9,
-                                     gap_idx = 43,
-                                     emission_alphabet_size = 20
+                                     gap_idx = 43
                                      )
         
         

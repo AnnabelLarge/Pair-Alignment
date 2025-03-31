@@ -21,7 +21,7 @@ outputs:
      >> dim2 = 2: categorically-encoded alignment (<pad>, M, I, D, <bos>, <eos>)
   
     > for feedforward head: d = 4
-    >> dim2 = 0: descendant, under alignment-augmented alphabet (ins + 20)
+    >> dim2 = 0: descendant, under alignment-augmented alphabet (ins + A)
     >> dim2 = 1: categorically-encoded alignment (<pad>, M, I, D, <bos>, <eos>)
     >> dim2 = 2: m-indices, precalculated from alignment
     >> dim2 = 3: n-indices, precalculated from alignment
@@ -57,7 +57,7 @@ Data to be read:
 
 3. Pandas dataframe of metadata
    > note: alignment length in this dataframe does NOT include 
-     sentinel tokens
+     sentinel tokens!
 
 4 (optional) different times to associate with each pair
   > plain .tsv file with two columns; no header and no index
@@ -126,7 +126,9 @@ def remove_excess_padding(seqs,
     """
     trim excess padding
     """
-    global_max_len = (seqs != padding_tok).sum(axis=1).max()
+    global_max_len = np.where(seqs != padding_tok,
+                              True,
+                              False).sum(axis=1).max()
     clipped_seqs = seqs[:, :global_max_len, ...]
     return clipped_seqs, global_max_len
 
@@ -179,11 +181,11 @@ def pad_to_length_divisible_by_chunk_len(aligned_mat,
 def load_aligned_mats(data_dir, 
                       split, 
                       pred_model_type,
+                      emission_alphabet_size ,
                       toss_alignments_longer_than = None, 
                       gap_idx = 43,
                       bos_idx = 1,
-                      eos_idx = 2,
-                      emission_alphabet_size = 20):
+                      eos_idx = 2):
     ### load data
     with open(f'{data_dir}/{split}_aligned_mats.npy','rb') as f:
         mat = np.load(f)
@@ -245,7 +247,6 @@ def load_aligned_mats(data_dir,
     if pred_model_type == 'feedforward':
         ins_pos = np.argwhere( zero_padded_mat[:,:,0] == gap_idx )
         zero_padded_mat[ins_pos[:,0], ins_pos[:,1], 1] += emission_alphabet_size
-        zero_padded_mat = zero_padded_mat[:,:,1:]
     
     # pairHMM: don't need alignment indices
     elif pred_model_type.startswith('pairhmm'):
@@ -276,7 +277,7 @@ def load_metadata(data_dir,
                     'descendant',
                     'pfam', 
                     'anc_seq_len', 
-                    'desc_seq_len',
+                    'desc_seq_len', 
                     'alignment_len',
                     'num_matches',
                     'num_ins',
@@ -390,14 +391,14 @@ class FullLenDset(Dataset):
                  split_prefixes: list, 
                  pred_model_type: str,
                  use_scan_fns: bool,
+                 emission_alphabet_size: int,
                  times_from_array: np.array = None,
                  single_time_from_file: bool = False,
                  chunk_length: int = 512,
                  toss_alignments_longer_than = None,
                  seq_padding_idx: int = 0,
                  align_padding_idx: int = -9,
-                 gap_idx: int = 43,
-                 emission_alphabet_size: int = 20):
+                 gap_idx: int = 43):
         """
         data locations, format:
         ------------------------
@@ -446,7 +447,7 @@ class FullLenDset(Dataset):
         > seq_padding_idx: padding token, usually zero
         > align_padding_idx: padding for precomputed alignments; I use -9
         > gap_idx: I use 43
-        > emission_alphabet_size: 20 for proteins
+        > emission_alphabet_size: 20 for proteins, 4 for DNA
         
         
         final attributes are:
@@ -455,7 +456,7 @@ class FullLenDset(Dataset):
           self.aligned_mat
           self.names_df
           self.times
-          self.aa_counts
+          self.emit_counts
           self.global_seq_max_length
           self.global_align_max_length
             > global_align_max_length is divisible by chunk_length 
@@ -469,8 +470,14 @@ class FullLenDset(Dataset):
         neg_nine_padded_aligned_mats_lst = []
         unaligned_seqs_lst = []
         metadata_lst = []
-        self.aa_counts = np.zeros( (20,) )
+        self.emit_counts = np.zeros( (emission_alphabet_size,) )
+            
+        if emission_alphabet_size == 20:
+            counts_suffix = 'AAcounts'
         
+        elif emission_alphabet_size == 4:
+            counts_suffix = 'NuclCounts'
+            
         # optionally read
         if single_time_from_file:
             times_lst = []
@@ -513,10 +520,10 @@ class FullLenDset(Dataset):
             
             
             ### counts of amino acids
-            ###   TODO: this could still include the counts of amino acids from
+            ###   TODO: this could still include the counts of emissions from
             ###   tossed samples... fix this later
-            with open(f'{data_dir}/{split}_AAcounts.npy','rb') as f:
-                self.aa_counts += np.load(f)
+            with open(f'{data_dir}/{split}_{counts_suffix}.npy','rb') as f:
+                self.emit_counts += np.load(f)
             
             
             ### (optional) time; assume time is in same order as samples in
@@ -633,3 +640,5 @@ class FullLenDset(Dataset):
         
         elif (times_from is None):
             return 0
+    
+    

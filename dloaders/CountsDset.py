@@ -22,26 +22,32 @@ outputs:
 
 Data to be read:
 =================
-1. subCounts.npy: (num_pairs, 20, 20)
+1. subCounts.npy: (num_pairs, A, A)
     counts of emissions at match states across whole alignment length
     (i.e. true matches and substitutions)
     
-2. insCounts.npy: (num_pairs, 20)
+2. insCounts.npy: (num_pairs, A)
     counts of emissions at insert states across whole alignment length
 
-3. delCounts.npy: (num_pairs, 20)
+3. delCounts.npy: (num_pairs, A)
     counts of bases that get deleted
 
-4. transCounts.npy: (num_pairs, 3, 3) OR (num_pairs, 4, 4)
+4. transCounts.npy: (num_pairs, 3, 3) OR (num_pairs, 5, 5)
     transition counts across whole alignment length
-    3x3 if encoding start and end states as match sites; 4x4 otherwise
+    3x3 if encoding start and end states as match sites; 5x5 otherwise
 
-5. AAcounts.npy: (20, )
-    equilibrium counts from whole dataset
+
+if protein:
+    5. AAcounts.npy: (A, )
+        equilibrium counts from whole dataset
+
+if dna:
+    5. NuclCounts.npy: (A,)
+        equilibrium counts from whole dataset
 
 6. metadata.tsv: [PANDAS DATAFRAME]
     metadata about each sample
-    NOTE: lengths here do not include sentinel tokens
+    lengths do NOT include any sentinel tokens!!!
 
 
 """
@@ -98,8 +104,10 @@ class CountsDset(Dataset):
                  split_prefixes: list, 
                  bos_eos_as_match: bool,
                  single_time_from_file: bool,
-                 times_from_array: jnp.array,
+                 emission_alphabet_size: int,
+                 times_from_array: np.array = None,
                  toss_alignments_longer_than = None):
+        
         #######################################################################
         ### 1: ITERATE THROUGH SPLIT PREFIXES AND READ FILES   ################
         #######################################################################
@@ -108,8 +116,15 @@ class CountsDset(Dataset):
         insCounts_list = []
         delCounts_list = []
         transCounts_list = []
-        self.AAcounts = np.zeros(20, dtype=int)
         metadata_list = []
+        
+        self.emit_counts = np.zeros(emission_alphabet_size, dtype=int)
+            
+        if emission_alphabet_size == 20:
+            counts_suffix = 'AAcounts'
+        
+        elif emission_alphabet_size == 4:
+            counts_suffix = 'NuclCounts'
         
         # optionally read
         if single_time_from_file:
@@ -192,11 +207,11 @@ class CountsDset(Dataset):
                 transCounts_list.append( mat )
                 del mat       
             
-            # counts (technically uses amino acids from tossed samples... 
+            # counts (technically uses emissions from tossed samples... 
             #   fix this later)
-            with open(f'./{data_dir}/{split}_AAcounts.npy', 'rb') as f:
+            with open(f'./{data_dir}/{split}_{counts_suffix}.npy', 'rb') as f:
                 mat = safe_convert( np.load(f) )
-                self.AAcounts += mat
+                self.emit_counts += mat
                 del mat
                    
             
@@ -241,7 +256,6 @@ class CountsDset(Dataset):
         ##############
         self.names_df = pd.concat(metadata_list, axis=0)
         self.names_df = self.names_df.reset_index(drop=True)
-        
         del metadata_list
         
         
@@ -280,7 +294,7 @@ class CountsDset(Dataset):
         return self.names_df.iloc[idxes]
     
     def retrieve_equil_dist(self):
-        return self.AAcounts / self.AAcounts.sum()
+        return self.emit_counts / self.emit_counts.sum()
     
     
     ################################
@@ -295,12 +309,9 @@ class CountsDset(Dataset):
         return self.times #array of size (T,)
     
     def retrieve_num_timepoints(self, times_from):
-        if times_from in ['geometric', 't_array_from_file']:
+        if times_from == 'geometric':
             return self.times.shape[0]
         
-        elif times_from == 'one_time_per_sample_from_file':
-            return self.times.shape[1] # should be one
-        
-        elif (times_from is None):
-            return 0
+        elif times_from == 't_array_from_file':
+            return 1
     

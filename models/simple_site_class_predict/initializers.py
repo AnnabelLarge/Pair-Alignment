@@ -22,12 +22,19 @@ def init_pairhmm_indp_sites( seq_shapes,
     """
     preset_names = ['load_all',
                     'fit_rate_mult_only',
-                    'fit_rate_mult_and_matrix']
+                    'fit_rate_mult_and_matrix',
+                    'hky85_load_all',
+                    'hky85_fit_indel_only',
+                    'hky85_fit_all']
     assert pred_config['preset_name'] in preset_names, f'valid options: {preset_names}'
     
     # enforce this default
     pred_config['num_tkf_site_classes'] = 1
     
+    
+    ######################
+    ### Protein models   #
+    ######################
     if pred_config['preset_name'] == 'load_all':
         from models.simple_site_class_predict.PairHMM_indp_sites import IndpPairHMMLoadAll
         pairhmm_instance = IndpPairHMMLoadAll(config = pred_config,
@@ -43,7 +50,29 @@ def init_pairhmm_indp_sites( seq_shapes,
         pairhmm_instance = IndpPairHMMFitBoth(config = pred_config,
                                                name = 'IndpPairHMMFitBoth')
     
-    ### tabulate and save the model
+    
+    ##########################
+    ### DNA (HKY85) models   #
+    ##########################
+    elif pred_config['preset_name'] == 'hky85_load_all':
+        from models.simple_site_class_predict.HKY85_indp_sites import IndpHKY85LoadAll
+        pairhmm_instance = IndpHKY85LoadAll(config = pred_config,
+                                            name = 'IndpHKY85LoadAll')
+    
+    elif pred_config['preset_name'] == 'hky85_fit_indel_only':
+        from models.simple_site_class_predict.HKY85_indp_sites import IndpHKY85FitIndelOnly
+        pairhmm_instance = IndpHKY85FitIndelOnly(config = pred_config,
+                                            name = 'IndpHKY85FitIndelOnly')
+    
+    elif pred_config['preset_name'] == 'hky85_fit_all':
+        from models.simple_site_class_predict.HKY85_indp_sites import IndpHKY85FitAll
+        pairhmm_instance = IndpHKY85FitAll(config = pred_config,
+                                            name = 'IndpHKY85FitAll')
+        
+        
+    ###################################
+    ### tabulate and save the model   #
+    ###################################
     if (tabulate_file_loc is not None):
         tab_fn = nn.tabulate(pairhmm_instance, 
                               rngs=model_init_rngkey,

@@ -18,9 +18,6 @@ def fill_with_default_values(args):
     if 'align_padding_idx' not in provided_args:
         args.align_padding_idx = -9
     
-    if 'emission_alphabet_size' not in provided_args:
-        args.emission_alphabet_size = 20
-
     if 'base_alphabet_size' not in provided_args:
         args.base_alphabet_size = args.emission_alphabet_size + 3
         

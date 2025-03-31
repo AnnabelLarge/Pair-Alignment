@@ -1,0 +1,9 @@
+	pairID	ancestor	descendant	pfam	anc_seq_len	desc_seq_len	alignment_len	num_matches	num_ins	num_del
+0	FW_pair0	fake_seq_1	fake_seq_z	FAKEPF00000	3	2	4	3	1	2
+1	RV_pair0	fake_seq_z	fake_seq_1	FAKEPF00000	2	3	4	3	2	1
+2	FW_pair1	fake_seq_2	fake_seq_y	FAKEPF00001	5	4	6	5	1	2
+3	RV_pair1	fake_seq_y	fake_seq_2	FAKEPF00001	4	5	6	5	2	1
+4	FW_pair2	fake_seq_3	fake_seq_x	FAKEPF00002	5	3	5	5	0	2
+5	RV_pair2	fake_seq_x	fake_seq_3	FAKEPF00002	3	5	5	5	2	0
+6	FW_pair3	fake_seq_4	fake_seq_w	FAKEPF00003	2	2	2	4	0	0
+7	RV_pair3	fake_seq_w	fake_seq_4	FAKEPF00003	2	2	2	4	0	0

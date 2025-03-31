@@ -60,6 +60,9 @@ def init_counts_dset(args,
     """
     initialize the dataloaders
     """
+    emission_alphabet_size = 4 if 'hky85' in args.pred_config['preset_name'] else 20
+
+
     #################################
     ### training-specific options   #
     #################################
@@ -94,6 +97,7 @@ def init_counts_dset(args,
                             split_prefixes = args.test_dset_splits,
                             single_time_from_file = single_time_from_file,
                             times_from_array = times_from_array,
+                            emission_alphabet_size=emission_alphabet_size,
                             toss_alignments_longer_than = args.toss_alignments_longer_than,
                             bos_eos_as_match = args.bos_eos_as_match)
 
@@ -108,6 +112,7 @@ def init_counts_dset(args,
         training_dset = CountsDset( data_dir = args.data_dir, 
                                     split_prefixes = args.train_dset_splits,
                                     times_from_array = times_from_array,
+                                    emission_alphabet_size=emission_alphabet_size,
                                     single_time_from_file = single_time_from_file,
                                     toss_alignments_longer_than = args.toss_alignments_longer_than,
                                     bos_eos_as_match = args.bos_eos_as_match)

@@ -5,19 +5,25 @@ Created on Wed Feb  5 02:03:13 2025
 
 @author: annabel
 
+
+most of these rate matrix functions are similar to protein_emission_models
+
+
 modules:
 ========
- 'LG08RateMatFromFile',
- 'LG08RateMatFitRateMult',
- 'LG08RateMatFitBoth',
- 'PerClassRateMat',
- 
- 'LogEqulVecFromFile',
- 'LogEqulVecFromCounts',
- 'LogEqulVecPerClass',
+'LogEqulVecFromCounts',
+'LogEqulVecFromFile',
+'LogEqulVecPerClass',
 
- 'SiteClassLogprobs',
- 'SiteClassLogprobsFromFile'
+'HKY85',
+'HKY85FromFile',
+'PerClassRateMat',
+'RateMatFitBoth',
+'RateMatFitRateMult',
+'RateMatFromFile',
+
+'SiteClassLogprobs',
+'SiteClassLogprobsFromFile',
 
 """
 # jumping jax and leaping flax
@@ -94,14 +100,20 @@ class SiteClassLogprobsFromFile(ModuleBase):
 
 
 ###############################################################################
-### SUBSTITUTION RATE MATRICES   ##############################################
+### GENERAL SUBSTITUTION RATE MATRIX MODELS   #################################
 ###############################################################################
-class LG08RateMatFromFile(ModuleBase):
+class RateMatFromFile(ModuleBase):
     """
     return (rho * Q), to be directly used in matrix exponential
 
-    exchanegabilities come from LG08 substitution model
-    rate multipliers directly loaded from separate file
+    load exchangeabilities and rate multiplier from files; exchangeabilties 
+      could either be a vector of values (which will be transformed into a 
+      square matrix), or the final square matrix
+    
+    return the normalized rate matrix, as well as the rate matrix after
+      multiplying by rate multipliers
+     
+    out = (rate_mat_times_rho, rate_mat)
     """
     config: dict
     name: str
@@ -112,18 +124,28 @@ class LG08RateMatFromFile(ModuleBase):
         rate_multiplier_file = self.config['filenames']['rate_mult']
         exchangeabilities_file = self.config['filenames']['exch']
         
-        # LG08 exchangeabilities; (20, 20)
-        with open(exchangeabilities_file,'rb') as f:
-            self.lg08_exch = jnp.load(f)
         
-        # RATE MULTIPLIERS: (c,)
+        ### EXCHANGEABILITIES: (A_from, A_to)
+        with open(exchangeabilities_file,'rb') as f:
+            exch_from_file = jnp.load(f)
+        
+        # if providing a vector, need to prepare a square exchangeabilities matrix
+        if len(exch_from_file.shape) == 2:
+            self.exchangeabilities = self._upper_tri_vector_to_sym_matrix( exch_from_file )
+        
+        # otherwise, use the matrix as-is
+        elif len(exch_from_file.shape) == 1:
+            self.exchangeabilities = exch_from_file
+                    
+        
+        ### RATE MULTIPLIERS: (c,)
         if self.num_emit_site_classes > 1:
             with open(rate_multiplier_file, 'rb') as f:
                 self.rate_multiplier = jnp.load(f)
         else:
             self.rate_multiplier = jnp.array([1])
-            
-        
+    
+    
     def __call__(self,
                  logprob_equl,
                  sow_intermediates: bool,
@@ -132,22 +154,47 @@ class LG08RateMatFromFile(ModuleBase):
         # (C, alph)
         equl = jnp.exp(logprob_equl)
         
-        # chi; one shared all classes
-        exchangeabilities = self.lg08_exch
-        
-        return self.prepare_rate_matrix(exchangeabilities = exchangeabilities,
+        out =  self._prepare_rate_matrix(exchangeabilities = self.exchangeabilities,
                                    equilibrium_distributions = equl,
                                    sow_intermediates = sow_intermediates,
                                    rate_multiplier = self.rate_multiplier)
+        return out
     
     
-    def prepare_rate_matrix(self,
+    def _upper_tri_vector_to_sym_matrix( self, 
+                                         vec ):
+        # automatically detect emission alphabet size
+        # 6 = DNA (alphabet size = 4)
+        # 2016 = codons (alphabet size = 64)
+        # 190 = proteins (alphabet size = 20)
+        if vec.shape[-1] == 6:
+            emission_alphabet_size = 4
+        
+        elif vec.shape[-1] == 2016:
+            emission_alphabet_size = 64
+        
+        elif vec.shape[-1] == 190:
+            emission_alphabet_size = 20
+        
+        # fill upper triangular part of matrix
+        out_size = (emission_alphabet_size, emission_alphabet_size)
+        upper_tri_exchang = jnp.zeros( out_size )
+        idxes = jnp.triu_indices(emission_alphabet_size, k=1)  
+        upper_tri_exchang = upper_tri_exchang.at[idxes].set(vec)
+        
+        # reflect across diagonal
+        mat = (upper_tri_exchang + upper_tri_exchang.T)
+        
+        return mat
+    
+    
+    def _prepare_rate_matrix(self,
                             exchangeabilities,
                             equilibrium_distributions,
                             rate_multiplier,
-                            sow_intermediates: bool,
-                            alphabet_size: int=20):
+                            sow_intermediates: bool):
         C = equilibrium_distributions.shape[0]
+        alphabet_size = equilibrium_distributions.shape[1]
 
         # Q = chi * pi
         rate_mat_without_diags = jnp.einsum('ij, cj -> cij', 
@@ -167,29 +214,39 @@ class LG08RateMatFromFile(ModuleBase):
         norm_factor = -jnp.sum(diag * equilibrium_distributions, axis=1)[:,None,None]
         subst_rate_mat = subst_rate_mat / norm_factor
             
-        final = jnp.einsum( 'c,cij->cij', 
-                            rate_multiplier, 
-                            subst_rate_mat ) 
-        return final
+        rate_mat_times_rho = jnp.einsum( 'c,cij->cij', 
+                                         rate_multiplier, 
+                                         subst_rate_mat ) 
+        
+        return rate_mat_times_rho
 
 
-class LG08RateMatFitRateMult(LG08RateMatFromFile):
+class RateMatFitRateMult(RateMatFromFile):
     """
     return (rho * Q), to be directly used in matrix exponential
-    inherit prepare_rate_matrix from LG08RateMatFromFile
 
-    exchanegabilities come from LG08 substitution model
-    rate multipliers fit with gradient updates
+    load exchangeabilities from files; exchangeabilties could either be a 
+      vector of values (which will be transformed into a square matrix), 
+      or the final square matrix
     
     rate matrix is normalized to one substitution, THEN multiplied by a scalar 
       multiple; first hidden site class has rate of 1, then subsequent ones 
       are fit with gradient descent (rho = [1, rate2, rate3, ...])
+    
+    return the normalized rate matrix, as well as the rate matrix after
+      multiplying by rate multipliers
+     
+    out = (rate_mat_times_rho, rate_mat)
     
     params: 
         - rate_mult_logits( C, )
     
     valid ranges:
         - rate_mult: (0, inf); bound values with rate_mult_range
+    
+    inherit the following from RateMatFromFile:
+        - _upper_tri_vector_to_sym_matrix
+        - _prepare_rate_matrix
         
     """
     config: dict
@@ -204,9 +261,18 @@ class LG08RateMatFitRateMult(LG08RateMatFromFile):
         self.rate_mult_min_val, self.rate_mult_max_val = out
         del out
         
-        ### LG08 exchangeabilities; (20, 20)
+        
+        ### EXCHANGEABILITIES: (A_from, A_to)
         with open(exchangeabilities_file,'rb') as f:
-            self.lg08_exch = jnp.load(f)
+            exch_from_file = jnp.load(f)
+        
+        # if providing a vector, need to prepare a square exchangeabilities matrix
+        if len(exch_from_file.shape) == 2:
+            self.exchangeabilities = self._upper_tri_vector_to_sym_matrix( exch_from_file )
+        
+        # otherwise, use the matrix as-is
+        elif len(exch_from_file.shape) == 1:
+            self.exchangeabilities = exch_from_file
         
 
         ### RATE MULTIPLIERS: (c-1,)
@@ -247,42 +313,40 @@ class LG08RateMatFitRateMult(LG08RateMatFromFile):
         else:
             rate_multiplier = jnp.array([1])
         
-        # chi; one shared all classes
-        exchangeabilities = self.lg08_exch
-        
-        return self.prepare_rate_matrix(exchangeabilities = exchangeabilities,
+        out = self._prepare_rate_matrix(exchangeabilities = self.exchangeabilities,
                                    equilibrium_distributions = equl,
                                    sow_intermediates = sow_intermediates,
                                    rate_multiplier = rate_multiplier)
+        return out
 
 
-class LG08RateMatFitBoth(LG08RateMatFitRateMult):
+class RateMatFitBoth(RateMatFromFile):
     """
     return (rho * Q), to be directly used in matrix exponential
-    inherit prepare_rate_matrix from LG08RateMatFromFile
 
-    exchanegabilities come from LG08 substitution model, but are updated with
-      gradient updates
-    rate multipliers fit with gradient updates
-    
+    load initial values for exchangeabilities from file
+
     rate matrix is normalized to one substitution, THEN multiplied by a scalar 
       multiple; first hidden site class has rate of 1, then subsequent ones 
       are fit with gradient descent (rho = [1, rate2, rate3, ...])
     
     params: 
-        - exchangeabilities_logits ( alph, alph )
+        - exch_raw; length of vector is ( alph * (alph - 1) ) / 2
         - rate_mult_logits( C, )
     
     valid ranges:
         - exchangeabilities: (0, inf); bound values with exchange_range
         - rate_mult: (0, inf); bound values with rate_mult_range
+    
+    inherit the following from RateMatFromFile:
+        - _upper_tri_vector_to_sym_matrix
+        - _prepare_rate_matrix
         
     """
     config: dict
     name: str
     
     def setup(self):
-        emission_alphabet_size = self.config['emission_alphabet_size']
         self.num_emit_site_classes = self.config['num_emit_site_classes']
         exchangeabilities_file = self.config['filenames']['exch']
         
@@ -297,28 +361,18 @@ class LG08RateMatFitBoth(LG08RateMatFitRateMult):
         del out
         
         
-        ### initialize with LG08 upper triangular matrix
-        # (190,)
+        ### EXCHANGEABILITIES: (A_from, A_to)
         with open(exchangeabilities_file,'rb') as f:
             vec = jnp.load(f)
         transformed_vec = bounded_sigmoid_inverse(vec, 
                                                   min_val = self.exchange_min_val,
                                                   max_val = self.exchange_max_val)
-        
         exch_raw = self.param("exchangeabilities", 
                               lambda rng, shape: transformed_vec,
                               transformed_vec.shape )
+        self.exchangeabilities_logits = self._upper_tri_vector_to_sym_matrix( exch_raw )
         
-        # fill upper triangular part of matrix
-        out_size = (emission_alphabet_size, emission_alphabet_size)
-        upper_tri_exchang = jnp.zeros( out_size )
-        idxes = jnp.triu_indices(emission_alphabet_size, k=1)  
-        upper_tri_exchang = upper_tri_exchang.at[idxes].set(exch_raw)
         
-        # reflect across diagonal
-        self.exchangeabilities_logits = (upper_tri_exchang + upper_tri_exchang.T)
-        
-            
         ### RATE MULTIPLIERS: (c-1,)
         if self.num_emit_site_classes > 1:
             # first class automatically has rate multiplier of one
@@ -368,26 +422,32 @@ class LG08RateMatFitBoth(LG08RateMatFitRateMult):
                                         which='scalars')
         
         # output is (c, i, j)
-        return self.prepare_rate_matrix(exchangeabilities = exchangeabilities,
+        out = self._prepare_rate_matrix(exchangeabilities = exchangeabilities,
                                    equilibrium_distributions = equl,
                                    sow_intermediates = sow_intermediates,
                                    rate_multiplier = rate_multiplier)
+        return out
             
             
-class PerClassRateMat(LG08RateMatFitBoth):
+class PerClassRateMat(RateMatFitBoth):
     """
     return (rho * Q), to be directly used in matrix exponential
-    inherit prepare_rate_matrix from LG08RateMatFromFile
-    inherit call from LG08RateMatFitBoth
+    
+    inherit the following from RateMatFromFile:
+        - _upper_tri_vector_to_sym_matrix
+        - _prepare_rate_matrix
+    
+    inherit __call__ from RateMatFitBoth
 
     params: 
-        - exchangeabilities_logits ( alph, alph )
+        - exch_raw; length of vector is ( alph * (alph - 1) ) / 2
         - rate_mult_logits( C, )
     
     valid ranges:
         - exchangeabilities: (0, inf); bound values with exchange_range
         - rate_mult: (0, inf); bound values with rate_mult_range
-        
+    
+    HAVE TO PROVIDE emission_alphabet_size IN PRED CONFIG!!!
     """
     config: dict
     name: str
@@ -406,22 +466,14 @@ class PerClassRateMat(LG08RateMatFitBoth):
         del out
         
         
-        ### EXCHANGEABILITIES: (i,j)
+        ### EXCHANGEABILITIES: (A_from, A_to)
         # init logits
         num_vars = int( (emission_alphabet_size * (emission_alphabet_size-1))/2 )
         exch_raw = self.param('exchangeabilities',
                                nn.initializers.normal(),
                                (num_vars,),
                                jnp.float32)
-        
-        # fill upper triangular part of matrix
-        out_size = (emission_alphabet_size, emission_alphabet_size)
-        upper_tri_exchang = jnp.zeros( out_size )
-        idxes = jnp.triu_indices(emission_alphabet_size, k=1)  
-        upper_tri_exchang = upper_tri_exchang.at[idxes].set(exch_raw)
-        
-        # reflect across diagonal
-        self.exchangeabilities_logits = (upper_tri_exchang + upper_tri_exchang.T)
+        self.exchangeabilities_logits = self._upper_tri_vector_to_sym_matrix( exch_raw )
         
         
         ### RATE MULTIPLIERS: (c-1,)
@@ -431,10 +483,121 @@ class PerClassRateMat(LG08RateMatFitBoth):
                                                nn.initializers.normal(),
                                                (self.num_emit_site_classes-1,),
                                                jnp.float32)
+
+
+###############################################################################
+### DNA SUBSTITUTION RATE MATRIX MODELS   #####################################
+###############################################################################
+class HKY85(RateMatFitBoth):
+    """
+    return (rho * Q), to be directly used in matrix exponential
+    
+    inherit the following from RateMatFromFile:
+        - _upper_tri_vector_to_sym_matrix
+        - _prepare_rate_matrix
+    
+    inherit __call__ from RateMatFitBoth
+
+    params: 
+        - ti, tv: each are floats; store in (2,) matrix
+          > ti is first value, tv is second
+        - rate_mult_logits( C, )
+    
+    valid ranges:
+        - exchangeabilities: (0, inf); bound values with exchange_range
+        - rate_mult: (0, inf); bound values with rate_mult_range
+    
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        self.num_emit_site_classes = self.config['num_emit_site_classes']
+        out  = self.config.get( 'exchange_range',
+                               (1e-4, 10) )
+        self.exchange_min_val, self.exchange_max_val = out
+        del out
         
+        out  = self.config.get( 'rate_mult_range',
+                               (0.01, 10) )
+        self.rate_mult_min_val, self.rate_mult_max_val = out
+        del out
+        
+        
+        ### EXCHANGEABILITIES: (A_from=4, A_to=4)
+        ti_tv_vec = self.param('exchangeabilities',
+                               nn.initializers.normal(),
+                               (2,),
+                               jnp.float32)
+        
+        # order should be: tv, ti, tv, tv, ti, tv
+        hky85_raw_vec = jnp.stack( [ ti_tv_vec[1], 
+                                     ti_tv_vec[0], 
+                                     ti_tv_vec[1], 
+                                     ti_tv_vec[1], 
+                                     ti_tv_vec[0], 
+                                     ti_tv_vec[1] ] )
+        
+        self.exchangeabilities_logits = self._upper_tri_vector_to_sym_matrix( hky85_raw_vec )
+        
+        
+        ### RATE MULTIPLIERS: (c-1,)
+        if self.num_emit_site_classes > 1:
+            # first class automatically has rate multiplier of one
+            self.rate_mult_logits = self.param('rate_multipliers',
+                                               nn.initializers.normal(),
+                                               (self.num_emit_site_classes-1,),
+                                               jnp.float32)
+
+class HKY85FromFile(RateMatFromFile):
+    """
+    return (rho * Q), to be directly used in matrix exponential
+
+    load ti, tv, and rate multipliers from files
     
+    return the normalized rate matrix, as well as the rate matrix after
+      multiplying by rate multipliers
+     
+    out = (rate_mat_times_rho, rate_mat)
     
+    inherit the following from RateMatFromFile:
+        - _upper_tri_vector_to_sym_matrix
+        - _prepare_rate_matrix
     
+    inherit __call__ from RateMatFromFile
+    
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        self.num_emit_site_classes = self.config['num_emit_site_classes']
+        rate_multiplier_file = self.config['filenames']['rate_mult']
+        exchangeabilities_file = self.config['filenames']['exch']
+        
+        
+        ### EXCHANGEABILITIES: (A_from, A_to)
+        with open(exchangeabilities_file,'rb') as f:
+            ti_tv_vec_from_file = jnp.load(f)
+            
+        # order should be: tv, ti, tv, tv, ti, tv
+        hky85_raw_vec = jnp.stack( [ ti_tv_vec_from_file[1], 
+                                     ti_tv_vec_from_file[0], 
+                                     ti_tv_vec_from_file[1], 
+                                     ti_tv_vec_from_file[1], 
+                                     ti_tv_vec_from_file[0], 
+                                     ti_tv_vec_from_file[1] ] )
+        
+        self.exchangeabilities = self._upper_tri_vector_to_sym_matrix( hky85_raw_vec )
+        
+        ### RATE MULTIPLIERS: (c,)
+        if self.num_emit_site_classes > 1:
+            with open(rate_multiplier_file, 'rb') as f:
+                self.rate_multiplier = jnp.load(f)
+        else:
+            self.rate_multiplier = jnp.array([1])
+        
+            
 
 ###############################################################################
 ### LOGPROB (emit at indel sites)   ###########################################
@@ -502,9 +665,9 @@ class LogEqulVecFromCounts(ModuleBase):
     
     def setup(self):
         # (alph,)
-        training_dset_aa_counts = self.config['training_dset_aa_counts']
+        training_dset_emit_counts = self.config['training_dset_emit_counts']
         
-        prob_equilibr = training_dset_aa_counts/training_dset_aa_counts.sum()
+        prob_equilibr = training_dset_emit_counts/training_dset_emit_counts.sum()
         logprob_equilibr = safe_log( prob_equilibr )
         
         # expand to to (C=1, alpha)

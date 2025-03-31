@@ -5,6 +5,17 @@ Created on Wed Feb  5 04:33:00 2025
 
 @author: annabel
 
+IN THE FUTURE: if you want to let protein models use generalizable 
+emission functions:
+	'protein_emission_models.LG08RateMatFromFile' ->
+        replace with 'general_emission_models.RateMatFromFile'
+        
+	'protein_emission_models.LG08RateMatFitRateMult' ->
+        replace with 'general_emission_models.RateMatFitRateMult'
+        
+	'protein_emission_models.LG08RateMatFitBoth' ->
+        replace with 'general_emission_models.RateMatFitBoth'
+
 models:
 =======
 MarkovPairHMM
@@ -22,7 +33,7 @@ from jax.scipy.linalg import expm
 from jax.scipy.special import logsumexp
 
 from models.model_utils.BaseClasses import ModuleBase
-from models.simple_site_class_predict.emission_models import (LogEqulVecFromCounts,
+from models.simple_site_class_predict.protein_emission_models import (LogEqulVecFromCounts,
                                                        LogEqulVecPerClass,
                                                        LogEqulVecFromFile,
                                                        LG08RateMatFromFile,
