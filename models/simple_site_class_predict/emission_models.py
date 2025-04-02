@@ -6,6 +6,8 @@ Created on Wed Feb  5 02:03:13 2025
 @author: annabel
 
 
+if loading from files, provide parameters in PROBABILITY SPACE 
+
 most of these rate matrix functions are similar to protein_emission_models
 
 
@@ -54,37 +56,64 @@ def save_interms(param_name, mat):
 
 
 ###############################################################################
-### For joint loss functions: probability of classes   ########################
+### Probability of being in site classes   ####################################
 ###############################################################################
 class SiteClassLogprobs(ModuleBase):
+    """
+    required in pred_config:
+        - num_emit_site_classes: number of classes
+    
+    params:
+        - class_logits: (C,)
+    
+    __call__ returns:
+        - logP(site classes): (C,)
+    """
     config: dict
     name: str
     
     def setup(self):
         self.n_classes = self.config['num_emit_site_classes']
         
-        self.class_logits = self.param('class_logits',
-                                        nn.initializers.normal(),
-                                        (self.n_classes,),
-                                        jnp.float32)
-    
+        if self.n_classes > 1:
+            self.class_logits = self.param('class_logits',
+                                            nn.initializers.normal(),
+                                            (self.n_classes,),
+                                            jnp.float32)
+        
     def __call__(self,
                  sow_intermediates):
-        log_class_probs = nn.log_softmax(self.class_logits)
         
-        if sow_intermediates:
-            for i in range(log_class_probs.shape[0]):
-                val_to_write = jnp.exp( log_class_probs[i] )
-                lab = f'{self.name}/prob of class {i}'
-                self.sow_histograms_scalars(mat= val_to_write, 
-                                            label=lab, 
-                                            which='scalars')
-                del lab
+        if self.n_classes > 1:
+            log_class_probs = nn.log_softmax(self.class_logits)
         
+            if sow_intermediates:
+                for i in range(log_class_probs.shape[0]):
+                    val_to_write = jnp.exp( log_class_probs[i] )
+                    lab = f'{self.name}/prob of class {i}'
+                    self.sow_histograms_scalars(mat= val_to_write, 
+                                                label=lab, 
+                                                which='scalars')
+                    del lab
+        
+        else:
+            log_class_probs = jnp.array([0])
+            
         return log_class_probs
 
 
 class SiteClassLogprobsFromFile(ModuleBase):
+    """
+    required in pred_config:
+      - filenames: dictionary of files to load
+          > pred_config["filenames"]["class_probs"]: file containing the 
+            class probabilities to load
+    
+    params: None
+    
+    __call__ returns:
+        - logP(site classes): (C,)
+    """
     config: dict
     name: str
     
@@ -104,6 +133,8 @@ class SiteClassLogprobsFromFile(ModuleBase):
 ###############################################################################
 class RateMatFromFile(ModuleBase):
     """
+    ABOUT:
+    ======
     return (rho * Q), to be directly used in matrix exponential
 
     load exchangeabilities and rate multiplier from files; exchangeabilties 
@@ -114,6 +145,18 @@ class RateMatFromFile(ModuleBase):
       multiplying by rate multipliers
      
     out = (rate_mat_times_rho, rate_mat)
+    
+    
+    tl;dr:
+    =======
+    required in pred_config:
+        - num_emit_site_classes: number of classes
+        - filenames: dictionary of files to load
+          > pred_config["filenames"]["rate_mult"]
+          > pred_config["filenames"]["exch"]
+    
+    __call__ returns:
+        - rate matrix times rate multipliers: (C_curr, |\omega_Y|, |\omega_X|)
     """
     config: dict
     name: str
@@ -125,7 +168,7 @@ class RateMatFromFile(ModuleBase):
         exchangeabilities_file = self.config['filenames']['exch']
         
         
-        ### EXCHANGEABILITIES: (A_from, A_to)
+        ### EXCHANGEABILITIES ALREADY TRANSFORMED:
         with open(exchangeabilities_file,'rb') as f:
             exch_from_file = jnp.load(f)
         
@@ -196,9 +239,12 @@ class RateMatFromFile(ModuleBase):
         C = equilibrium_distributions.shape[0]
         alphabet_size = equilibrium_distributions.shape[1]
 
+        # just in case, zero out the diagonals of exchangeabilities
+        exchangeabilities_without_diags = exchangeabilities * ~jnp.eye(alphabet_size, dtype=bool)
+
         # Q = chi * pi
         rate_mat_without_diags = jnp.einsum('ij, cj -> cij', 
-                                            exchangeabilities, 
+                                            exchangeabilities_without_diags, 
                                             equilibrium_distributions)
     
         row_sums = rate_mat_without_diags.sum(axis=2) 
@@ -213,7 +259,7 @@ class RateMatFromFile(ModuleBase):
         diag = jnp.einsum("cii->ci", subst_rate_mat) 
         norm_factor = -jnp.sum(diag * equilibrium_distributions, axis=1)[:,None,None]
         subst_rate_mat = subst_rate_mat / norm_factor
-            
+        
         rate_mat_times_rho = jnp.einsum( 'c,cij->cij', 
                                          rate_multiplier, 
                                          subst_rate_mat ) 
@@ -248,6 +294,18 @@ class RateMatFitRateMult(RateMatFromFile):
         - _upper_tri_vector_to_sym_matrix
         - _prepare_rate_matrix
         
+    
+    tl;dr:
+    =======
+    required in pred_config:
+        - num_emit_site_classes: number of classes
+        - rate_mult_range: range for bounded sigmoid transformation of 
+          rate multiplier logits 
+        - filenames: dictionary of files to load
+          > pred_config["filenames"]["exch"]
+    
+    __call__ returns:
+        - rate matrix times rate multipliers: (C_curr, |\omega_Y|, |\omega_X|)
     """
     config: dict
     name: str
@@ -341,7 +399,21 @@ class RateMatFitBoth(RateMatFromFile):
     inherit the following from RateMatFromFile:
         - _upper_tri_vector_to_sym_matrix
         - _prepare_rate_matrix
-        
+    
+    
+    tl;dr:
+    =======
+    required in pred_config:
+        - num_emit_site_classes: number of classes
+        - rate_mult_range: range for bounded sigmoid transformation of 
+          rate multiplier logits 
+        - exchange_range: range for bounded sigmoid transformation of 
+          exchangeability logits 
+        - filenames: dictionary of files to load
+          > pred_config["filenames"]["exch"]
+    
+    __call__ returns:
+        - rate matrix times rate multipliers: (C_curr, |\omega_Y|, |\omega_X|)
     """
     config: dict
     name: str
@@ -361,16 +433,15 @@ class RateMatFitBoth(RateMatFromFile):
         del out
         
         
-        ### EXCHANGEABILITIES: (A_from, A_to)
+        ### EXCHANGEABILITIES AS A VECTOR
         with open(exchangeabilities_file,'rb') as f:
             vec = jnp.load(f)
         transformed_vec = bounded_sigmoid_inverse(vec, 
                                                   min_val = self.exchange_min_val,
                                                   max_val = self.exchange_max_val)
-        exch_raw = self.param("exchangeabilities", 
-                              lambda rng, shape: transformed_vec,
-                              transformed_vec.shape )
-        self.exchangeabilities_logits = self._upper_tri_vector_to_sym_matrix( exch_raw )
+        self.exchangeabilities_logits_vec = self.param("exchangeabilities", 
+                                                       lambda rng, shape: transformed_vec,
+                                                       transformed_vec.shape )
         
         
         ### RATE MULTIPLIERS: (c-1,)
@@ -412,17 +483,24 @@ class RateMatFitBoth(RateMatFromFile):
             rate_multiplier = jnp.array([1])
         
         # chi; one shared all classes
-        exchangeabilities = bounded_sigmoid(x = self.exchangeabilities_logits, 
-                                            min_val = self.exchange_min_val,
-                                            max_val = self.exchange_max_val)
-        
         if sow_intermediates:
-            self.sow_histograms_scalars(mat = exchangeabilities, 
-                                        label = 'exchangeabilities', 
+            self.sow_histograms_scalars(mat= self.exchangeabilities_logits_vec, 
+                                        label= 'exchangeability_logits_before_bound_sigmoid', 
                                         which='scalars')
         
+        upper_triag_values = bounded_sigmoid( x = self.exchangeabilities_logits_vec, 
+                                              min_val = self.exchange_min_val,
+                                              max_val = self.exchange_max_val )
+    
+        if sow_intermediates:
+            self.sow_histograms_scalars(mat = upper_triag_values, 
+                                        label = 'exchangeabilities_after_bound_sigmoid', 
+                                        which='scalars')
+            
+        exchangeabilities_mat = self._upper_tri_vector_to_sym_matrix( upper_triag_values )
+        
         # output is (c, i, j)
-        out = self._prepare_rate_matrix(exchangeabilities = exchangeabilities,
+        out = self._prepare_rate_matrix(exchangeabilities = exchangeabilities_mat,
                                    equilibrium_distributions = equl,
                                    sow_intermediates = sow_intermediates,
                                    rate_multiplier = rate_multiplier)
@@ -448,6 +526,17 @@ class PerClassRateMat(RateMatFitBoth):
         - rate_mult: (0, inf); bound values with rate_mult_range
     
     HAVE TO PROVIDE emission_alphabet_size IN PRED CONFIG!!!
+    
+    tl;dr:
+    =======
+    required in pred_config:
+        - emission_alphabet_size
+        - num_emit_site_classes: number of classes
+        - rate_mult_range: range for bounded sigmoid transformation of 
+          rate multiplier logits 
+    
+    __call__ returns:
+        - rate matrix times rate multipliers: (C_curr, |\omega_Y|, |\omega_X|)
     """
     config: dict
     name: str
@@ -466,14 +555,13 @@ class PerClassRateMat(RateMatFitBoth):
         del out
         
         
-        ### EXCHANGEABILITIES: (A_from, A_to)
+        ### EXCHANGEABILITIES VECTOR
         # init logits
         num_vars = int( (emission_alphabet_size * (emission_alphabet_size-1))/2 )
-        exch_raw = self.param('exchangeabilities',
-                               nn.initializers.normal(),
-                               (num_vars,),
-                               jnp.float32)
-        self.exchangeabilities_logits = self._upper_tri_vector_to_sym_matrix( exch_raw )
+        self.exchangeabilities_logits_vec = self.param('exchangeabilities',
+                                                       nn.initializers.normal(),
+                                                       (num_vars,),
+                                                       jnp.float32)
         
         
         ### RATE MULTIPLIERS: (c-1,)
@@ -507,6 +595,18 @@ class HKY85(RateMatFitBoth):
         - exchangeabilities: (0, inf); bound values with exchange_range
         - rate_mult: (0, inf); bound values with rate_mult_range
     
+    
+    tl;dr:
+    =======
+    required in pred_config:
+        - num_emit_site_classes: number of classes
+        - rate_mult_range: range for bounded sigmoid transformation of 
+          rate multiplier logits 
+        - exchange_range: range for bounded sigmoid transformation of 
+          exchangeability logits 
+    
+    __call__ returns:
+        - rate matrix times rate multipliers: (C_curr, |\omega_Y|, |\omega_X|)
     """
     config: dict
     name: str
@@ -531,15 +631,12 @@ class HKY85(RateMatFitBoth):
                                jnp.float32)
         
         # order should be: tv, ti, tv, tv, ti, tv
-        hky85_raw_vec = jnp.stack( [ ti_tv_vec[1], 
-                                     ti_tv_vec[0], 
-                                     ti_tv_vec[1], 
-                                     ti_tv_vec[1], 
-                                     ti_tv_vec[0], 
-                                     ti_tv_vec[1] ] )
-        
-        self.exchangeabilities_logits = self._upper_tri_vector_to_sym_matrix( hky85_raw_vec )
-        
+        self.exchangeabilities_logits_vec = jnp.stack( [ ti_tv_vec[1], 
+                                                         ti_tv_vec[0], 
+                                                         ti_tv_vec[1], 
+                                                         ti_tv_vec[1], 
+                                                         ti_tv_vec[0], 
+                                                         ti_tv_vec[1] ] )
         
         ### RATE MULTIPLIERS: (c-1,)
         if self.num_emit_site_classes > 1:
@@ -566,6 +663,17 @@ class HKY85FromFile(RateMatFromFile):
     
     inherit __call__ from RateMatFromFile
     
+    
+    tl;dr:
+    =======
+    required in pred_config:
+        - num_emit_site_classes: number of classes
+        - filenames: dictionary of files to load
+          > pred_config["filenames"]["rate_mult"]
+          > pred_config["filenames"]["exch"]
+    
+    __call__ returns:
+        - rate matrix times rate multipliers: (C_curr, |\omega_Y|, |\omega_X|)
     """
     config: dict
     name: str
@@ -604,7 +712,15 @@ class HKY85FromFile(RateMatFromFile):
 ###############################################################################
 class LogEqulVecPerClass(ModuleBase):
     """
-    generate equilibrium distribution; (num_site_clases, features) matrix
+    required in pred_config:
+        - emission_alphabet_size: alphabet size
+        - num_emit_site_classes: number of classes
+    
+    params:
+        - logits: (C, \omega)
+    
+    __call__ returns:
+        - logP(emission from alphabet): (C, \omega)
     """
     config: dict
     name: str
@@ -636,6 +752,17 @@ class LogEqulVecPerClass(ModuleBase):
 
 
 class LogEqulVecFromFile(ModuleBase):
+    """
+    required in pred_config:
+      - filenames: dictionary of files to load
+          > pred_config["filenames"]["equl_dist"]: file containing the 
+            equilibrium distribution to load
+    
+    params: None
+    
+    __call__ returns:
+        - logP(emission from alphabet): (C, \omega)
+    """
     config: dict
     name: str
     
@@ -658,7 +785,16 @@ class LogEqulVecFromFile(ModuleBase):
 
 class LogEqulVecFromCounts(ModuleBase):
     """
-    A (1, features) matrix from counts
+    Generate equilibrium distribution based on observed counts (used when 
+      only one class)
+    
+    required in pred_config:
+      - training_dset_emit_counts: emission counts from training set
+    
+    params: None
+    
+    __call__ returns:
+        - logP(emission from alphabet): (1, \omega)
     """
     config: dict
     name: str

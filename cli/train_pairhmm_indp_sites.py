@@ -229,6 +229,13 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
                                   pairhmm_trainstate=pairhmm_trainstate)
             train_metrics, pairhmm_trainstate = out
             del out
+            
+            
+            ### debug: plot some gradients of interest
+            for key, val in train_metrics['grads_of_interest'].items():
+                writer.add_scalar(tag = f'GRADS/{key}', 
+                                  scalar_value = val.item(), 
+                                  global_step = batch_epoch_idx)
         
 
 #__4___8__12: batch level (three tabs)
@@ -497,9 +504,12 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     
     
     ### un-transform parameters and write to numpy arrays
-    pairhmm_instance.write_params(tstate = best_pairhmm_trainstate,
-                                     out_folder = args.out_arrs_dir,
-                                     pred_config = args.pred_config)
+    # state.apply_fn(state.params, x)
+    best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
+                                      curr_params = best_pairhmm_trainstate.params,
+                                      t_array = t_array,
+                                      out_folder = args.out_arrs_dir,
+                                      method = pairhmm_instance.write_params )
     
     
     ### save the argparse object by itself
