@@ -5,18 +5,6 @@ Created on Wed Feb  5 04:33:00 2025
 
 @author: annabel
 
-IN THE FUTURE: if you want to let protein models use generalizable 
-emission functions:
-	'protein_emission_models.RateMatFromFile' ->
-        replace with 'general_emission_models.RateMatFromFile'
-        
-	'protein_emission_models.RateMatFitRateMult' ->
-        replace with 'general_emission_models.RateMatFitRateMult'
-        
-	'protein_emission_models.RateMatFitBoth' ->
-        replace with 'general_emission_models.RateMatFitBoth'
-
-
 models here:
 ============
 'IndpPairHMMFitBoth',

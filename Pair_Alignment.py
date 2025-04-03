@@ -54,7 +54,7 @@ def main():
     
     # ### UNCOMMENT TO RUN IN SPYDER IDE
     # args.task = 'train'
-    # args.configs = 'one-class_hky85-tkf92_recover-params.json'
+    # args.configs = 'DRY-RUN_tkf91.json'
     
     
     ### helper function to open a single config file and extract additional arguments

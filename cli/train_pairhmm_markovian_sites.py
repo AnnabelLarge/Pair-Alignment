@@ -43,7 +43,7 @@ from utils.edit_argparse import (enforce_valid_defaults,
 from utils.setup_training_dir import setup_training_dir
 from utils.sequence_length_helpers import determine_alignlen_bin
 from utils.tensorboard_recording_utils import (write_times,
-                                               write_optional_outputs_during_training)
+                                               write_optional_outputs_during_training_hmms)
 from utils.write_timing_file import write_timing_file
 
 # specific to training this model
@@ -271,9 +271,8 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
             # record metrics
             interm_rec = batch_epoch_idx % args.histogram_output_freq == 0
             final_rec = (batch_idx == len(training_dl)) & (epoch_idx == args.num_epochs)
-            
-            write_optional_outputs_during_training(writer_obj = writer, 
-                                                    all_trainstates = pairhmm_trainstate,
+            write_optional_outputs_during_training_hmms(writer_obj = writer, 
+                                                    pairhmm_trainstate = pairhmm_trainstate,
                                                     global_step = batch_epoch_idx, 
                                                     dict_of_values = train_metrics, 
                                                     interms_for_tboard = args.interms_for_tboard, 
@@ -512,9 +511,10 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     
     
     ### un-transform parameters and write to numpy arrays
-    pairhmm_instance.write_params(tstate = best_pairhmm_trainstates,
-                                     out_folder = args.out_arrs_dir,
-                                     pred_config = args.pred_config)
+    best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
+                                      t_array = t_array,
+                                      out_folder = args.out_arrs_dir,
+                                      method = pairhmm_instance.write_params )
     
     
     ### save the argparse object by itself

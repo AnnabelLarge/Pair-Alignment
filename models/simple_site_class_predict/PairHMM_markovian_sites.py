@@ -5,17 +5,6 @@ Created on Wed Feb  5 04:33:00 2025
 
 @author: annabel
 
-IN THE FUTURE: if you want to let protein models use generalizable 
-emission functions:
-	'protein_emission_models.RateMatFromFile' ->
-        replace with 'general_emission_models.RateMatFromFile'
-        
-	'protein_emission_models.RateMatFitRateMult' ->
-        replace with 'general_emission_models.RateMatFitRateMult'
-        
-	'protein_emission_models.RateMatFitBoth' ->
-        replace with 'general_emission_models.RateMatFitBoth'
-
 models:
 =======
 MarkovPairHMM
@@ -556,87 +545,117 @@ class MarkovPairHMM(ModuleBase):
     
     
     def write_params(self,
-                     pred_config,
-                     tstate,
+                     t_array,
                      out_folder: str):
-        params_dict = tstate.params['params']
+        out = self._get_scoring_matrices(t_array=t_array,
+                                        sow_intermediates=False)
         
+        # normalized rate matrix
+        normalized_rate_matrix = out['normalized_rate_matrix']
         
-        ##################################################
-        ### use default values, if ranges aren't found   #
-        ##################################################
-        with open(f'{out_folder}/ranges_used.tsv','w') as g:
-            g.write('Ranges used to convert params (if values were not provided, noted below)\n\n')
+        with open(f'{out_folder}/normalized_rate_matrix.npy', 'wb') as g:
+            np.save(g, normalized_rate_matrix)
+        
+        np.savetxt( f'{out_folder}/ASCII_normalized_rate_matrix.tsv', 
+                    np.array(normalized_rate_matrix), 
+                    fmt = '%.4f',
+                    delimiter= '\t' )
+        
+        del normalized_rate_matrix, g
+        
+        # matrix that you apply expm() to
+        to_expm = np.squeeze( out['to_expm'] )
+        
+        with open(f'{out_folder}/to_expm.npy', 'wb') as g:
+            np.save(g, to_expm)
+        
+        if len(to_expm.shape) <= 2:
+            np.savetxt( f'{out_folder}/ASCII_to_expm.tsv', 
+                        to_expm, 
+                        fmt = '%.4f',
+                        delimiter= '\t' )
+        
+        del to_expm, g
+        
+        # other emission matrices; exponentiate them first
+        for key in ['logprob_emit_at_indel', 
+                    'joint_logprob_emit_at_match']:
+            mat = np.exp(out[key])
+            new_key = key.replace('logprob','prob')
             
-        def read_pred_config(key, default_tup):
-            if key not in pred_config.keys():
-                with open(f'{out_folder}/ranges_used.tsv','a') as g:
-                    g.write(f'{key}: {default_tup} [NOT PROVIDED; USED DEFAULT VALUE]\n')                
-                return default_tup
+            with open(f'{out_folder}/{new_key}.npy', 'wb') as g:
+                np.save(g, mat)
             
-            else:
-                with open(f'{out_folder}/ranges_used.tsv','a') as g:
-                    g.write(f'{key}: {pred_config[key]}\n')
-                return pred_config[key]
-        
-        
-        out = read_pred_config( 'exchange_range', (1e-4, 10) )
-        exchange_min_val, exchange_max_val = out
-        del out
-        
-        out = read_pred_config( 'rate_mult_range', (0.01, 10) )
-        rate_mult_min_val, rate_mult_max_val = out
-        del out
-        
-        out = read_pred_config( 'lambda_range', (pred_config['tkf_err'], 3) )
-        lam_min_val, lam_max_val = out
-        del out
-         
-        out = read_pred_config( 'offset_range', (pred_config['tkf_err'], 0.333) )
-        offs_min_val, offs_max_val = out
-        del out
-        
+            mat = np.squeeze(mat)
+            if len(mat.shape) <= 2:
+                np.savetxt( f'{out_folder}/ASCII_{new_key}.tsv', 
+                            np.array(mat), 
+                            fmt = '%.4f',
+                            delimiter= '\t' )
+            
+            del key, mat, g
+            
+        for key, mat in out['all_transit_matrices'].items():
+            mat = np.exp(mat)
+            new_key = key.replace('logprob','prob')
+            
+            with open(f'{out_folder}/{new_key}_transit_matrix.npy', 'wb') as g:
+                np.save(g, mat)
+            
+            mat = np.squeeze(mat)
+            if len(mat.shape) <= 2:
+                np.savetxt( f'{out_folder}/ASCII_{new_key}_transit_matrix.tsv', 
+                            np.array(mat), 
+                            fmt = '%.4f',
+                            delimiter= '\t' )
+            
+            del key, mat, g
         
         
         ###############
         ### extract   #
         ###############
         ### site class probs
-        if 'get site class probabilities' in params_dict.keys():
-            class_logits = params_dict['get site class probabilities']['class_logits']
-            class_probs = nn.softmax(class_logits)
+        if 'class_logits' in dir(self.class_logprobs_module):
+            class_probs = nn.softmax(self.class_logprobs_module.class_logits)
             with open(f'{out_folder}/PARAMS_class_probs.txt','w') as g:
                 [g.write(f'{elem.item()}\n') for elem in class_probs]
-                
-                
-        ### emissions
-        if 'get rate matrix' in params_dict.keys():
-            
-            if 'exchangeabilities' in params_dict['get rate matrix']:
-                exch_logits = params_dict['get rate matrix']['exchangeabilities']
-                exchangeabilities = bounded_sigmoid(x = exch_logits, 
-                                                    min_val = exchange_min_val,
-                                                    max_val = exchange_max_val)
-                
-                np.savetxt( f'{out_folder}/PARAMS_exchangeabilities.tsv', 
-                            np.array(exchangeabilities), 
-                            fmt = '%.4f',
-                            delimiter= '\t' )
-                
-                with open(f'{out_folder}/PARAMS-ARR_exchangeabilities.npy','wb') as g:
-                    jnp.save(g, exchangeabilities)
-                
-            if 'rate_multipliers' in params_dict['get rate matrix']:
-                rate_mult_logits = params_dict['get rate matrix']['rate_multipliers']
-                rate_mult = bounded_sigmoid(x = rate_mult_logits, 
-                                            min_val = rate_mult_min_val,
-                                            max_val = rate_mult_max_val)
-    
-                with open(f'{out_folder}/PARAMS_rate_multipliers.txt','w') as g:
-                    [g.write(f'{elem.item()}\n') for elem in rate_mult]
         
-        if 'get equilibrium' in params_dict.keys():
-            equl_logits = params_dict['get equilibrium']['Equilibrium distr.']
+        
+        ### emissions
+        # exchangeabilities
+        if 'exchangeabilities_logits' in dir(self.rate_matrix_module):
+            exchange_min_val = self.rate_matrix_module.exchange_min_val
+            exchange_max_val = self.rate_matrix_module.exchange_max_val
+            exch_logits = self.rate_matrix_module.exchangeabilities_logits
+            exchangeabilities = bounded_sigmoid(x = exch_logits, 
+                                                min_val = exchange_min_val,
+                                                max_val = exchange_max_val)
+            
+            np.savetxt( f'{out_folder}/PARAMS_exchangeabilities.tsv', 
+                        np.array(exchangeabilities), 
+                        fmt = '%.4f',
+                        delimiter= '\t' )
+            
+            with open(f'{out_folder}/PARAMS_exchangeabilities.npy','wb') as g:
+                jnp.save(g, exchangeabilities)
+                
+        # emissions: rate multipliers
+        if 'rate_mult_logits' in dir(self.rate_matrix_module):
+            rate_mult_min_val = self.rate_matrix_module.rate_mult_min_val
+            rate_mult_max_val = self.rate_matrix_module.rate_mult_max_val
+            rate_mult_logits = self.rate_matrix_module.rate_mult_logits
+                
+            rate_mult = bounded_sigmoid(x = rate_mult_logits, 
+                                        min_val = rate_mult_min_val,
+                                        max_val = rate_mult_max_val)
+
+            with open(f'{out_folder}/PARAMS_rate_multipliers.txt','w') as g:
+                [g.write(f'{elem.item()}\n') for elem in rate_mult]
+        
+        # emissions: equilibrium distribution
+        if 'logits' in dir(self.indel_prob_module):
+            equl_logits = self.indel_prob_module.logits
             equl_dist = nn.softmax( equl_logits, axis=1 )
             
             np.savetxt( f'{out_folder}/PARAMS_equilibriums.tsv', 
@@ -649,40 +668,44 @@ class MarkovPairHMM(ModuleBase):
                 
                 
         ### transitions
-        # also need range for r values
-        out = read_pred_config( 'r_range', (pred_config['tkf_err'], 0.8) )
-        r_extend_min_val, r_extend_max_val = out
-        del out
-    
-        lam_mu_logits = params_dict['tkf92 indel model']['TKF92 lambda, mu']
-    
-        lam = bounded_sigmoid(x = lam_mu_logits[0],
-                              min_val = lam_min_val,
-                              max_val = lam_max_val)
+        # always write lambda and mu
+        if 'tkf_lam_mu_logits' in dir(self.transitions_module):
+            lam_min_val = self.transitions_module.lam_min_val
+            lam_max_val = self.transitions_module.lam_max_val
+            offs_min_val = self.transitions_module.offs_min_val
+            offs_max_val = self.transitions_module.offs_max_val
+            lam_mu_logits = self.transitions_module.tkf_lam_mu_logits
         
-        offset = bounded_sigmoid(x = lam_mu_logits[1],
-                                 min_val = offs_min_val,
-                                 max_val = offs_max_val)
-        mu = lam / ( 1 -  offset) 
-        
-        r_extend_logits = params_dict['tkf92 indel model']['TKF92 r extension prob']
-        r_extend = bounded_sigmoid(x = r_extend_logits,
-                                   min_val = r_extend_min_val,
-                                   max_val = r_extend_max_val)
-        
-        mean_indel_lengths = 1 / (1 - r_extend)
-        
-        with open(f'{out_folder}/PARAMS_tkf92_indel_params.txt','w') as g:
-            g.write(f'insert rate, lambda: {lam}\n')
-            g.write(f'deletion rate, mu: {mu}\n')
-            g.write(f'extension prob, r: ')
-            [g.write(f'{elem}\t') for elem in r_extend]
-            g.write('\n')
-            g.write(f'mean indel length: ')
-            [g.write(f'{elem}\t') for elem in mean_indel_lengths]
-            g.write('\n')
+            lam = bounded_sigmoid(x = lam_mu_logits[0],
+                                  min_val = lam_min_val,
+                                  max_val = lam_max_val)
+            
+            offset = bounded_sigmoid(x = lam_mu_logits[1],
+                                     min_val = offs_min_val,
+                                     max_val = offs_max_val)
+            mu = lam / ( 1 -  offset) 
+            
+            r_extend_min_val = self.transitions_module.r_extend_min_val
+            r_extend_max_val = self.transitions_module.r_extend_max_val
+            r_extend_logits = self.transitions_module.r_extend_logits
+            
+            r_extend = bounded_sigmoid(x = r_extend_logits,
+                                       min_val = r_extend_min_val,
+                                       max_val = r_extend_max_val)
+            
+            mean_indel_lengths = 1 / (1 - r_extend)
+            
+            with open(f'{out_folder}/PARAMS_tkf92_indel_params.txt','w') as g:
+                g.write(f'insert rate, lambda: {lam}\n')
+                g.write(f'deletion rate, mu: {mu}\n')
+                g.write(f'extension prob, r: ')
+                [g.write(f'{elem}\t') for elem in r_extend]
+                g.write('\n')
+                g.write(f'mean indel length: ')
+                [g.write(f'{elem}\t') for elem in mean_indel_lengths]
+                g.write('\n')
                 
-        
+                
     def _get_scoring_matrices( self,
                                t_array,
                                sow_intermediates: bool):
@@ -704,7 +727,6 @@ class MarkovPairHMM(ModuleBase):
         cond_prob_emit_at_match = expm( to_expm )
         cond_logprob_emit_at_match = safe_log( cond_prob_emit_at_match )
         joint_logprob_emit_at_match = cond_logprob_emit_at_match + logprob_emit_at_indel[None,:,:,None]
-        del to_expm, cond_logprob_emit_at_match
         
         
         ### probability of being in any particular class
@@ -719,6 +741,9 @@ class MarkovPairHMM(ModuleBase):
         
         out_dict = {'logprob_emit_at_indel': logprob_emit_at_indel,
                     'joint_logprob_emit_at_match': joint_logprob_emit_at_match,
+                    'cond_logprob_emit_at_match': cond_logprob_emit_at_match,
+                    'normalized_rate_matrix': rate_mat_times_rho[0,...],
+                    'to_expm': to_expm,
                     'all_transit_matrices': all_transit_matrices}
         
         return out_dict

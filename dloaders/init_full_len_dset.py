@@ -70,7 +70,10 @@ def init_full_len_dset( args,
     """
     initialize the dataloaders
     """
-    emission_alphabet_size = 4 if 'hky85' in args.pred_config['preset_name'] else 20
+    if 'preset_name' in args.pred_config:
+        emission_alphabet_size = 4 if 'hky85' in args.pred_config['preset_name'] else 20
+    else:
+        emission_alphabet_size = 20
 
     #################################
     ### training-specific options   #

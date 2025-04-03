@@ -25,6 +25,7 @@ def train_one_batch(batch,
                     pairhmm_trainstate,
                     t_array,
                     interms_for_tboard,
+                    indel_model_type,
                     update_grads: bool = True,
                     **kwargs):
     """
@@ -60,12 +61,6 @@ def train_one_batch(batch,
     
     ### only turn this off during debug
     if update_grads:
-        grads_of_interest = {'ti_grads': grad['params']['get rate matrix']['exchangeabilities'][0],
-                             'tv_grads': grad['params']['get rate matrix']['exchangeabilities'][1],
-                             'lam_grads': grad['params']['tkf92 indel model']['TKF92 lambda, mu'][0],
-                             'mu_grads': grad['params']['tkf92 indel model']['TKF92 lambda, mu'][1],
-                             'r_extend_grads': grad['params']['tkf92 indel model']['TKF92 r extension prob']}
-        
         updates, new_opt_state = pairhmm_trainstate.tx.update(grad,
                                                             pairhmm_trainstate.opt_state,
                                                             pairhmm_trainstate.params)
@@ -74,7 +69,6 @@ def train_one_batch(batch,
         new_trainstate = pairhmm_trainstate.replace(params = new_params,
                                                     opt_state = new_opt_state)
     else:
-        grads_of_interest = {}
         new_trainstate = pairhmm_trainstate
     
     
@@ -90,7 +84,7 @@ def train_one_batch(batch,
                 'batch_loss': batch_loss_NLL,
                 'batch_ave_joint_perpl': jnp.mean(joint_perplexity_perSamp),
                 'pred_layer_metrics': aux_dict['pred_layer_metrics'],
-                'grads_of_interest': grads_of_interest}
+                'finalpred_gradient': grad}
     
     return out_dict, new_trainstate
 

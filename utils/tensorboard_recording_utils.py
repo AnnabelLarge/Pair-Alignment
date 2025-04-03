@@ -219,6 +219,7 @@ def weight_summary_stats(all_trainstates,
 ### functions used during training loop   #
 ###########################################
 def grads_summary_stats(gradient_dictionaries,
+                        mod_lst,
                         tag_prefix):
     """
     keys have naming convention:
@@ -236,23 +237,55 @@ def grads_summary_stats(gradient_dictionaries,
     out_dict is a flat dictionary (i.e. NOT nested)
     """
     out_dict = {}
-    for which_module_grad in ['enc_gradient',
-                              'dec_gradient',
-                              'finalpred_gradient']:
+    for which_module_grad in mod_lst:
         grad_dict = gradient_dictionaries[which_module_grad]
         grad_dict = grad_dict.get('params', dict() )
         grad_dict = flatten_convert( grad_dict )
         
-        for layer_name, grad_mat in grad_dict.items():
-            ## for some reason, the first two labels keep getting duplicated; 
-            ## just manually remove these
-            #layer_name = '/'.join( layer_name.split('/')[2:] )
-            
+        for layer_name, val in grad_dict.items():
             layer_for_tag = f'{tag_prefix}/GRADIENTS/'+layer_name
+
+            ##################################
+            ### special rules fpr pairHMMs   #
+            ##################################
+            if 'lambda, mu' in layer_name:
+                lam_grads = val[0]
+                offset_grads = val[1]
+                out_dict[f'{tag_prefix}/GRADIENTS/indel model/lambda'] = lam_grads.item()
+                out_dict[f'{tag_prefix}/GRADIENTS/indel model/offset'] = offset_grads.item()
+            
+            elif 'r extension prob' in layer_name:
+                C = val.shape[0]
                 
-            to_add = calc_stats(mat = grad_mat, 
-                                name = layer_for_tag)
-            out_dict = {**out_dict, **to_add}
+                for i in range(C):
+                    grad_to_write = val[i].item()
+                    out_dict[f'{tag_prefix}/GRADIENTS/indel model/r extend. prob (c={i})'] = grad_to_write
+                
+            elif 'class_logits' in layer_name:
+                C = val.shape[0]
+                
+                for i in range(C):
+                    grad_to_write = val[i].item()
+                    out_dict[f'{tag_prefix}/GRADIENTS/mixture model/class prob (c={i})'] = grad_to_write
+                
+            elif 'rate_multipliers' in layer_name:
+                C = val.shape[0]
+                
+                for i in range(C):
+                    grad_to_write = val[i].item()
+                    out_dict[f'{tag_prefix}/GRADIENTS/get rate matrix/rate mult. (c={i+1})'] = grad_to_write
+                
+
+            ####################################
+            ### regular rules for all models   #
+            ####################################
+            elif val.size == 1:
+                out_dict[layer_for_tag] = val.item()
+            
+            elif val.size > 1:
+                to_add = calc_stats(mat = val, 
+                                    name = layer_for_tag)
+                out_dict = {**out_dict, **to_add}
     
     return out_dict
 
@@ -418,7 +451,8 @@ def write_optional_outputs_during_training(writer_obj,
         gradient_dictionaries = {key: val for key, val in dict_of_values.items() if key in 
                                   ['enc_gradient', 'dec_gradient','finalpred_gradient']}        
         flat_dict = grads_summary_stats(gradient_dictionaries = gradient_dictionaries,
-                                tag_prefix = 'IN TRAIN LOOP') 
+                                        mod_lst = ['enc_gradient', 'dec_gradient','finalpred_gradient'],
+                                        tag_prefix = 'IN TRAIN LOOP') 
         write_scalars_from_dict(flat_dict=flat_dict, 
                                 top_layer_name='',
                                 writer_obj=writer_obj, 
@@ -450,7 +484,74 @@ def write_optional_outputs_during_training(writer_obj,
         write_optimizer_updates(all_updates = all_updates,
                                 writer_obj=writer_obj,
                                 global_step=global_step)
+
+
+def write_optional_outputs_during_training_hmms(writer_obj, 
+                                           pairhmm_trainstate,
+                                           global_step, 
+                                           dict_of_values, 
+                                           interms_for_tboard, 
+                                           write_histograms_flag):
+    """
+    in the training loop, could record the following (under certain flags)
+    
+    scalars:
+        - sowed intermediates statistics
+        - weights (calculate statistics first!)
+        - gradients (calculate statistics first!)
+        - optimizer states (mu, nu, updates)  (calculate statistics first!)
         
+    histograms (periodically):
+        - weights
+        - gradients
+    """
+    ### intermediates sowed by the models
+    if interms_for_tboard.get('finalpred_sow_outputs',False):
+        flat_dict = flatten_convert( dict_of_values['pred_layer_metrics']['scalars'] )
+        write_scalars_from_dict(flat_dict=flat_dict, 
+                                top_layer_name=f'IN TRAIN LOOP/FINALPRED_INTERMS/',
+                                writer_obj=writer_obj, 
+                                global_step=global_step)
+        del flat_dict
+    
+    ### gradients; also already flattened with top_layer_name
+    # place in redundant dictionary for compatibility
+    if interms_for_tboard.get('gradients',False):
+        gradient_dictionaries = {'finalpred_gradient': dict_of_values['finalpred_gradient']}
+        flat_dict = grads_summary_stats(gradient_dictionaries = gradient_dictionaries,
+                                        mod_lst = ['finalpred_gradient'],
+                                        tag_prefix = 'IN TRAIN LOOP') 
+        write_scalars_from_dict(flat_dict=flat_dict, 
+                                top_layer_name='',
+                                writer_obj=writer_obj, 
+                                global_step=global_step)
+        del flat_dict
+        
+        # also possibly output histogram
+        if write_histograms_flag:
+            for key, grad_dict in gradient_dictionaries.items():
+                grad_dict = flatten_convert( grad_dict.get('params',dict()) )
+                write_histograms_from_dict(flat_dict=grad_dict, 
+                                            top_layer_name='IN TRAIN LOOP/GRADIENTS/',
+                                            writer_obj=writer_obj, 
+                                            global_step=global_step)
+            del grad_dict
+    
+    
+    ### optimizer updates; functions defined above
+    if interms_for_tboard.get('optimizer',False):
+        # mu, nu
+        write_adam_optimizer_summary_stats(all_trainstates = all_trainstates,
+                                            writer_obj=writer_obj,
+                                            global_step=global_step)
+        
+        # updates
+        all_updates = [dict_of_values.get(item, dict()) for item in
+                        ['encoder_updates', 'decoder_updates', 'finalpred_updates']
+                        ]
+        write_optimizer_updates(all_updates = all_updates,
+                                writer_obj=writer_obj,
+                                global_step=global_step)
         
 
 ###########################################

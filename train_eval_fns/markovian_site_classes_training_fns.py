@@ -19,8 +19,7 @@ import jax.numpy as jnp
 from jax import config
 from flax import linen as nn
 import optax
-
-                                               
+                            
 def train_one_batch(batch, 
                     training_rngkey,
                     pairhmm_trainstate,  
@@ -77,7 +76,8 @@ def train_one_batch(batch,
                 'joint_ece': joint_ece,
                 'batch_loss': batch_loss_NLL,
                 'batch_ave_joint_perpl': jnp.mean(joint_perplexity_perSamp),
-                'pred_layer_metrics': aux_dict['pred_layer_metrics']}
+                'pred_layer_metrics': aux_dict['pred_layer_metrics'],
+                'finalpred_gradient': grad}
     
     return out_dict, new_trainstate
 
