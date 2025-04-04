@@ -174,11 +174,11 @@ class RateMatFromFile(ModuleBase):
         
         # if providing a vector, need to prepare a square exchangeabilities matrix
         if len(exch_from_file.shape) == 2:
-            self.exchangeabilities = self._upper_tri_vector_to_sym_matrix( exch_from_file )
+            self.exchangeabilities = exch_from_file
         
         # otherwise, use the matrix as-is
         elif len(exch_from_file.shape) == 1:
-            self.exchangeabilities = exch_from_file
+            self.exchangeabilities = self._upper_tri_vector_to_sym_matrix( exch_from_file )
                     
         
         ### RATE MULTIPLIERS: (c,)

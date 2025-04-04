@@ -59,16 +59,11 @@ def init_pairhmm_indp_sites( seq_shapes,
         pairhmm_instance = IndpHKY85LoadAll(config = pred_config,
                                             name = 'IndpHKY85LoadAll')
     
-    elif pred_config['preset_name'] == 'hky85_fit_indel_only':
-        from models.simple_site_class_predict.HKY85_indp_sites import IndpHKY85FitIndelOnly
-        pairhmm_instance = IndpHKY85FitIndelOnly(config = pred_config,
-                                            name = 'IndpHKY85FitIndelOnly')
-    
     elif pred_config['preset_name'] == 'hky85_fit_all':
         from models.simple_site_class_predict.HKY85_indp_sites import IndpHKY85FitAll
         pairhmm_instance = IndpHKY85FitAll(config = pred_config,
                                             name = 'IndpHKY85FitAll')
-        
+    
         
     ###################################
     ### tabulate and save the model   #
@@ -113,7 +108,12 @@ def init_pairhmm_markov_sites( seq_shapes,
      site modeling experiments: fitting both rate matrix and rate multiplier,
      or just fitting rate multiplier
     """
-    if not pred_config['load_all_params']:
+    if pred_config['preset_name'] == 'DEBUG_markovian_code':
+        from models.simple_site_class_predict.HKY85_indp_sites import OneClassMarkovHKY85FitAll
+        pairhmm_instance = OneClassMarkovHKY85FitAll(config = pred_config,
+                                            name = 'OneClassMarkovHKY85FitAll')
+    
+    elif not pred_config['load_all_params']:
         ### uncomment for jax.lax.scan version
         from models.simple_site_class_predict.PairHMM_markovian_sites import MarkovPairHMM
         pairhmm_instance = MarkovPairHMM(config = pred_config,
@@ -123,6 +123,7 @@ def init_pairhmm_markov_sites( seq_shapes,
         from models.simple_site_class_predict.PairHMM_markovian_sites import MarkovPairHMMLoadAll
         pairhmm_instance = MarkovPairHMMLoadAll(config = pred_config,
                                                 name = 'MarkovPairHMMLoadAll')
+    
     
     ### tabulate and save the model
     if (tabulate_file_loc is not None):

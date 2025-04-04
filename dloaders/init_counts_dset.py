@@ -60,9 +60,6 @@ def init_counts_dset(args,
     """
     initialize the dataloaders
     """
-    emission_alphabet_size = 4 if 'hky85' in args.pred_config['preset_name'] else 20
-
-
     #################################
     ### training-specific options   #
     #################################
@@ -74,6 +71,7 @@ def init_counts_dset(args,
         
         only_test = False
         times_from_array, single_time_from_file = init_time_array(args)
+        emission_alphabet_size = 4 if 'hky85' in args.pred_config['preset_name'] else 20
     
     
     #############################
@@ -82,6 +80,7 @@ def init_counts_dset(args,
     elif task in ['eval']:
         only_test = True
         times_from_array, single_time_from_file = init_time_array(training_argparse)
+        emission_alphabet_size = 4 if 'hky85' in training_argparse.pred_config['preset_name'] else 20
     
     
     #################

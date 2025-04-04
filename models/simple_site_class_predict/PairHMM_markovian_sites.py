@@ -103,7 +103,7 @@ class MarkovPairHMM(ModuleBase):
         
         
         ### probability of site classes
-        self.class_logprobs_module = SiteClassLogprobs(config = self.config,
+        self.site_class_probability_module = SiteClassLogprobs(config = self.config,
                                                        name = 'class_logits')
     
     
@@ -616,8 +616,8 @@ class MarkovPairHMM(ModuleBase):
         ### extract   #
         ###############
         ### site class probs
-        if 'class_logits' in dir(self.class_logprobs_module):
-            class_probs = nn.softmax(self.class_logprobs_module.class_logits)
+        if 'class_logits' in dir(self.site_class_probability_module):
+            class_probs = nn.softmax(self.site_class_probability_module.class_logits)
             with open(f'{out_folder}/PARAMS_class_probs.txt','w') as g:
                 [g.write(f'{elem.item()}\n') for elem in class_probs]
         
@@ -730,7 +730,7 @@ class MarkovPairHMM(ModuleBase):
         
         
         ### probability of being in any particular class
-        log_class_probs = self.class_logprobs_module( sow_intermediates = sow_intermediates )
+        log_class_probs = self.site_class_probability_module( sow_intermediates = sow_intermediates )
 
 
         ### transition logprobs
@@ -839,7 +839,7 @@ class MarkovPairHMMLoadAll(MarkovPairHMM):
                                                  name = f'get rate matrix')
         
         ### probability of site classes
-        self.class_logprobs_module = SiteClassLogprobsFromFile(config = self.config,
+        self.site_class_probability_module = SiteClassLogprobsFromFile(config = self.config,
                                                                name = 'class_logits')
         
         ### transitions modele
@@ -903,7 +903,7 @@ class MarkovPairHMMLoadAll(MarkovPairHMM):
         
         
 #         ### probability of being in any particular class
-#         log_class_probs = self.class_logprobs_module(sow_intermediates = sow_intermediates)
+#         log_class_probs = self.site_class_probability_module(sow_intermediates = sow_intermediates)
         
         
 #         ######################################

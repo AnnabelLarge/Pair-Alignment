@@ -70,10 +70,7 @@ def init_full_len_dset( args,
     """
     initialize the dataloaders
     """
-    if 'preset_name' in args.pred_config:
-        emission_alphabet_size = 4 if 'hky85' in args.pred_config['preset_name'] else 20
-    else:
-        emission_alphabet_size = 20
+    
 
     #################################
     ### training-specific options   #
@@ -97,6 +94,16 @@ def init_full_len_dset( args,
         
         # misc params, time array
         times_from_array, single_time_from_file = init_time_array(args)
+
+        # emission alphabet size
+        if 'preset_name' in args.pred_config:
+            if ('hky85' in args.pred_config['preset_name']) or (args.pred_config['preset_name'] == 'DEBUG_markovian_code'):
+                emission_alphabet_size = 4
+            else:
+                emission_alphabet_size = 20
+    
+        else:
+            emission_alphabet_size = 20
     
     
     #############################
@@ -117,6 +124,16 @@ def init_full_len_dset( args,
             args.use_scan_fns = False
         
         times_from_array, single_time_from_file = init_time_array(training_argparse)
+
+        # emission alphabet size
+        if 'preset_name' in training_argparse.pred_config:
+            if ('hky85' in training_argparse.pred_config['preset_name']) or (training_argparse.pred_config['preset_name'] == 'DEBUG_markovian_code'):
+                emission_alphabet_size = 4
+            else:
+                emission_alphabet_size = 20
+    
+        else:
+            emission_alphabet_size = 20
         
     
     

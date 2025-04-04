@@ -557,12 +557,16 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     ###########################################
     ### update the logfile with final losses  #
     ###########################################
-    to_write = {'RUN': args.training_wkdir}
-    to_write = {**to_write, **train_summary_stats}
-    to_write = {**to_write, **test_summary_stats}
+    to_write_prefix = {'RUN': args.training_wkdir}
+    to_write_train = {**to_write_prefix, **train_summary_stats}
+    to_write_test = {**to_write_prefix, **test_summary_stats}
     
-    with open(f'{args.logfile_dir}/AVE-LOSSES.tsv','w') as g:
-        for k, v in to_write.items():
+    with open(f'{args.logfile_dir}/TRAIN-AVE-LOSSES.tsv','w') as g:
+        for k, v in to_write_train.items():
+            g.write(f'{k}\t{v}\n')
+    
+    with open(f'{args.logfile_dir}/TEST-AVE-LOSSES.tsv','w') as g:
+        for k, v in to_write_test.items():
             g.write(f'{k}\t{v}\n')
     
     post_training_real_end = wall_clock_time()

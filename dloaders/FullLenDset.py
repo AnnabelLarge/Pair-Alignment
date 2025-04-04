@@ -471,7 +471,7 @@ class FullLenDset(Dataset):
         unaligned_seqs_lst = []
         metadata_lst = []
         self.emit_counts = np.zeros( (emission_alphabet_size,) )
-            
+        
         if emission_alphabet_size == 20:
             counts_suffix = 'AAcounts'
         

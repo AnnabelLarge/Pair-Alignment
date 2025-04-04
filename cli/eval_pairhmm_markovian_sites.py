@@ -145,6 +145,13 @@ def eval_pairhmm_markovian_sites( args,
     del parted_eval_fn
     
     
+    ### write the parameters again
+    best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
+                                      t_array = t_array,
+                                      out_folder = args.out_arrs_dir,
+                                      method = pairhmm_instance.write_params )
+    
+    
     ###########################################################################
     ### 2: EVAL   #############################################################
     ###########################################################################
