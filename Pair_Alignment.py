@@ -53,8 +53,8 @@ def main():
     
     
     # ### UNCOMMENT TO RUN IN SPYDER IDE
-    # args.task = 'eval'
-    # args.configs = 'RESCORE_markov_1-site_test.json'
+    # args.task = 'train'
+    # args.configs = 'hky85-tkf92_score_original.json'
     
     
     ### helper function to open a single config file and extract additional arguments

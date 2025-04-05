@@ -108,12 +108,12 @@ def init_pairhmm_markov_sites( seq_shapes,
      site modeling experiments: fitting both rate matrix and rate multiplier,
      or just fitting rate multiplier
     """
-    if pred_config['preset_name'] == 'DEBUG_markovian_code':
-        from models.simple_site_class_predict.HKY85_indp_sites import OneClassMarkovHKY85FitAll
-        pairhmm_instance = OneClassMarkovHKY85FitAll(config = pred_config,
-                                            name = 'OneClassMarkovHKY85FitAll')
+    # if pred_config['preset_name'] == 'DEBUG_markovian_code':
+    #     from models.simple_site_class_predict.HKY85_indp_sites import OneClassMarkovHKY85FitAll
+    #     pairhmm_instance = OneClassMarkovHKY85FitAll(config = pred_config,
+    #                                         name = 'OneClassMarkovHKY85FitAll')
     
-    elif not pred_config['load_all_params']:
+    if not pred_config['load_all_params']:
         ### uncomment for jax.lax.scan version
         from models.simple_site_class_predict.PairHMM_markovian_sites import MarkovPairHMM
         pairhmm_instance = MarkovPairHMM(config = pred_config,

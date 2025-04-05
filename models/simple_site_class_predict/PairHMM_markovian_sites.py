@@ -290,6 +290,8 @@ class MarkovPairHMM(ModuleBase):
         marginal_transit = out['all_transit_matrices']['marginal'] 
         del out
         
+        md_seen = jnp.zeros( B, ).astype(bool)
+        mi_seen = jnp.zeros( B, ).astype(bool)
         ######################################################
         ### initialize with <start> -> any (curr pos is 1)   #
         ######################################################
@@ -330,14 +332,22 @@ class MarkovPairHMM(ModuleBase):
         #   (S_prev=0, S_curr=1) is emit-><e>
         # use C_prev=0 for start class (but it doesn't matter, because the 
         # transition probability is the same for all C_prev)
-        init_anc_tr = marginal_transit[0,:,1,0][...,None] * anc_mask
+        # init_anc_tr = marginal_transit[0,:,1,0][...,None] * anc_mask
+        first_anc_emission_flag = (~md_seen) & anc_mask
+        anc_first_tr = transit[0,:,1,0][...,None]
+        
+        continued_anc_emission_flag = md_seen & anc_mask
+        anc_cont_tr = log_dot_bigger( log_vec = anc_alpha[None,...],
+                                      log_mat = transit[...,0,0][None,...,None])[0,...]
+        init_anc_tr = ( anc_cont_tr * continued_anc_emission_flag +
+                        anc_first_tr * first_anc_emission_flag )
+        
         
         # things to remember are:
         #   alpha: for forward algo
         #   md_seen: used to remember if <s> -> emit has been used yet
         #   (there could be gaps in between <s> and first emission)
         init_anc_alpha = init_anc_e + init_anc_tr
-        md_seen = anc_mask
         del init_anc_e, init_anc_tr, anc_mask
         
         
@@ -347,21 +357,28 @@ class MarkovPairHMM(ModuleBase):
         init_desc_e = logprob_emit_at_indel[:, desc_toks - 3] * desc_mask 
         
         # transitions
-        init_desc_tr = marginal_transit[0,:,1,0][...,None] * desc_mask
+        # init_desc_tr = marginal_transit[0,:,1,0][...,None] * desc_mask
+        first_desc_emission_flag = (~mi_seen) & desc_mask
+        desc_first_tr = transit[0,:,1,0][...,None]
+        
+        continued_desc_emission_flag = mi_seen & desc_mask
+        desc_cont_tr = log_dot_bigger( log_vec = desc_alpha[None,...],
+                                       log_mat = transit[...,0,0][None,...,None])[0,...]
+        desc_tr = ( desc_cont_tr * continued_desc_emission_flag +
+                    desc_first_tr * first_desc_emission_flag )
         
         # things to remember are:
         #   alpha: for forward algo
         #   mi_seen: used to remember if <s> -> emit has been used yet
         #   (there could be gaps in between <s> and first emission)
         init_desc_alpha = init_desc_e + init_desc_tr
-        mi_seen = desc_mask
         del init_desc_e, init_desc_tr, desc_mask, curr_state
         
         init_dict = {'joint_alpha': init_joint_alpha,
                      'anc_alpha': init_anc_alpha,
                      'desc_alpha': init_desc_alpha,
-                     'md_seen': md_seen,
-                     'mi_seen': mi_seen}
+                     'md_seen': first_anc_emission_flag,
+                     'mi_seen': first_desc_emission_flag}
         
         
         ######################################################
