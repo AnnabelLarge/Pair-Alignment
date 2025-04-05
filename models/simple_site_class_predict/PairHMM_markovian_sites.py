@@ -291,6 +291,10 @@ class MarkovPairHMM(ModuleBase):
         marginal_transit = out['all_transit_matrices']['marginal'] 
         del out
         
+        C = logprob_emit_at_indel.shape[0]
+        
+        anc_alpha = jnp.zeros( (C, B) )
+        desc_alpha = jnp.zeros( (C, B) )
         md_seen = jnp.zeros( B, ).astype(bool)
         mi_seen = jnp.zeros( B, ).astype(bool)
         ######################################################
