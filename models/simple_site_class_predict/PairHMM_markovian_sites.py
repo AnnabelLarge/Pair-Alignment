@@ -369,8 +369,8 @@ class MarkovPairHMM(ModuleBase):
         continued_desc_emission_flag = mi_seen & desc_mask
         desc_cont_tr = log_dot_bigger( log_vec = desc_alpha[None,...],
                                        log_mat = marginal_transit[...,0,0][None,...,None])[0,...]
-        desc_tr = ( desc_cont_tr * continued_desc_emission_flag +
-                    desc_first_tr * first_desc_emission_flag )
+        init_desc_tr = ( desc_cont_tr * continued_desc_emission_flag +
+                         desc_first_tr * first_desc_emission_flag )
         
         # things to remember are:
         #   alpha: for forward algo
@@ -428,7 +428,6 @@ class MarkovPairHMM(ModuleBase):
             continued_anc_emission_flag = prev_md_seen & anc_mask
             first_desc_emission_flag = (~prev_mi_seen) & desc_mask
             continued_desc_emission_flag = (prev_mi_seen) & desc_mask
-            
             
             ### transition probabilities
             def main_body(joint_carry, anc_carry, desc_carry):
@@ -502,12 +501,11 @@ class MarkovPairHMM(ModuleBase):
                                                    end_out[2] ),
                                         prev_desc_alpha )
             
-            
             out_dict = { 'joint_alpha': new_joint_alpha,
                          'anc_alpha': new_anc_alpha,
                          'desc_alpha': new_desc_alpha,
-                         'md_seen': (first_anc_emission_flag + md_seen).astype(bool),
-                         'mi_seen': (first_desc_emission_flag + mi_seen).astype(bool) }
+                         'md_seen': (first_anc_emission_flag + prev_md_seen).astype(bool),
+                         'mi_seen': (first_desc_emission_flag + prev_mi_seen).astype(bool) }
             
             return (out_dict, None)
     
