@@ -273,6 +273,7 @@ class MarkovPairHMM(ModuleBase):
         
         Calculate joint and sequence marginals in one jax.lax.scan operation
         """
+        B = aligned_inputs.shape[0]
         L_align = aligned_inputs.shape[1]
         
         # get lengths; subtract two to remove <bos> and <eos>
@@ -334,11 +335,11 @@ class MarkovPairHMM(ModuleBase):
         # transition probability is the same for all C_prev)
         # init_anc_tr = marginal_transit[0,:,1,0][...,None] * anc_mask
         first_anc_emission_flag = (~md_seen) & anc_mask
-        anc_first_tr = transit[0,:,1,0][...,None]
+        anc_first_tr = marginal_transit[0,:,1,0][...,None]
         
         continued_anc_emission_flag = md_seen & anc_mask
         anc_cont_tr = log_dot_bigger( log_vec = anc_alpha[None,...],
-                                      log_mat = transit[...,0,0][None,...,None])[0,...]
+                                      log_mat = marginal_transit[...,0,0][None,...,None])[0,...]
         init_anc_tr = ( anc_cont_tr * continued_anc_emission_flag +
                         anc_first_tr * first_anc_emission_flag )
         
@@ -359,11 +360,11 @@ class MarkovPairHMM(ModuleBase):
         # transitions
         # init_desc_tr = marginal_transit[0,:,1,0][...,None] * desc_mask
         first_desc_emission_flag = (~mi_seen) & desc_mask
-        desc_first_tr = transit[0,:,1,0][...,None]
+        desc_first_tr = marginal_transit[0,:,1,0][...,None]
         
         continued_desc_emission_flag = mi_seen & desc_mask
         desc_cont_tr = log_dot_bigger( log_vec = desc_alpha[None,...],
-                                       log_mat = transit[...,0,0][None,...,None])[0,...]
+                                       log_mat = marginal_transit[...,0,0][None,...,None])[0,...]
         desc_tr = ( desc_cont_tr * continued_desc_emission_flag +
                     desc_first_tr * first_desc_emission_flag )
         
