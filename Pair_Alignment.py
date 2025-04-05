@@ -139,8 +139,69 @@ def main():
         eval_fn( args, 
                  dload_lst, 
                  training_argparse )
-
+    
+    
+    elif args.task == 'batched_eval':
+        ### read argparse from first config file
+        file_lst = [file for file in os.listdir(args.configs) if not file.startswith('.')
+                    and file.endswith('.json')]
+        assert len(file_lst) > 0, f'{args.configs} is empty!'
         
+        
+        ### get dataloader and functions from first config file
+        first_config_file = file_lst[0]
+        first_args = read_config_file(f'{args.configs}/{first_config_file}')
+        
+        # find and read training argparse
+        first_training_argparse_filename = (f'{os.getcwd()}/'+
+                                            f'{first_args.training_wkdir}/'+
+                                            f'model_ckpts/'+
+                                            f'TRAINING_ARGPARSE.pkl')
+        
+        with open(first_training_argparse_filename,'rb') as g:
+            first_training_argparse = pickle.load(g)
+        
+        pred_model_type = first_training_argparse.pred_model_type
+        
+        # import correct wrappers, dataloader initializers
+        if pred_model_type == 'pairhmm_indp_sites':
+            from cli.eval_pairhmm_indp_sites import eval_pairhmm_indp_sites as eval_fn
+            from dloaders.init_counts_dset import init_counts_dset as init_dataloaders
+
+        elif pred_model_type == 'pairhmm_markovian_sites':
+            from cli.eval_pairhmm_markovian_sites import eval_pairhmm_markovian_sites as eval_fn
+            from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
+
+        # load data
+        dload_lst_for_all = init_dataloaders( first_args, 
+                                             'eval',
+                                             first_training_argparse )
+        
+        del first_training_argparse, first_args
+        
+        
+        ### with this dload_lst, train using ALL config files
+        for file in file_lst:
+            # read argparse
+            assert file.endswith('.json'), print("input is one JSON file")
+            print(f'EVALUATING WITH: {args.configs}/{file}')
+            args = read_config_file(f'{args.configs}/{file}')
+            
+            # find and read training argparse
+            training_argparse_filename = (f'{os.getcwd()}/'+
+                                          f'{args.training_wkdir}/'+
+                                          f'model_ckpts/'+
+                                          f'TRAINING_ARGPARSE.pkl')
+            
+            with open(training_argparse_filename,'rb') as g:
+                training_argparse = pickle.load(g)
+            
+            eval_fn( args, 
+                     dload_lst_for_all, 
+                     training_argparse )
+            
+            del args, training_argparse
+            
     
 if __name__ == '__main__':
     main()
