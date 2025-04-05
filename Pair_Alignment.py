@@ -184,8 +184,8 @@ def main():
         for file in file_lst:
             # read argparse
             assert file.endswith('.json'), print("input is one JSON file")
+            this_run_args = read_config_file(f'{args.configs}/{file}')
             print(f'EVALUATING WITH: {args.configs}/{file}')
-            args = read_config_file(f'{args.configs}/{file}')
             
             # find and read training argparse
             training_argparse_filename = (f'{os.getcwd()}/'+
@@ -196,11 +196,11 @@ def main():
             with open(training_argparse_filename,'rb') as g:
                 training_argparse = pickle.load(g)
             
-            eval_fn( args, 
+            eval_fn( this_run_args, 
                      dload_lst_for_all, 
                      training_argparse )
             
-            del args, training_argparse
+            del this_run_args, training_argparse
             
     
 if __name__ == '__main__':
