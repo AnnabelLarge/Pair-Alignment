@@ -30,7 +30,8 @@ def main():
     
     ### which program do you want to run?
     valid_tasks = ['train',
-                   'eval']
+                   'eval',
+                   'batched_eval']
     
     parser.add_argument('-task',
                       type=str,
@@ -189,7 +190,7 @@ def main():
             
             # find and read training argparse
             training_argparse_filename = (f'{os.getcwd()}/'+
-                                          f'{args.training_wkdir}/'+
+                                          f'{this_run_args.training_wkdir}/'+
                                           f'model_ckpts/'+
                                           f'TRAINING_ARGPARSE.pkl')
             
