@@ -567,7 +567,6 @@ class IndpPairHMMFitBoth(ModuleBase):
                                           ins_emit_score[None,:] +
                                           del_emit_score[None,:] +
                                           joint_transit_score)
-        # joint_logprob_perSamp_perTime = match_emit_score
         
         # marginalize over times; (B,)
         if t_array.shape[0] > 1:
