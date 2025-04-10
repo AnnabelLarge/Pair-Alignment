@@ -303,19 +303,21 @@ class IndpPairHMMFitBoth(ModuleBase):
         out = self._get_scoring_matrices(t_array=t_array,
                                         sow_intermediates=False)
         
-        # normalized rate matrix
-        normalized_rate_matrix = out['normalized_rate_matrix']
-        
-        with open(f'{out_folder}/normalized_rate_matrix.npy', 'wb') as g:
-            np.save(g, normalized_rate_matrix)
-        
-        np.savetxt( f'{out_folder}/ASCII_normalized_rate_matrix.tsv', 
-                    np.array(normalized_rate_matrix), 
-                    fmt = '%.4f',
-                    delimiter= '\t' )
-        
-        del normalized_rate_matrix, g
-        
+        rate_mat_times_rho_per_class = out['rate_mat_times_rho_per_class']
+        for c in range(rate_mat_times_rho_per_class.shape[0]):
+            mat_to_save = rate_mat_times_rho_per_class[c,...]
+            
+            with open(f'{out_folder}/class-{c}_rate_matrix_times_rho.npy', 'wb') as g:
+                np.save(g, mat_to_save)
+            
+            np.savetxt( f'{out_folder}/ASCII_class-{c}_rate_matrix_times_rho.tsv', 
+                        np.array(mat_to_save), 
+                        fmt = '%.4f',
+                        delimiter= '\t' )
+            
+            del mat_to_save, g
+            
+
         # matrix that you apply expm() to
         to_expm = np.squeeze( out['to_expm'] )
         
@@ -377,10 +379,10 @@ class IndpPairHMMFitBoth(ModuleBase):
         
         ### emissions
         # exchangeabilities
-        if 'exchangeabilities_logits' in dir(self.rate_matrix_module):
+        if 'exchangeabilities_logits_vec' in dir(self.rate_matrix_module):
             exchange_min_val = self.rate_matrix_module.exchange_min_val
             exchange_max_val = self.rate_matrix_module.exchange_max_val
-            exch_logits = self.rate_matrix_module.exchangeabilities_logits
+            exch_logits = self.rate_matrix_module.exchangeabilities_logits_vec
             exchangeabilities = bounded_sigmoid(x = exch_logits, 
                                                 min_val = exchange_min_val,
                                                 max_val = exchange_max_val)
@@ -520,7 +522,7 @@ class IndpPairHMMFitBoth(ModuleBase):
         out_dict = {'logprob_emit_at_indel': logprob_emit_at_indel,
                     'joint_logprob_emit_at_match': joint_logprob_emit_at_match,
                     'cond_logprob_emit_at_match': cond_prob_emit_at_match_per_class,
-                    'normalized_rate_matrix': rate_mat_times_rho_per_class[0,...],
+                    'rate_mat_times_rho_per_class': rate_mat_times_rho_per_class,
                     'to_expm': to_expm,
                     'all_transit_matrices': all_transit_matrices}
         

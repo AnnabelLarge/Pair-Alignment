@@ -160,6 +160,10 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     # note: if you want to use a different time per sample, will
     #  have to change this jit compilation
     t_array = test_dset.return_time_array()
+    print('Using times:')
+    print(t_array)
+    print()
+    
     parted_train_fn = partial( train_one_batch,
                                indel_model_type = args.pred_config['indel_model_type'],
                                t_array = t_array, 
