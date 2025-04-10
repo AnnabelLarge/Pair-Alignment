@@ -602,7 +602,7 @@ class IndpPairHMMFitBoth(ModuleBase):
                                t_array):
         # logP(t_k) = exponential distribution
         logP_time = ( jnp.log(exponential_dist_param) - 
-                      jnp.log(exponential_dist_param) * t_array )
+                      (exponential_dist_param * t_array) )
         log_t_grid = jnp.log( t_array[1:] - t_array[:-1] )
         
         # kind of a hack, but repeat the last time array value

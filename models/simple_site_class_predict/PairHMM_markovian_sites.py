@@ -814,15 +814,15 @@ class MarkovPairHMM(ModuleBase):
                                t_array):
         # logP(t_k) = exponential distribution
         logP_time = ( jnp.log(exponential_dist_param) - 
-                      jnp.log(exponential_dist_param) * t_array )
+                      (exponential_dist_param * t_array) )
         log_t_grid = jnp.log( t_array[1:] - t_array[:-1] )
         
         # kind of a hack, but repeat the last time array value
-        log_t_grid = jnp.concatenate( [log_t_grid, log_t_grid[-1] ], axis=0)
+        log_t_grid = jnp.concatenate( [log_t_grid, log_t_grid[-1][None] ], axis=0)
         
         logP_perSamp_perTime_withConst = ( logprob_perSamp_perTime +
-                                           logP_time +
-                                           log_t_grid )
+                                           logP_time[:,None] +
+                                           log_t_grid[:,None] )
         
         logP_perSamp_raw = logsumexp(logP_perSamp_perTime_withConst, axis=0)
         
