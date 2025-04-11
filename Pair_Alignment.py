@@ -31,7 +31,9 @@ def main():
     ### which program do you want to run?
     valid_tasks = ['train',
                    'eval',
-                   'batched_eval']
+                   'batched_train',
+                   'batched_eval',
+                   'label_class_post']
     
     parser.add_argument('-task',
                       type=str,
@@ -44,18 +46,18 @@ def main():
                       type = str,
                       help='Load configs from file or folder of files, in json format.')
     
-    # only when resuming training
-    parser.add_argument(f'-training_wkdir',
-                      type = str,
-                      help = 'training working directory to resume from')
+    # # OLD OPTION: needed to resuming training
+    # parser.add_argument(f'-training_wkdir',
+    #                   type = str,
+    #                   help = 'training working directory to resume from')
     
     # parse the arguments
     args = parser.parse_args()
     
     
     # ### UNCOMMENT TO RUN IN SPYDER IDE
-    # args.task = 'eval'
-    # args.configs = 'RESCORE_markov_1-site_test.json'
+    # args.task = 'train'
+    # args.configs = 'DRY-RUN_indp_control.json'
     
     
     ### helper function to open a single config file and extract additional arguments
@@ -101,6 +103,58 @@ def main():
         
         train_fn( args, 
                   dload_lst )
+    
+    elif args.task == 'batched_train':
+        ### read argparse from first config file
+        file_lst = [file for file in os.listdir(args.configs) if not file.startswith('.')
+                    and file.endswith('.json')]
+        assert len(file_lst) > 0, f'{args.configs} is empty!'
+        
+        
+        ### get dataloader and functions from first config file
+        first_config_file = file_lst[0]
+        print(f'DATALOADER CONSTRUCTED FROM: {args.configs}/{first_config_file}')
+        print("WARNING: make sure you want this dataloader for ALL experiments!!!")
+        print("WARNING: make sure you want this dataloader for ALL experiments!!!")
+        print("WARNING: make sure you want this dataloader for ALL experiments!!!")
+        first_args = read_config_file(f'{args.configs}/{first_config_file}')
+        
+        # import correct wrappers, dataloader initializers
+        if first_args.pred_model_type == 'pairhmm_indp_sites':
+            from cli.train_pairhmm_indp_sites import train_pairhmm_indp_sites as train_fn
+            from dloaders.init_counts_dset import init_counts_dset as init_dataloaders
+
+        elif first_args.pred_model_type == 'pairhmm_markovian_sites':
+            from cli.train_pairhmm_markovian_sites import train_pairhmm_markovian_sites as train_fn
+            from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
+
+        elif first_args.pred_model_type == 'neural_hmm':
+            from cli.train_neural_hmm import train_neural_hmm as train_fn
+            from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
+
+        elif first_args.pred_model_type == 'feedforward':
+            from cli.train_feedforward import train_feedforward as train_fn
+            from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
+
+        # load data
+        dload_lst_for_all = init_dataloaders( first_args, 
+                                             'train',
+                                             training_argparse = None  )
+        
+        del first_training_argparse, first_args
+        
+        
+        ### with this dload_lst, train using ALL config files
+        for file in file_lst:
+            # read argparse
+            assert file.endswith('.json'), print("input is one JSON file")
+            this_run_args = read_config_file(f'{args.configs}/{file}')
+            print(f'TRAINING WITH: {args.configs}/{file}')
+            
+            train_fn( this_run_args, 
+                      dload_lst_for_all )
+            
+            del this_run_args
       
     
     ###########################################################################
@@ -132,7 +186,7 @@ def main():
             from cli.eval_pairhmm_markovian_sites import eval_pairhmm_markovian_sites as eval_fn
             from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
 
-        # train model
+        # evaluate model
         dload_lst = init_dataloaders( args, 
                                       'eval',
                                       training_argparse )
@@ -151,6 +205,10 @@ def main():
         
         ### get dataloader and functions from first config file
         first_config_file = file_lst[0]
+        print(f'DATALOADER CONSTRUCTED FROM: {args.configs}/{first_config_file}')
+        print("WARNING: make sure you want this dataloader for ALL experiments!!!")
+        print("WARNING: make sure you want this dataloader for ALL experiments!!!")
+        print("WARNING: make sure you want this dataloader for ALL experiments!!!")
         first_args = read_config_file(f'{args.configs}/{first_config_file}')
         
         # find and read training argparse
@@ -202,6 +260,40 @@ def main():
                      training_argparse )
             
             del this_run_args, training_argparse
+    
+    
+    ###########################################################################
+    ### EVAL: label class posterior marginals for markovian class sites   #####
+    ###########################################################################
+    elif task == 'label_class_post':
+        ### read argparse
+        assert args.configs.endswith('.json'), print("input is one JSON file")
+        print(f'EVALUATING WITH: {args.configs}')
+        args = read_config_file(args.configs)
+        
+        
+        ### find and read training argparse
+        model_ckpts_dir = f'{os.getcwd()}/{args.training_wkdir}/model_ckpts'
+        training_argparse_filename = model_ckpts_dir + '/' + 'TRAINING_ARGPARSE.pkl'
+        
+        with open(training_argparse_filename,'rb') as g:
+            training_argparse = pickle.load(g)
+        
+        pred_model_type = training_argparse.pred_model_type
+        
+        
+        ### import correct wrappers, dataloader initializers
+        from cli.class_posteriors_pairhmm_markovian_sites import class_posteriors_pairhmm_markovian_sites as labeling_fn
+        from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
+
+        # evaluate
+        dload_lst = init_dataloaders( args, 
+                                      'eval',
+                                      training_argparse )
+        
+        labeling_fn( args, 
+                     dload_lst, 
+                     training_argparse )
             
     
 if __name__ == '__main__':

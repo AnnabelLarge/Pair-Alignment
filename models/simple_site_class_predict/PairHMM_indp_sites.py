@@ -7,9 +7,13 @@ Created on Wed Feb  5 04:33:00 2025
 
 models here:
 ============
-'IndpPairHMMFitBoth',
- 'IndpPairHMMFitRateMult',
- 'IndpPairHMMLoadAll',
+'IndpPairHMMFitBoth', 
+'IndpPairHMMLoadAll',
+
+
+not used:
+=========
+'IndpPairHMMFitRateMult',
 
 
 main methods for all models:
@@ -39,7 +43,6 @@ from models.simple_site_class_predict.emission_models import (LogEqulVecFromCoun
                                                               LogEqulVecPerClass,
                                                               LogEqulVecFromFile,
                                                               RateMatFromFile,
-                                                              RateMatFitRateMult,
                                                               RateMatFitBoth,
                                                               SiteClassLogprobs,
                                                               SiteClassLogprobsFromFile)
@@ -300,6 +303,17 @@ class IndpPairHMMFitBoth(ModuleBase):
     def write_params(self,
                      t_array,
                      out_folder: str):
+        with open(f'{out_folder}/EXPERIMENTAL_OPTIONS.tsv','w') as g:
+            flag = self.rate_matrix_module.normalize_first_class
+            g.write(f'normalize_first_class: {flag}\n')
+            
+            flag = self.rate_matrix_module.rate_mult_use_sigmoid
+            g.write(f'rate_mult_use_sigmoid: {flag}\n')
+            
+            flag = self.rate_matrix_module.exch_use_sigmoid
+            g.write(f'exch_use_sigmoid: {flag}\n')
+        
+        
         out = self._get_scoring_matrices(t_array=t_array,
                                         sow_intermediates=False)
         
@@ -380,12 +394,8 @@ class IndpPairHMMFitBoth(ModuleBase):
         ### emissions
         # exchangeabilities
         if 'exchangeabilities_logits_vec' in dir(self.rate_matrix_module):
-            exchange_min_val = self.rate_matrix_module.exchange_min_val
-            exchange_max_val = self.rate_matrix_module.exchange_max_val
             exch_logits = self.rate_matrix_module.exchangeabilities_logits_vec
-            exchangeabilities = bounded_sigmoid(x = exch_logits, 
-                                                min_val = exchange_min_val,
-                                                max_val = exchange_max_val)
+            exchangeabilities = self.rate_matrix_module.exchange_activation( exch_logits )
             
             np.savetxt( f'{out_folder}/PARAMS_exchangeabilities.tsv', 
                         np.array(exchangeabilities), 
@@ -397,13 +407,8 @@ class IndpPairHMMFitBoth(ModuleBase):
                 
         # emissions: rate multipliers
         if 'rate_mult_logits' in dir(self.rate_matrix_module):
-            rate_mult_min_val = self.rate_matrix_module.rate_mult_min_val
-            rate_mult_max_val = self.rate_matrix_module.rate_mult_max_val
             rate_mult_logits = self.rate_matrix_module.rate_mult_logits
-                
-            rate_mult = bounded_sigmoid(x = rate_mult_logits, 
-                                        min_val = rate_mult_min_val,
-                                        max_val = rate_mult_max_val)
+            rate_mult = self.rate_matrix_module.rate_multiplier_activation( rate_mult_logits )
 
             with open(f'{out_folder}/PARAMS_rate_multipliers.txt','w') as g:
                 [g.write(f'{elem.item()}\n') for elem in rate_mult]
@@ -615,50 +620,6 @@ class IndpPairHMMFitBoth(ModuleBase):
         logP_perSamp_raw = logsumexp(logP_perSamp_perTime_withConst, axis=0)
         
         return logP_perSamp_raw
-    
-    
-class IndpPairHMMFitRateMult(IndpPairHMMFitBoth):
-    """
-    same as IndpPairHMMFitBoth, but now keep LG08 exchangeabilites
-    
-    inherits everything except setup
-    """
-    config: dict
-    name: str
-    
-    def setup(self):
-        num_emit_site_classes = self.config['num_emit_site_classes']
-        self.indel_model_type = self.config['indel_model_type']
-        self.norm_loss_by = self.config['norm_loss_by']
-        self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
-        
-        ### how to score emissions from indel sites
-        if num_emit_site_classes == 1:
-            self.indel_prob_module = LogEqulVecFromCounts(config = self.config,
-                                                       name = f'get equilibrium')
-        elif num_emit_site_classes > 1:
-            self.indel_prob_module = LogEqulVecPerClass(config = self.config,
-                                                     name = f'get equilibrium')
-        
-        
-        ### rate matrix to score emissions from match sites
-        self.rate_matrix_module = RateMatFitRateMult(config = self.config,
-                                                 name = f'get rate matrix')
-        
-        
-        ### now need probabilities for rate classes themselves
-        self.site_class_probability_module = SiteClassLogprobs(config = self.config,
-                                                  name = f'get site class probabilities')
-        
-        
-        ### TKF91 or TKF92
-        if self.indel_model_type == 'tkf91':
-            self.transitions_module = TKF91TransitionLogprobs(config = self.config,
-                                                     name = f'tkf91 indel model')
-        
-        elif self.indel_model_type == 'tkf92':
-            self.transitions_module = TKF92TransitionLogprobs(config = self.config,
-                                                     name = f'tkf92 indel model')
 
 
 class IndpPairHMMLoadAll(IndpPairHMMFitBoth):
@@ -709,3 +670,53 @@ class IndpPairHMMLoadAll(IndpPairHMMFitBoth):
     def write_params(self, **kwargs):
         pass
 
+
+
+
+
+
+
+    
+    
+# class IndpPairHMMFitRateMult(IndpPairHMMFitBoth):
+#     """
+#     same as IndpPairHMMFitBoth, but now keep LG08 exchangeabilites
+    
+#     inherits everything except setup
+#     """
+#     config: dict
+#     name: str
+    
+#     def setup(self):
+#         num_emit_site_classes = self.config['num_emit_site_classes']
+#         self.indel_model_type = self.config['indel_model_type']
+#         self.norm_loss_by = self.config['norm_loss_by']
+#         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
+        
+#         ### how to score emissions from indel sites
+#         if num_emit_site_classes == 1:
+#             self.indel_prob_module = LogEqulVecFromCounts(config = self.config,
+#                                                        name = f'get equilibrium')
+#         elif num_emit_site_classes > 1:
+#             self.indel_prob_module = LogEqulVecPerClass(config = self.config,
+#                                                      name = f'get equilibrium')
+        
+        
+#         ### rate matrix to score emissions from match sites
+#         self.rate_matrix_module = RateMatFitRateMult(config = self.config,
+#                                                  name = f'get rate matrix')
+        
+        
+#         ### now need probabilities for rate classes themselves
+#         self.site_class_probability_module = SiteClassLogprobs(config = self.config,
+#                                                   name = f'get site class probabilities')
+        
+        
+#         ### TKF91 or TKF92
+#         if self.indel_model_type == 'tkf91':
+#             self.transitions_module = TKF91TransitionLogprobs(config = self.config,
+#                                                      name = f'tkf91 indel model')
+        
+#         elif self.indel_model_type == 'tkf92':
+#             self.transitions_module = TKF92TransitionLogprobs(config = self.config,
+#                                                      name = f'tkf92 indel model')

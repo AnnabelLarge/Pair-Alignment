@@ -21,17 +21,23 @@ modules:
 'HKY85FromFile',
 'PerClassRateMat',
 'RateMatFitBoth',
-'RateMatFitRateMult',
 'RateMatFromFile',
 
 'SiteClassLogprobs',
-'SiteClassLogprobsFromFile',
+'SiteClassLogprobsFromFile'
+
+
+not in use:
+============
+'RateMatFitRateMult',
 
 """
 # jumping jax and leaping flax
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
+
+from functools import partial
 
 from models.model_utils.BaseClasses import ModuleBase
 from utils.pairhmm_helpers import (bounded_sigmoid,
@@ -267,117 +273,6 @@ class RateMatFromFile(ModuleBase):
         return rate_mat_times_rho
 
 
-class RateMatFitRateMult(RateMatFromFile):
-    """
-    return (rho * Q), to be directly used in matrix exponential
-
-    load exchangeabilities from files; exchangeabilties could either be a 
-      vector of values (which will be transformed into a square matrix), 
-      or the final square matrix
-    
-    rate matrix is normalized to one substitution, THEN multiplied by a scalar 
-      multiple; first hidden site class has rate of 1, then subsequent ones 
-      are fit with gradient descent (rho = [1, rate2, rate3, ...])
-    
-    return the normalized rate matrix, as well as the rate matrix after
-      multiplying by rate multipliers
-     
-    out = (rate_mat_times_rho, rate_mat)
-    
-    params: 
-        - rate_mult_logits( C, )
-    
-    valid ranges:
-        - rate_mult: (0, inf); bound values with rate_mult_range
-    
-    inherit the following from RateMatFromFile:
-        - _upper_tri_vector_to_sym_matrix
-        - _prepare_rate_matrix
-        
-    
-    tl;dr:
-    =======
-    required in pred_config:
-        - num_emit_site_classes: number of classes
-        - rate_mult_range: range for bounded sigmoid transformation of 
-          rate multiplier logits 
-        - filenames: dictionary of files to load
-          > pred_config["filenames"]["exch"]
-    
-    __call__ returns:
-        - rate matrix times rate multipliers: (C_curr, |\omega_Y|, |\omega_X|)
-    """
-    config: dict
-    name: str
-    
-    def setup(self):
-        self.num_emit_site_classes = self.config['num_emit_site_classes']
-        exchangeabilities_file = self.config['filenames']['exch']
-        
-        out  = self.config.get( 'rate_mult_range',
-                               (0.01, 10) )
-        self.rate_mult_min_val, self.rate_mult_max_val = out
-        del out
-        
-        
-        ### EXCHANGEABILITIES: (A_from, A_to)
-        with open(exchangeabilities_file,'rb') as f:
-            exch_from_file = jnp.load(f)
-        
-        # if providing a vector, need to prepare a square exchangeabilities matrix
-        if len(exch_from_file.shape) == 2:
-            self.exchangeabilities = self._upper_tri_vector_to_sym_matrix( exch_from_file )
-        
-        # otherwise, use the matrix as-is
-        elif len(exch_from_file.shape) == 1:
-            self.exchangeabilities = exch_from_file
-        
-
-        ### RATE MULTIPLIERS: (c-1,)
-        if self.num_emit_site_classes > 1:
-            # first class automatically has rate multiplier of one
-            self.rate_mult_logits = self.param('rate_multipliers',
-                                               nn.initializers.normal(),
-                                               (self.num_emit_site_classes-1,),
-                                               jnp.float32)
-        
-    def __call__(self,
-                 logprob_equl,
-                 sow_intermediates: bool,
-                 *args,
-                 **kwargs):
-        # (C, alph)
-        equl = jnp.exp(logprob_equl)
-        
-        # rate multiplier
-        if self.num_emit_site_classes > 1:
-            subsequent_rate_multipliers = bounded_sigmoid(self.rate_mult_logits,
-                                                          min_val = self.rate_mult_min_val,
-                                                          max_val = self.rate_mult_max_val)
-            
-            if sow_intermediates:
-                for i in range(subsequent_rate_multipliers.shape[0]):
-                    val_to_write = subsequent_rate_multipliers[i]
-                    lab = f'{self.name}/rate multiplier for class {i+1}'
-                    self.sow_histograms_scalars(mat= val_to_write, 
-                                                label=lab, 
-                                                which='scalars')
-                    del lab
-            
-            rate_multiplier = jnp.concatenate( [jnp.array([1]), 
-                                                subsequent_rate_multipliers],
-                                               axis=0 )
-
-        else:
-            rate_multiplier = jnp.array([1])
-        
-        out = self._prepare_rate_matrix(exchangeabilities = self.exchangeabilities,
-                                   equilibrium_distributions = equl,
-                                   sow_intermediates = sow_intermediates,
-                                   rate_multiplier = rate_multiplier)
-        return out
-
-
 class RateMatFitBoth(RateMatFromFile):
     """
     return (rho * Q), to be directly used in matrix exponential
@@ -419,38 +314,83 @@ class RateMatFitBoth(RateMatFromFile):
     name: str
     
     def setup(self):
+        ############################
+        ### experimental options   #
+        ############################
+        exp_dict = self.config['experimental']
+        self.normalize_first_class = exp_dict['normalize_first_class']
+        self.rate_mult_use_sigmoid = exp_dict['rate_mult_use_sigmoid']
+        self.exch_use_sigmoid = exp_dict['exch_use_sigmoid']
+        
+        
+        ########################
+        ### standard options   #
+        ########################
         self.num_emit_site_classes = self.config['num_emit_site_classes']
         exchangeabilities_file = self.config['filenames']['exch']
         
-        out  = self.config.get( 'rate_mult_range',
-                               (0.01, 10) )
-        self.rate_mult_min_val, self.rate_mult_max_val = out
-        del out
-
-        out  = self.config.get( 'exchange_range',
-                               (1e-4, 10) )
-        self.exchange_min_val, self.exchange_max_val = out
-        del out
+        
+        ########################
+        ### RATE MULTIPLIERS   #
+        ########################
+        # activation
+        if self.rate_mult_use_sigmoid:
+            out  = self.config.get( 'rate_mult_range',
+                                   (0.01, 10) )
+            self.rate_mult_min_val, self.rate_mult_max_val = out
+            del out
+            
+            self.rate_multiplier_activation = partial(bounded_sigmoid,
+                                                      min_val = self.rate_mult_min_val,
+                                                      max_val = self.rate_mult_max_val)
+        
+        elif not self.rate_mult_use_sigmoid:
+            self.rate_multiplier_activation = jax.nn.softplus
         
         
-        ### EXCHANGEABILITIES AS A VECTOR
+        # initializers
+        if self.num_emit_site_classes > 1:
+            if self.normalize_first_class:
+                num_params = self.num_emit_site_classes-1
+                
+            elif not self.normalize_first_class:
+                num_params = self.num_emit_site_classes
+                
+            self.rate_mult_logits = self.param('rate_multipliers',
+                                               nn.initializers.normal(),
+                                               (num_params,),
+                                               jnp.float32)
+    
+            
+        #####################################
+        ### EXCHANGEABILITIES AS A VECTOR   #
+        #####################################
         with open(exchangeabilities_file,'rb') as f:
             vec = jnp.load(f)
-        transformed_vec = bounded_sigmoid_inverse(vec, 
-                                                  min_val = self.exchange_min_val,
-                                                  max_val = self.exchange_max_val)
+            
+        if self.exch_use_sigmoid:
+            out  = self.config.get( 'exchange_range',
+                                   (1e-4, 10) )
+            self.exchange_min_val, self.exchange_max_val = out
+            del out
+            
+            transformed_vec = bounded_sigmoid_inverse(vec, 
+                                                      min_val = self.exchange_min_val,
+                                                      max_val = self.exchange_max_val)
+            
+            self.exchange_activation = partial(bounded_sigmoid,
+                                               min_val = self.exchange_min_val,
+                                               max_val = self.exchange_max_val)
+        
+        elif not self.exch_use_sigmoid:
+            transformed_vec = jnp.log(jnp.exp(vec) - 1.)
+            self.exchange_activation = jax.nn.softplus
+        
         self.exchangeabilities_logits_vec = self.param("exchangeabilities", 
                                                        lambda rng, shape: transformed_vec,
                                                        transformed_vec.shape )
         
         
-        ### RATE MULTIPLIERS: (c-1,)
-        if self.num_emit_site_classes > 1:
-            # first class automatically has rate multiplier of one
-            self.rate_mult_logits = self.param('rate_multipliers',
-                                               nn.initializers.normal(),
-                                               (self.num_emit_site_classes-1,),
-                                               jnp.float32)
         
     def __call__(self,
                  logprob_equl,
@@ -460,43 +400,62 @@ class RateMatFitBoth(RateMatFromFile):
         # pi; one per class
         equl = jnp.exp(logprob_equl)
         
-        # rate multiplier
+        #######################
+        ### rate multiplier   #
+        #######################
         if self.num_emit_site_classes > 1:
-            subsequent_rate_multipliers = bounded_sigmoid(self.rate_mult_logits,
-                                                          min_val = self.rate_mult_min_val,
-                                                          max_val = self.rate_mult_max_val)
             
+            ### apply activation of choice
             if sow_intermediates:
-                for i in range(subsequent_rate_multipliers.shape[0]):
-                    val_to_write = subsequent_rate_multipliers[i]
-                    lab = f'{self.name}/rate multiplier for class {i}'
+                for i in range(self.rate_mult_logits.shape[0]):
+                    val_to_write = self.rate_mult_logits[i]
+                    lab = f'{self.name}/logit BEFORE activation- rate multiplier for class {i}'
                     self.sow_histograms_scalars(mat= val_to_write, 
                                                 label=lab, 
                                                 which='scalars')
                     del lab
-                
-            rate_multiplier = jnp.concatenate( [jnp.array([1]), 
-                                                subsequent_rate_multipliers],
-                                               axis=0 )
+                    
+            learned_rate_multipliers = self.rate_multiplier_activation( self.rate_mult_logits )
+            
+            if sow_intermediates:
+                for i in range(learned_rate_multipliers.shape[0]):
+                    val_to_write = learned_rate_multipliers[i]
+                    lab = f'{self.name}/value AFTER activation- rate multiplier for class {i}'
+                    self.sow_histograms_scalars(mat= val_to_write, 
+                                                label=lab, 
+                                                which='scalars')
+                    del lab
+            
+            ### upate rate multipliers
+            if self.normalize_first_class:
+                rate_multiplier = learned_rate_multipliers
+            
+            elif not self.normalize_first_class:
+                rate_multiplier = jnp.concatenate( [jnp.array([1]), 
+                                                    learned_rate_multipliers],
+                                                   axis=0 )
                     
         else:
             rate_multiplier = jnp.array([1])
         
-        # chi; one shared all classes
+        
+        ###################################
+        ### chi; one shared all classes   #
+        ###################################
+        ### apply activation of choice
         if sow_intermediates:
             self.sow_histograms_scalars(mat= self.exchangeabilities_logits_vec, 
-                                        label= 'exchangeability_logits_before_bound_sigmoid', 
+                                        label= 'logit BEFORE activation- exchangeabilities', 
                                         which='scalars')
         
-        upper_triag_values = bounded_sigmoid( x = self.exchangeabilities_logits_vec, 
-                                              min_val = self.exchange_min_val,
-                                              max_val = self.exchange_max_val )
+        upper_triag_values = self.exchange_activation( self.exchangeabilities_logits_vec )
     
         if sow_intermediates:
             self.sow_histograms_scalars(mat = upper_triag_values, 
-                                        label = 'exchangeabilities_after_bound_sigmoid', 
+                                        label = 'value AFTER activation- exchangeabilities', 
                                         which='scalars')
-            
+        
+        ### update values
         exchangeabilities_mat = self._upper_tri_vector_to_sym_matrix( upper_triag_values )
         
         # output is (c, i, j)
@@ -817,4 +776,129 @@ class LogEqulVecFromCounts(ModuleBase):
         return self.logprob_equilibr
         
     
+    
+
+
+
+
+
+
+
+
+
+
+
+# class RateMatFitRateMult(RateMatFromFile):
+#     """
+#     return (rho * Q), to be directly used in matrix exponential
+
+#     load exchangeabilities from files; exchangeabilties could either be a 
+#       vector of values (which will be transformed into a square matrix), 
+#       or the final square matrix
+    
+#     rate matrix is normalized to one substitution, THEN multiplied by a scalar 
+#       multiple; first hidden site class has rate of 1, then subsequent ones 
+#       are fit with gradient descent (rho = [1, rate2, rate3, ...])
+    
+#     return the normalized rate matrix, as well as the rate matrix after
+#       multiplying by rate multipliers
+     
+#     out = (rate_mat_times_rho, rate_mat)
+    
+#     params: 
+#         - rate_mult_logits( C, )
+    
+#     valid ranges:
+#         - rate_mult: (0, inf); bound values with rate_mult_range
+    
+#     inherit the following from RateMatFromFile:
+#         - _upper_tri_vector_to_sym_matrix
+#         - _prepare_rate_matrix
+        
+    
+#     tl;dr:
+#     =======
+#     required in pred_config:
+#         - num_emit_site_classes: number of classes
+#         - rate_mult_range: range for bounded sigmoid transformation of 
+#           rate multiplier logits 
+#         - filenames: dictionary of files to load
+#           > pred_config["filenames"]["exch"]
+    
+#     __call__ returns:
+#         - rate matrix times rate multipliers: (C_curr, |\omega_Y|, |\omega_X|)
+#     """
+#     config: dict
+#     name: str
+    
+#     def setup(self):
+#         self.num_emit_site_classes = self.config['num_emit_site_classes']
+#         exchangeabilities_file = self.config['filenames']['exch']
+        
+#         out  = self.config.get( 'rate_mult_range',
+#                                (0.01, 10) )
+#         self.rate_mult_min_val, self.rate_mult_max_val = out
+#         del out
+        
+        
+#         ### EXCHANGEABILITIES: (A_from, A_to)
+#         with open(exchangeabilities_file,'rb') as f:
+#             exch_from_file = jnp.load(f)
+        
+#         # if providing a vector, need to prepare a square exchangeabilities matrix
+#         if len(exch_from_file.shape) == 2:
+#             self.exchangeabilities = self._upper_tri_vector_to_sym_matrix( exch_from_file )
+        
+#         # otherwise, use the matrix as-is
+#         elif len(exch_from_file.shape) == 1:
+#             self.exchangeabilities = exch_from_file
+        
+
+#         ### RATE MULTIPLIERS: (c-1,)
+#         if self.num_emit_site_classes > 1:
+#             # first class automatically has rate multiplier of one
+#             self.rate_mult_logits = self.param('rate_multipliers',
+#                                                nn.initializers.normal(),
+#                                                (self.num_emit_site_classes-1,),
+#                                                jnp.float32)
+        
+#     def __call__(self,
+#                  logprob_equl,
+#                  sow_intermediates: bool,
+#                  *args,
+#                  **kwargs):
+#         # (C, alph)
+#         equl = jnp.exp(logprob_equl)
+        
+#         # rate multiplier
+#         if self.num_emit_site_classes > 1:
+#             subsequent_rate_multipliers = bounded_sigmoid(self.rate_mult_logits,
+#                                                           min_val = self.rate_mult_min_val,
+#                                                           max_val = self.rate_mult_max_val)
+            
+#             if sow_intermediates:
+#                 for i in range(subsequent_rate_multipliers.shape[0]):
+#                     val_to_write = subsequent_rate_multipliers[i]
+#                     lab = f'{self.name}/rate multiplier for class {i+1}'
+#                     self.sow_histograms_scalars(mat= val_to_write, 
+#                                                 label=lab, 
+#                                                 which='scalars')
+#                     del lab
+            
+#             rate_multiplier = jnp.concatenate( [jnp.array([1]), 
+#                                                 subsequent_rate_multipliers],
+#                                                axis=0 )
+
+#         else:
+#             rate_multiplier = jnp.array([1])
+        
+#         out = self._prepare_rate_matrix(exchangeabilities = self.exchangeabilities,
+#                                    equilibrium_distributions = equl,
+#                                    sow_intermediates = sow_intermediates,
+#                                    rate_multiplier = rate_multiplier)
+#         return out
+
+
+
+
         

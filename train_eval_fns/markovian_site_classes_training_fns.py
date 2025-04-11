@@ -16,7 +16,6 @@ from tqdm import tqdm
 # flax, jax, and optax
 import jax
 import jax.numpy as jnp
-from jax import config
 from flax import linen as nn
 import optax
                             
@@ -250,3 +249,24 @@ def final_eval_wrapper(dataloader,
         del to_add
     
     return summary_stats
+
+
+
+
+
+def label_class_posteriors(batch, 
+                           t_array,
+                           pairhmm_trainstate,  
+                           pairhmm_instance,
+                           max_align_len,
+                           **kwargs):
+    batch_aligned_mats = batch[1]
+    clipped_aligned_mats = batch_aligned_mats[:, :max_align_len, :]
+    del batch
+    
+    out = pairhmm_trainstate.apply_fn( variables = pairhmm_trainstate.params,
+                                       aligned_inputs = clipped_aligned_mats,
+                                       t_array = t_array,
+                                       method=pairhmm_instance.get_class_posterior_marginals )
+
+    return out

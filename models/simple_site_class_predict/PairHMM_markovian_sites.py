@@ -46,14 +46,47 @@ def log_dot_bigger(log_vec, log_mat):
                      )
     return out
 
-# class DebugNansInfs:
-#     def __enter__(self):
-#         jax.config.update("jax_debug_nans", True)
-#         jax.config.update("jax_debug_infs", True)
+def _expand_dims_like(x, target):
+    return x.reshape(list(x.shape) + [1] * (target.ndim - x.ndim))
 
-#     def __exit__(self, exc_type, exc_value, traceback):
-#         jax.config.update("jax_debug_nans", False)
-#         jax.config.update("jax_debug_infs", False)
+def flip_sequences( inputs, 
+                    seq_lengths, 
+                    flip_along_axis,
+                    num_features_dims = None
+                   ):
+    """
+    this is taken from flax RNN
+    
+    https://flax.readthedocs.io/en/v0.6.10/_modules/flax/linen/recurrent.html \
+        #RNN:~:text=.ndim))-,def%20flip_sequences(,-inputs%3A%20Array
+    """
+    # Compute the indices to put the inputs in flipped order as per above example.
+    max_steps = inputs.shape[flip_along_axis]
+    
+    if seq_lengths is None:
+        # reverse inputs and return
+        inputs = jnp.flip(inputs, axis=flip_along_axis)
+        return inputs
+    
+    seq_lengths = jnp.expand_dims(seq_lengths, axis=flip_along_axis)
+    
+    # create indexes
+    idxs = jnp.arange(max_steps - 1, -1, -1) # [max_steps]
+    
+    if flip_along_axis == 0:
+        num_batch_dims = len( inputs.shape[1:-num_features_dims] )
+        idxs = jnp.reshape(idxs, [max_steps] + [1] * num_batch_dims)
+    elif flip_along_axis > 0:
+        num_batch_dims = len( inputs.shape[:flip_along_axis] )
+        idxs = jnp.reshape(idxs, [1] * num_batch_dims + [max_steps])
+    
+    idxs = (idxs + seq_lengths) % max_steps # [*batch, max_steps]
+    idxs = _expand_dims_like(idxs, target=inputs) # [*batch, max_steps, *features]
+    # Select the inputs in flipped order.
+    outputs = jnp.take_along_axis(inputs, idxs, axis=flip_along_axis)
+    
+    return outputs
+
 
     
 class MarkovPairHMM(ModuleBase):
@@ -567,12 +600,22 @@ class MarkovPairHMM(ModuleBase):
     def write_params(self,
                      t_array,
                      out_folder: str):
+        with open(f'{out_folder}/EXPERIMENTAL_OPTIONS.tsv','w') as g:
+            flag = self.rate_matrix_module.normalize_first_class
+            g.write(f'normalize_first_class: {flag}\n')
+            
+            flag = self.rate_matrix_module.rate_mult_use_sigmoid
+            g.write(f'rate_mult_use_sigmoid: {flag}\n')
+            
+            flag = self.rate_matrix_module.exch_use_sigmoid
+            g.write(f'exch_use_sigmoid: {flag}\n')
+                
         out = self._get_scoring_matrices(t_array=t_array,
                                         sow_intermediates=False)
         
-        rate_mat_times_rho_per_class = out['rate_mat_times_rho_per_class']
-        for c in range(rate_mat_times_rho_per_class.shape[0]):
-            mat_to_save = rate_mat_times_rho_per_class[c,...]
+        rate_mat_times_rho = out['rate_mat_times_rho']
+        for c in range(rate_mat_times_rho.shape[0]):
+            mat_to_save = rate_mat_times_rho[c,...]
             
             with open(f'{out_folder}/class-{c}_rate_matrix_times_rho.npy', 'wb') as g:
                 np.save(g, mat_to_save)
@@ -646,12 +689,8 @@ class MarkovPairHMM(ModuleBase):
         ### emissions
         # exchangeabilities
         if 'exchangeabilities_logits_vec' in dir(self.rate_matrix_module):
-            exchange_min_val = self.rate_matrix_module.exchange_min_val
-            exchange_max_val = self.rate_matrix_module.exchange_max_val
             exch_logits = self.rate_matrix_module.exchangeabilities_logits_vec
-            exchangeabilities = bounded_sigmoid(x = exch_logits, 
-                                                min_val = exchange_min_val,
-                                                max_val = exchange_max_val)
+            exchangeabilities = self.rate_matrix_module.exchange_activation( exch_logits )
             
             np.savetxt( f'{out_folder}/PARAMS_exchangeabilities.tsv', 
                         np.array(exchangeabilities), 
@@ -663,13 +702,8 @@ class MarkovPairHMM(ModuleBase):
                 
         # emissions: rate multipliers
         if 'rate_mult_logits' in dir(self.rate_matrix_module):
-            rate_mult_min_val = self.rate_matrix_module.rate_mult_min_val
-            rate_mult_max_val = self.rate_matrix_module.rate_mult_max_val
             rate_mult_logits = self.rate_matrix_module.rate_mult_logits
-                
-            rate_mult = bounded_sigmoid(x = rate_mult_logits, 
-                                        min_val = rate_mult_min_val,
-                                        max_val = rate_mult_max_val)
+            rate_mult = self.rate_matrix_module.rate_multiplier_activation( rate_mult_logits )
 
             with open(f'{out_folder}/PARAMS_rate_multipliers.txt','w') as g:
                 [g.write(f'{elem.item()}\n') for elem in rate_mult]
@@ -726,7 +760,281 @@ class MarkovPairHMM(ModuleBase):
                 [g.write(f'{elem}\t') for elem in mean_indel_lengths]
                 g.write('\n')
                 
+    
+    def forward_with_interms( self,
+                              aligned_inputs,
+                              logprob_emit_at_indel,
+                              joint_logprob_emit_at_match,
+                              joint_transit ):
+        ######################################################
+        ### initialize with <start> -> any (curr pos is 1)   #
+        ######################################################
+        # emissions; (T, C_curr, B)
+        init_emission_logprob = self._joint_emit_scores( aligned_inputs=aligned_inputs,
+                                                         pos=1,
+                                                         joint_logprob_emit_at_match=joint_logprob_emit_at_match,
+                                                         logprob_emit_at_indel=logprob_emit_at_indel )
+        
+        # transitions; assume there's never start -> end; (T, C_curr, B)
+        # joint_transit is (T, C_prev, C_curr, S_prev, S_curr)
+        # initial state is 4 (<start>); take the last row
+        # use C_prev=0 for start class (but it doesn't matter, because the 
+        # transition probability is the same for all C_prev)
+        curr_state = aligned_inputs[:, 1, 2] # B
+        start_any = joint_transit[:, 0, :, -1, :]
+        init_trans_logprob = start_any[...,curr_state-1]
+        
+        # carry value; (T, C_curr, B)
+        init_alpha = init_emission_logprob + init_trans_logprob
+        del init_emission_logprob, curr_state, init_trans_logprob
+        
+        
+        ######################################################
+        ### scan down length dimension to end of alignment   #
+        ######################################################
+        def scan_fn(prev_alpha, pos):
+            ### unpack
+            anc_toks =   aligned_inputs[:,   pos, 0]
+            desc_toks =  aligned_inputs[:,   pos, 1]
+
+            prev_state = aligned_inputs[:, pos-1, 2]
+            curr_state = aligned_inputs[:,   pos, 2]
+            curr_state = jnp.where( curr_state!=5, curr_state, 4 )
+            
+            
+            ### emissions
+            e = self._joint_emit_scores( aligned_inputs=aligned_inputs,
+                                         pos=pos,
+                                         joint_logprob_emit_at_match=joint_logprob_emit_at_match,
+                                         logprob_emit_at_indel=logprob_emit_at_indel )
+            
+            
+            ### transition probabilities
+            def main_body(in_carry):
+                # like dot product with C_prev, C_curr
+                tr_per_class = joint_transit[..., prev_state-1, curr_state-1]                
+                return e + logsumexp(in_carry[:, :, None, :] + tr_per_class, axis=1)
+            
+            def end(in_carry):
+                # if end, then curr_state = -1 (<end>)
+                tr_per_class = joint_transit[..., -1, prev_state-1, -1]
+                return tr_per_class + in_carry
+            
+            
+            ### alpha update, in log space ONLY if curr_state is not pad
+            new_alpha = jnp.where(curr_state != 0,
+                                  jnp.where( curr_state != 4,
+                                              main_body(prev_alpha),
+                                              end(prev_alpha) ),
+                                  prev_alpha )
+            
+            return (new_alpha, new_alpha)
+        
+        ### end scan function definition, use scan
+        idx_arr = jnp.array( [ i for i in range(2, L_align) ] )
+        _, stacked_outputs = jax.lax.scan( f = scan_fn,
+                                           init = init_alpha,
+                                           xs = idx_arr,
+                                           length = idx_arr.shape[0] )
+        
+        # stacked_outputs is cumulative sum PER POSITION, PER TIME
+        # append the first return value (from sentinel -> first alignment column)
+        stacked_outputs = jnp.concatenate( [ init_alpha[None,...],
+                                             stacked_outputs ],
+                                          axis=0)
+        
+        # transpose to (T, C, B, L-1) for convenience
+        stacked_outputs = jnp.transpose( stacked_outputs, (1,2,3,0) )
+        
+        return stacked_outputs
+    
+    
+    def backward_with_interms( self,
+                               aligned_inputs,
+                               logprob_emit_at_indel,
+                               joint_logprob_emit_at_match,
+                               joint_transit ):
+        ######################################
+        ### flip inputs, transition matrix   #
+        ######################################
+        align_len = (aligned_inputs[...,-1] != 0).sum(axis=1)
+        flipped_seqs = flip_sequences( inputs = aligned_inputs, 
+                                       seq_lengths = align_len, 
+                                       flip_along_axis = 1
+                                       )
+        B = flipped_seqs.shape[0]
+        
+        # transits needs to be flipped from (T, C_from, C_to, S_from, S_to)
+        #   to (T, C_to, C_from, S_to, S_from)
+        flipped_transit = jnp.transpose(joint_transit, (0, 2, 1, 4, 3) )
+        
+        
+        ### init with <sentinel> -> any, but don't count transition found at any,
+        ###   since this is already taken care of by forward alignment
+        # these are all (B,)
+        future_state = flipped_seqs[:,1,2]
+        
+        # transits is (T, C_prev, C_curr, S_prev, S_curr)
+        # under forward: prev=from, curr=to
+        # under backwards: prev=to, curr=from
+        sentinel_to_any = flipped_transit[:, 0, :, -1, :]
+        init_alpha = sentinel_to_any[:,:,future_state-1]
+        del future_state, sentinel_to_any
+        
+        
+        def scan_fn(prev_alpha, index):
+            curr_state = flipped_seqs[:,index,2]
+            future_state = flipped_seqs[:,index-1,2] 
+            
+            #################
+            ### emissions   #
+            #################
+            e = self._joint_emit_scores( aligned_inputs = flipped_seqs,
+                                         pos = index-1,
+                                         joint_logprob_emit_at_match = joint_logprob_emit_at_match,
+                                         logprob_emit_at_indel = logprob_emit_at_indel )
+            
+            ###################
+            ### transitions   #
+            ###################
+            def main_body(in_carry):
+                # (T, C_future, C_curr, B)
+                tr = flipped_transit[:,:,:, future_state-1, curr_state-1]
                 
+                # add emission at C_future to transition C_curr -> C_future
+                for_log_dot = e[:,:, None, :] + tr
+                
+                # return dot product with previous carry
+                return log_dot_bigger(log_vec = in_carry, log_mat = for_log_dot)
+            
+            def begin(in_carry):
+                # e is always associated with prev_state, so still add here
+                any_to_sentinel = flipped_transit[:, :, -1, :, -1]
+                final_tr = any_to_sentinel[:,:,future_state-1]
+                return e + in_carry + final_tr
+            
+            ### alpha update, in log space ONLY if curr_state is not pad
+            new_alpha = jnp.where(curr_state != 0,
+                                  jnp.where( curr_state != 4,
+                                             main_body(prev_alpha),
+                                             begin(prev_alpha) ),
+                                  prev_alpha )
+            
+            return (new_alpha, new_alpha)
+        
+        idx_arr = jnp.array( [i for i in range(2, L)] )
+        out = jax.lax.scan( f = scan_fn,
+                            init = init_alpha,
+                            xs = idx_arr,
+                            length = idx_arr.shape[0] )
+        _, stacked_outputs = out
+        del out
+        
+        
+        # stacked_outputs is cumulative sum PER POSITION
+        # append the first return value (from sentinel -> last alignment column)
+        stacked_outputs = jnp.concatenate( [ init_alpha[None,...],
+                                             stacked_outputs ],
+                                          axis=0)
+        
+        ### swap the sequence back; final output should always be (T, C, B, L-1)
+        # reshape: (L-1, T, C, B) -> (B, L-1, T, C)
+        reshaped_stacked_outputs = jnp.transpose( stacked_outputs,
+                                                  (3, 0, 1, 2) )
+        flipped_stacked_outputs = flip_sequences( inputs = reshaped_stacked_outputs, 
+                                                  seq_lengths = align_len-1, 
+                                                  flip_along_axis = 1
+                                                  )
+        # reshape back to (T, C, B, L-1)
+        stacked_outputs = jnp.transpose( flipped_stacked_outputs,
+                                          (2, 3, 0, 1) )
+        
+        return stacked_outputs
+        
+    
+    def get_class_posterior_marginals(self,
+                                      aligned_inputs,
+                                      t_array):
+        """
+        Label P(C | anc, desc, align, t) post-hoc using the 
+          forward-backard algorithm
+        
+        ASSUMES pad is 0, bos is 1, and eos is 2
+        
+        returns:
+            - posterior_marginals
+        
+        
+        extra notes:
+        ------------
+        posterior_marginals will be of shape: (T, C, B, L-2)
+
+        posterior_marginals[...,0] corresponds to the marginals at the FIRST valid 
+          alignment column (right after <bos>)
+
+        increases from there, and the posterior marginal at <eos> should be all zeros 
+          (because it's an invalid value)
+        """
+        T = time.shape[0]
+        B = aligned_inputs.shape[0]
+        L = aligned_inputs.shape[1]
+        
+        out = self._get_scoring_matrices( t_array=t_array,
+                                          sow_intermediates=False )
+        
+        logprob_emit_at_indel = out['logprob_emit_at_indel']
+        joint_logprob_emit_at_match = out['joint_logprob_emit_at_match']
+        joint_transit = out['all_transit_matrices']['joint']
+        del out
+        
+        C = joint_logprob_emit_at_match.shape[0]
+        
+        
+        ### each are: (T, C, B, L-1) 
+        forward_stacked_outputs = self.forward_with_interms( aligned_inputs,
+                                                             logprob_emit_at_indel,
+                                                             joint_logprob_emit_at_match,
+                                                             joint_transit )
+        
+        backward_stacked_outputs = self.backward_with_interms( aligned_inputs,
+                                                               logprob_emit_at_indel,
+                                                               joint_logprob_emit_at_match,
+                                                               joint_transit )
+        
+        # can get the denominator from backwards outputs before masking
+        joint_logprob = logsumexp(backward_stacked_outputs[..., 0], axis=1)
+       
+        
+        ### mask and combine 
+        invalid_tok_mask = ~jnp.isin(aligned_inputs[...,0], jnp.array([0,1,2]))
+        
+        # mask out padding tokens and final value at <eos>
+        # reduce to (T, C, B, L-2) 
+        forward_pad = invalid_tok_mask[:, 1:]
+        forward_pad = jnp.broadcast_to( forward_pad[None,None,...], (T, C, B, L-1) )
+        forward_stacked_outputs = forward_stacked_outputs * forward_pad
+        
+        # mask out padding tokens and "final" value at <bos>
+        # reduce to (T, C, B, L-2) 
+        backwards_pad = invalid_tok_mask[:, :-1]
+        backwards_pad = jnp.broadcast_to( backwards_pad[None,None,...], (T, C, B, L-1) )
+        backward_stacked_outputs = backward_stacked_outputs * backwards_pad
+        
+        # combine; wherever there's padding and <eos>, the sum should be zero
+        for_times_back = forward_logprobs_per_pos[..., :-1] + backward_logprobs_per_pos[..., 1:]
+        
+        invalid_pos = (( forward_logprobs_per_pos[..., :-1] == 0 ) &
+                       ( backward_logprobs_per_pos[..., :-1] == 0 ) &
+                       ( for_times_back == 0 ) )
+        
+        posterior_log_marginals = jnp.where( ~invalid_pos, 
+                                             for_times_back - joint_logprob[:, None, :, None],
+                                             0 )
+        
+        return posterior_log_marginals
+        
+
+    
     def _get_scoring_matrices( self,
                                t_array,
                                sow_intermediates: bool):
@@ -777,13 +1085,12 @@ class MarkovPairHMM(ModuleBase):
                             logprob_emit_at_indel ):
         T = joint_logprob_emit_at_match.shape[0]
         B = aligned_inputs.shape[0]
-        L = aligned_inputs.shape[1]
         C = self.num_site_classes
         
         # unpack
         anc_toks = aligned_inputs[:,pos,0]
         desc_toks = aligned_inputs[:,pos,1]
-        curr_state = aligned_inputs[:,pos,2]
+        state_at_pos = aligned_inputs[:,pos,2]
         
         # get all possible scores
         joint_emit_if_match = joint_logprob_emit_at_match[:, :, anc_toks - 3, desc_toks - 3]
@@ -798,12 +1105,12 @@ class MarkovPairHMM(ModuleBase):
                                      emit_if_indel_anc], axis=0)
 
         # expand current state for take_along_axis operation
-        curr_state_expanded = jnp.broadcast_to( curr_state[None, None, None, :]-1, 
-                                                (1, T, C, B) )
+        state_at_pos_expanded = jnp.broadcast_to( state_at_pos[None, None, None, :]-1, 
+                                                  (1, T, C, B) )
 
         # gather, remove temporary leading axis
         joint_e = jnp.take_along_axis( joint_emissions, 
-                                       curr_state_expanded,
+                                       state_at_pos_expanded,
                                        axis=0 )[0, ...]
         
         return joint_e

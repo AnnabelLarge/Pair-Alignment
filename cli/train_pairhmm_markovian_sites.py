@@ -158,6 +158,9 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     
     ### part+jit training function
     t_array = test_dset.return_time_array()
+    print('Using times:')
+    print(t_array)
+    
     parted_train_fn = partial( train_one_batch,
                                interms_for_tboard = args.interms_for_tboard,
                                t_array = t_array,
