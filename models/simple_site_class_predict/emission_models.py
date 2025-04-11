@@ -265,7 +265,6 @@ class RateMatFromFile(ModuleBase):
         diag = jnp.einsum("cii->ci", subst_rate_mat) 
         norm_factor = -jnp.sum(diag * equilibrium_distributions, axis=1)[:,None,None]
         subst_rate_mat = subst_rate_mat / norm_factor
-        
         rate_mat_times_rho = jnp.einsum( 'c,cij->cij', 
                                          rate_multiplier, 
                                          subst_rate_mat ) 
@@ -428,12 +427,13 @@ class RateMatFitBoth(RateMatFromFile):
             
             ### upate rate multipliers
             if self.normalize_first_class:
-                rate_multiplier = learned_rate_multipliers
-            
-            elif not self.normalize_first_class:
                 rate_multiplier = jnp.concatenate( [jnp.array([1]), 
                                                     learned_rate_multipliers],
                                                    axis=0 )
+            
+            elif not self.normalize_first_class:
+                rate_multiplier = learned_rate_multipliers
+                
                     
         else:
             rate_multiplier = jnp.array([1])

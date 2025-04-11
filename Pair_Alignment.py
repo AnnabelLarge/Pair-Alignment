@@ -57,7 +57,7 @@ def main():
     
     # ### UNCOMMENT TO RUN IN SPYDER IDE
     # args.task = 'train'
-    # args.configs = 'DRY-RUN_indp_control.json'
+    # args.configs = 'test.json'
     
     
     ### helper function to open a single config file and extract additional arguments
