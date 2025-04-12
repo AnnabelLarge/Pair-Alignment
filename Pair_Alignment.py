@@ -41,7 +41,7 @@ def main():
                       choices = valid_tasks,
                       help='What do you want to do? Pick from: {valid_tasks}')
     
-    # needed for most options
+    # needed for most options 
     parser.add_argument('-configs',
                       type = str,
                       help='Load configs from file or folder of files, in json format.')
@@ -57,7 +57,7 @@ def main():
     
     # ### UNCOMMENT TO RUN IN SPYDER IDE
     # args.task = 'train'
-    # args.configs = 'test.json'
+    # args.configs = 'markov_test.json'
     
     
     ### helper function to open a single config file and extract additional arguments
@@ -141,7 +141,7 @@ def main():
                                              'train',
                                              training_argparse = None  )
         
-        del first_training_argparse, first_args
+        del first_args
         
         
         ### with this dload_lst, train using ALL config files

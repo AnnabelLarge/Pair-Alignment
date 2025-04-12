@@ -12,6 +12,7 @@ import pickle
 import math
 from functools import partial
 from tqdm import tqdm
+import os
 
 # flax, jax, and optax
 import jax
@@ -76,7 +77,8 @@ def train_one_batch(batch,
                 'batch_loss': batch_loss_NLL,
                 'batch_ave_joint_perpl': jnp.mean(joint_perplexity_perSamp),
                 'pred_layer_metrics': aux_dict['pred_layer_metrics'],
-                'finalpred_gradient': grad}
+                'finalpred_gradient': grad,
+                'used_tkf_beta_approx': aux_dict['used_tkf_beta_approx']}
     
     return out_dict, new_trainstate
 
@@ -127,7 +129,8 @@ def eval_one_batch( batch,
     out_dict = {'joint_neg_logP': aux_dict['joint_neg_logP'],
                 'joint_neg_logP_length_normed': joint_neg_logP_length_normed,
                 'joint_perplexity_perSamp': joint_perplexity_perSamp,
-                'pred_layer_metrics': sow_dict}
+                'pred_layer_metrics': sow_dict,
+                'used_tkf_beta_approx': aux_dict['used_tkf_beta_approx']}
     
     ### other metrics
     if return_all_loglikes:
@@ -203,6 +206,16 @@ def final_eval_wrapper(dataloader,
         
         eval_metrics = eval_fn_jitted(batch=batch, 
                                       max_align_len=batch_max_alignlen)
+        
+        tkf_status_file = f'FINAL-EVAL_tkf_approx.tsv'
+        if tkf_status_file not in os.listdir(out_arrs_dir):
+            write_mode = 'w'
+        else:
+            write_mode = 'a'
+            
+        with open(f'{out_arrs_dir}/{tkf_status_file}', write_mode) as g:
+            g.write(f'tkf_approx used in batch {batch_idx} of {outfile_prefix}: {eval_metrics["used_tkf_beta_approx"]}\n')
+        
         
         #########################################
         ### start df; record metrics per sample #

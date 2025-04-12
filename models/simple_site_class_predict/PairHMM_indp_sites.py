@@ -142,6 +142,7 @@ class IndpPairHMMFitBoth(ModuleBase):
         logprob_emit_at_indel = out['logprob_emit_at_indel']
         joint_logprob_emit_at_match = out['joint_logprob_emit_at_match']
         joint_transit_mat = out['all_transit_matrices']['joint']
+        used_tkf_beta_approx = out['used_tkf_beta_approx']
         del out
         
         # calculate scores
@@ -152,6 +153,7 @@ class IndpPairHMMFitBoth(ModuleBase):
                                              joint_transit_mat=joint_transit_mat )
         
         loss = jnp.mean( aux_dict['joint_neg_logP_length_normed'] )
+        aux_dict['used_tkf_beta_approx'] =used_tkf_beta_approx
         
         return loss, aux_dict
     
@@ -192,11 +194,12 @@ class IndpPairHMMFitBoth(ModuleBase):
         #   (conditional comes from dividing joint by marginal)
         out = self._get_scoring_matrices(t_array=t_array,
                                         sow_intermediates=sow_intermediates)
-        
+                                        
         logprob_emit_at_indel = out['logprob_emit_at_indel']
         joint_logprob_emit_at_match = out['joint_logprob_emit_at_match']
         joint_transit_mat = out['all_transit_matrices']['joint']
         marginal_transit_mat = out['all_transit_matrices']['marginal'] 
+        used_tkf_beta_approx = out['used_tkf_beta_approx']
         del out
         
         # get all lengths
@@ -222,6 +225,7 @@ class IndpPairHMMFitBoth(ModuleBase):
                                         logprob_emit_at_indel=logprob_emit_at_indel,
                                         joint_logprob_emit_at_match=joint_logprob_emit_at_match,
                                         joint_transit_mat=joint_transit_mat )
+        out['used_tkf_beta_approx'] = used_tkf_beta_approx
         
         
         #####################################
@@ -316,6 +320,7 @@ class IndpPairHMMFitBoth(ModuleBase):
         
         out = self._get_scoring_matrices(t_array=t_array,
                                         sow_intermediates=False)
+        
         
         rate_mat_times_rho_per_class = out['rate_mat_times_rho_per_class']
         for c in range(rate_mat_times_rho_per_class.shape[0]):
@@ -429,6 +434,7 @@ class IndpPairHMMFitBoth(ModuleBase):
                 
         ### transitions
         # always write lambda and mu
+        # also record if you used beta approximation or not
         if 'tkf_lam_mu_logits' in dir(self.transitions_module):
             lam_min_val = self.transitions_module.lam_min_val
             lam_max_val = self.transitions_module.lam_max_val
@@ -448,6 +454,7 @@ class IndpPairHMMFitBoth(ModuleBase):
             with open(f'{out_folder}/PARAMS_{self.indel_model_type}_indel_params.txt','w') as g:
                 g.write(f'insert rate, lambda: {lam}\n')
                 g.write(f'deletion rate, mu: {mu}\n')
+                g.write(f'used tkf beta approximation? {out["used_tkf_beta_approx"]}\n\n')
         
         # if tkf92, have extra r_ext param
         if 'r_extend_logits' in dir(self.transitions_module):
@@ -513,11 +520,11 @@ class IndpPairHMMFitBoth(ModuleBase):
         ### logprob transitions is more straightforward (only one)
         # (T,4,4)
         if self.indel_model_type == 'tkf91':
-            all_transit_matrices = self.transitions_module(t_array = t_array,
+            all_transit_matrices, used_tkf_beta_approx = self.transitions_module(t_array = t_array,
                                                            sow_intermediates = sow_intermediates)
         
         elif self.indel_model_type == 'tkf92':
-            all_transit_matrices = self.transitions_module(t_array = t_array,
+            all_transit_matrices, used_tkf_beta_approx = self.transitions_module(t_array = t_array,
                                                            class_probs = jnp.array([1.]),
                                                            sow_intermediates = sow_intermediates)
             all_transit_matrices['joint'] = all_transit_matrices['joint'][:,0,0,...]
@@ -529,7 +536,8 @@ class IndpPairHMMFitBoth(ModuleBase):
                     'cond_logprob_emit_at_match': cond_prob_emit_at_match_per_class,
                     'rate_mat_times_rho_per_class': rate_mat_times_rho_per_class,
                     'to_expm': to_expm,
-                    'all_transit_matrices': all_transit_matrices}
+                    'all_transit_matrices': all_transit_matrices,
+                    'used_tkf_beta_approx': used_tkf_beta_approx}
         
         return out_dict
     

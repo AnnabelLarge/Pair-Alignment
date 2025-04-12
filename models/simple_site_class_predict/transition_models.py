@@ -146,7 +146,7 @@ class TKF91TransitionLogprobs(ModuleBase):
                                                 [-2, -5] )
         init_lam_offset_logits = jnp.array(init_lam_offset_logits, dtype=float)
         self.lam_min_val, self.lam_max_val = self.config.get( 'lambda_range', 
-                                                               [self.tkf_err, 3] )
+                                                               [self.tkf_err, 2] )
         self.offs_min_val, self.offs_max_val = self.config.get( 'offset_range', 
                                                                 [self.tkf_err, 0.333] )
         
@@ -207,7 +207,7 @@ class TKF91TransitionLogprobs(ModuleBase):
         matrix_dict = self.return_all_matrices(lam=lam,
                                                mu=mu,
                                                joint_matrix=joint_matrix)
-        return matrix_dict
+        return matrix_dict, use_approx
         
     
     def fill_joint_tkf91(self, 
@@ -422,7 +422,7 @@ class TKF91TransitionLogprobsFromFile(TKF91TransitionLogprobs):
         matrix_dict = self.return_all_matrices(lam=lam,
                                                mu=mu,
                                                joint_matrix=joint_matrix)
-        return matrix_dict
+        return matrix_dict, False
         
     
     
@@ -462,7 +462,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
                                                 range(1, self.num_tkf_site_classes+1)] )
         init_r_extend_logits = jnp.array(init_r_extend_logits, dtype=float)
         self.r_extend_min_val, self.r_extend_max_val = self.config.get( 'r_range', 
-                                                                [self.tkf_err, 0.8] )
+                                                                [self.tkf_err, 0.999] )
         
         
         ### initialize logits for lambda, offset
@@ -546,7 +546,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
                                                class_probs=class_probs,
                                                r_ext_prob = r_extend,
                                                joint_matrix=joint_matrix)
-        return matrix_dict
+        return matrix_dict, use_approx
         
     
     def fill_joint_tkf92(self,
@@ -691,5 +691,5 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
                                                class_probs=class_probs,
                                                r_ext_prob=r_extend,
                                                joint_matrix=joint_matrix)
-        return matrix_dict
+        return matrix_dict, False
     

@@ -235,6 +235,15 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
             train_metrics, pairhmm_trainstate = out
             del out
             
+            tkf_status_file = f'TRAIN_tkf_approx.tsv'
+            if tkf_status_file not in os.listdir(args.out_arrs_dir):
+                write_mode = 'w'
+            else:
+                write_mode = 'a'
+                
+            with open(f'{args.out_arrs_dir}/{tkf_status_file}', write_mode) as g:
+                g.write(f'tkf_approx used in epoch {epoch_idx}, batch {batch_idx}: {train_metrics["used_tkf_beta_approx"]}\n')
+            
 
 #__4___8__12: batch level (three tabs)
             ################################################################

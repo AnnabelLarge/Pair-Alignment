@@ -174,6 +174,7 @@ class MarkovPairHMM(ModuleBase):
         logprob_emit_at_indel = out['logprob_emit_at_indel']
         joint_logprob_emit_at_match = out['joint_logprob_emit_at_match']
         joint_transit = out['all_transit_matrices']['joint']
+        used_tkf_beta_approx = out['used_tkf_beta_approx']
         del out
         
         ######################################################
@@ -277,7 +278,8 @@ class MarkovPairHMM(ModuleBase):
         loss = jnp.mean(joint_neg_logP_length_normed)
         
         aux_dict = {'joint_neg_logP': joint_neg_logP,
-                    'joint_neg_logP_length_normed': joint_neg_logP_length_normed}
+                    'joint_neg_logP_length_normed': joint_neg_logP_length_normed,
+                    'used_tkf_beta_approx': used_tkf_beta_approx}
         
         return loss, aux_dict
     
@@ -322,6 +324,7 @@ class MarkovPairHMM(ModuleBase):
         joint_logprob_emit_at_match = out['joint_logprob_emit_at_match']
         joint_transit = out['all_transit_matrices']['joint']
         marginal_transit = out['all_transit_matrices']['marginal'] 
+        used_tkf_beta_approx = out['used_tkf_beta_approx']
         del out
         
         C = logprob_emit_at_indel.shape[0]
@@ -591,7 +594,8 @@ class MarkovPairHMM(ModuleBase):
                 'desc_neg_logP': desc_neg_logP,
                 'desc_neg_logP_length_normed': desc_neg_logP_length_normed,
                 'cond_neg_logP': cond_neg_logP,
-                'cond_neg_logP_length_normed': cond_neg_logP_length_normed
+                'cond_neg_logP_length_normed': cond_neg_logP_length_normed,
+                'used_tkf_beta_approx': used_tkf_beta_approx
                 }
         
         return out
@@ -753,6 +757,7 @@ class MarkovPairHMM(ModuleBase):
             with open(f'{out_folder}/PARAMS_tkf92_indel_params.txt','w') as g:
                 g.write(f'insert rate, lambda: {lam}\n')
                 g.write(f'deletion rate, mu: {mu}\n')
+                g.write(f'used tkf beta approximation? {out["used_tkf_beta_approx"]}\n\n')
                 g.write(f'extension prob, r: ')
                 [g.write(f'{elem}\t') for elem in r_extend]
                 g.write('\n')
@@ -985,6 +990,7 @@ class MarkovPairHMM(ModuleBase):
         logprob_emit_at_indel = out['logprob_emit_at_indel']
         joint_logprob_emit_at_match = out['joint_logprob_emit_at_match']
         joint_transit = out['all_transit_matrices']['joint']
+        used_tkf_beta_approx = out['used_tkf_beta_approx']
         del out
         
         C = joint_logprob_emit_at_match.shape[0]
@@ -1064,7 +1070,7 @@ class MarkovPairHMM(ModuleBase):
 
         ### transition logprobs
         # (T,C,C,4,4)
-        all_transit_matrices = self.transitions_module( t_array = t_array,
+        all_transit_matrices, used_tkf_beta_approx = self.transitions_module( t_array = t_array,
                                                         class_probs = jnp.exp( log_class_probs ),
                                                         sow_intermediates = sow_intermediates )
         
@@ -1073,7 +1079,8 @@ class MarkovPairHMM(ModuleBase):
                     'cond_logprob_emit_at_match': cond_logprob_emit_at_match,
                     'rate_mat_times_rho': rate_mat_times_rho,
                     'to_expm': to_expm,
-                    'all_transit_matrices': all_transit_matrices}
+                    'all_transit_matrices': all_transit_matrices,
+                    'used_tkf_beta_approx': used_tkf_beta_approx}
         
         return out_dict
     
