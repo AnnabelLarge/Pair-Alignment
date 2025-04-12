@@ -140,6 +140,7 @@ class TKF91TransitionLogprobs(ModuleBase):
     def setup(self):
         ### unpack config
         self.tkf_err = self.config.get('tkf_err', 1e-4)
+        self.sigmoid_temp = self.config.get('sigmoid_temp', 1)
         
         # initializing lamda, offset
         init_lam_offset_logits = self.config.get( 'init_lambda_offset_logits',
@@ -267,12 +268,14 @@ class TKF91TransitionLogprobs(ModuleBase):
         # lambda
         lam = bounded_sigmoid(x = lam_mu_logits[0],
                               min_val = lam_min_val,
-                              max_val = lam_max_val)
+                              max_val = lam_max_val,
+                              temperature = self.sigmoid_temp)
         
         # mu
         offset = bounded_sigmoid(x = lam_mu_logits[1],
                                  min_val = offs_min_val,
-                                 max_val = offs_max_val)
+                                 max_val = offs_max_val,
+                                 temperature = self.sigmoid_temp)
         mu = lam / ( 1 -  offset) 
 
         use_approx = (offset == tkf_err)
@@ -301,11 +304,6 @@ class TKF91TransitionLogprobs(ModuleBase):
         
         
         ### alpha and one minus alpha IN LOG SPACE
-        # alpha = jnp.exp(-mu_per_t); log(alpha) = -mu_per_t
-        # alpha = jnp.exp( -mu_per_t )
-        # one_minus_alpha = 1 - alpha
-        # log_alpha = jnp.log(alpha)
-        # log_one_minus_alpha = jnp.log(one_minus_alpha)
         log_alpha = -mu_per_t
         log_one_minus_alpha = log_one_minus_x(log_alpha)
         
@@ -444,6 +442,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
     def setup(self):
         ### unpack config
         self.tkf_err = self.config.get('tkf_err', 1e-4)
+        self.sigmoid_temp = self.config.get('sigmoid_temp', 1)
         self.num_tkf_site_classes = self.config['num_tkf_site_classes']
         
         ### initializing lamda, offset

@@ -15,8 +15,9 @@ def safe_log(x):
                                x, 
                                jnp.finfo('float32').smallest_normal ) )
 
-def bounded_sigmoid(x, min_val, max_val):
-    return min_val + (max_val - min_val) / (1 + jnp.exp(-x))
+def bounded_sigmoid(x, min_val, max_val, temperature=1):
+    if temperature != 1:
+    return min_val + (max_val - min_val) / (1 + jnp.exp(-x/temperature))
 
 def concat_along_new_last_axis(arr_lst):
     return jnp.concatenate( [arr[...,None] for arr in arr_lst], 

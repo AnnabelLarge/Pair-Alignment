@@ -35,16 +35,16 @@ def main():
                    'batched_eval',
                    'label_class_post']
     
-    parser.add_argument('-task',
-                      type=str,
-                      required=True,
-                      choices = valid_tasks,
-                      help='What do you want to do? Pick from: {valid_tasks}')
+    # parser.add_argument('-task',
+    #                   type=str,
+    #                   required=True,
+    #                   choices = valid_tasks,
+    #                   help='What do you want to do? Pick from: {valid_tasks}')
     
-    # needed for most options 
-    parser.add_argument('-configs',
-                      type = str,
-                      help='Load configs from file or folder of files, in json format.')
+    # # needed for most options 
+    # parser.add_argument('-configs',
+    #                   type = str,
+    #                   help='Load configs from file or folder of files, in json format.')
     
     # # OLD OPTION: needed to resuming training
     # parser.add_argument(f'-training_wkdir',
@@ -55,9 +55,9 @@ def main():
     args = parser.parse_args()
     
     
-    # ### UNCOMMENT TO RUN IN SPYDER IDE
-    # args.task = 'train'
-    # args.configs = 'indp_test.json'
+    ### UNCOMMENT TO RUN IN SPYDER IDE
+    args.task = 'train'
+    args.configs = 'test.json'
     
     
     ### helper function to open a single config file and extract additional arguments
@@ -114,9 +114,9 @@ def main():
         ### get dataloader and functions from first config file
         first_config_file = file_lst[0]
         print(f'DATALOADER CONSTRUCTED FROM: {args.configs}/{first_config_file}')
-        print("WARNING: make sure you want this dataloader for ALL experiments!!!")
-        print("WARNING: make sure you want this dataloader for ALL experiments!!!")
-        print("WARNING: make sure you want this dataloader for ALL experiments!!!")
+        print(f"WARNING: make sure you want this dataloader for ALL experiments in {args.configs}!!!")
+        print(f"WARNING: make sure you want this dataloader for ALL experiments in {args.configs}!!!")
+        print(f"WARNING: make sure you want this dataloader for ALL experiments in {args.configs}!!!")
         first_args = read_config_file(f'{args.configs}/{first_config_file}')
         
         # import correct wrappers, dataloader initializers
@@ -206,9 +206,9 @@ def main():
         ### get dataloader and functions from first config file
         first_config_file = file_lst[0]
         print(f'DATALOADER CONSTRUCTED FROM: {args.configs}/{first_config_file}')
-        print("WARNING: make sure you want this dataloader for ALL experiments!!!")
-        print("WARNING: make sure you want this dataloader for ALL experiments!!!")
-        print("WARNING: make sure you want this dataloader for ALL experiments!!!")
+        print(f"WARNING: make sure you want this dataloader for ALL experiments in {args.configs}!!!")
+        print(f"WARNING: make sure you want this dataloader for ALL experiments in {args.configs}!!!")
+        print(f"WARNING: make sure you want this dataloader for ALL experiments in {args.configs}!!!")
         first_args = read_config_file(f'{args.configs}/{first_config_file}')
         
         # find and read training argparse
