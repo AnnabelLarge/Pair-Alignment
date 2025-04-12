@@ -369,7 +369,7 @@ class RateMatFitBoth(RateMatFromFile):
             
         if self.exch_use_sigmoid:
             out  = self.config.get( 'exchange_range',
-                                   (1e-4, 10) )
+                                   (1e-4, 12) )
             self.exchange_min_val, self.exchange_max_val = out
             del out
             

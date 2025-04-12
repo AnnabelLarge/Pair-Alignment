@@ -35,29 +35,29 @@ def main():
                    'batched_eval',
                    'label_class_post']
     
-    # parser.add_argument('-task',
-    #                   type=str,
-    #                   required=True,
-    #                   choices = valid_tasks,
-    #                   help='What do you want to do? Pick from: {valid_tasks}')
+    parser.add_argument('-task',
+                      type=str,
+                      required=True,
+                      choices = valid_tasks,
+                      help='What do you want to do? Pick from: {valid_tasks}')
     
-    # # needed for most options 
-    # parser.add_argument('-configs',
+    # needed for most options 
+    parser.add_argument('-configs',
+                      type = str,
+                      help='Load configs from file or folder of files, in json format.')
+    
+    # # OLD OPTION: needed to resuming training
+    # parser.add_argument(f'-training_wkdir',
     #                   type = str,
-    #                   help='Load configs from file or folder of files, in json format.')
-    
-    # # # OLD OPTION: needed to resuming training
-    # # parser.add_argument(f'-training_wkdir',
-    # #                   type = str,
-    # #                   help = 'training working directory to resume from')
+    #                   help = 'training working directory to resume from')
     
     # parse the arguments
     args = parser.parse_args()
     
     
-    ### UNCOMMENT TO RUN IN SPYDER IDE
-    args.task = 'train'
-    args.configs = 'indp_test.json'
+    # ### UNCOMMENT TO RUN IN SPYDER IDE
+    # args.task = 'train'
+    # args.configs = 'indp_test.json'
     
     
     ### helper function to open a single config file and extract additional arguments
