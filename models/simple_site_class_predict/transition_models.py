@@ -451,7 +451,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
                                                   [-2, -5] )
         init_lam_offset_logits = jnp.array(init_lam_offset_logits, dtype=float)
         self.lam_min_val, self.lam_max_val = self.config.get( 'lambda_range', 
-                                                               [self.tkf_err, 3] )
+                                                               [self.tkf_err, 2] )
         self.offs_min_val, self.offs_max_val = self.config.get( 'offset_range', 
                                                                 [self.tkf_err, 0.333] )
         

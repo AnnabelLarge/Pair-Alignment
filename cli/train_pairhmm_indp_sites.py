@@ -94,6 +94,13 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
                   f'{args.pred_config["num_emit_site_classes"]}\n' )
                 )
         g.write( f'  - Normalizing losses by: {args.norm_loss_by}\n' )
+    
+    # extra files to record if you use tkf approximations
+    with open(f'{args.out_arrs_dir}/TRAIN_tkf_approx.tsv','w') as g:
+        g.write('Used tkf beta approximation in the following locations:\n')
+    
+    with open(f'{args.out_arrs_dir}/FINAL-EVAL_tkf_approx.tsv','w') as g:
+        g.write('Used tkf beta approximation in the following locations:\n')
         
         
     ### save updated config, provide filename for saving model parameters
@@ -235,16 +242,12 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
             train_metrics, pairhmm_trainstate = out
             del out
             
-            tkf_status_file = f'TRAIN_tkf_approx.tsv'
-            if tkf_status_file not in os.listdir(args.out_arrs_dir):
-                write_mode = 'w'
-            else:
-                write_mode = 'a'
-                
-            with open(f'{args.out_arrs_dir}/{tkf_status_file}', write_mode) as g:
-                g.write(f'tkf_approx used in epoch {epoch_idx}, batch {batch_idx}: {train_metrics["used_tkf_beta_approx"]}\n')
             
-
+            if train_metrics["used_tkf_beta_approx"]:
+                with open(f'{args.out_arrs_dir}/TRAIN_tkf_approx.tsv','a') as g:
+                    g.write('epoch {epoch_idx}, batch {batch_idx}: {train_metrics["used_tkf_beta_approx"]}\n')
+            
+            
 #__4___8__12: batch level (three tabs)
             ################################################################
             ### 3.2: if NaN is found, save current progress for inspection #

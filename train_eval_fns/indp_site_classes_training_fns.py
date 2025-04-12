@@ -220,16 +220,11 @@ def final_eval_wrapper(dataloader,
     for batch_idx, batch in tqdm( enumerate(dataloader), total=len(dataloader) ): 
         eval_metrics = eval_fn_jitted( batch=batch )
         
-        tkf_status_file = f'FINAL-EVAL_tkf_approx.tsv'
-        if tkf_status_file not in os.listdir(out_arrs_dir):
-            write_mode = 'w'
-        else:
-            write_mode = 'a'
-            
-        with open(f'{out_arrs_dir}/{tkf_status_file}', write_mode) as g:
-            g.write(f'tkf_approx used in batch {batch_idx} of {outfile_prefix}: {eval_metrics["used_tkf_beta_approx"]}\n')
-            
-        
+        if eval_metrics["used_tkf_beta_approx"]:
+            with open(f'{args.out_arrs_dir}/FINAL-EVAL_tkf_approx.tsv','a') as g:
+                g.write(f'batch {batch_idx} of {outfile_prefix}: {eval_metrics["used_tkf_beta_approx"]}\n')
+                    
+                
         #########################################
         ### start df; record metrics per sample #
         #########################################
