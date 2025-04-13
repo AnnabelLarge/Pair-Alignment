@@ -307,16 +307,10 @@ class IndpPairHMMFitBoth(ModuleBase):
     def write_params(self,
                      t_array,
                      out_folder: str):
-        with open(f'{out_folder}/EXPERIMENTAL_OPTIONS.tsv','w') as g:
-            flag = self.rate_matrix_module.normalize_first_class
-            g.write(f'normalize_first_class: {flag}\n')
-            
-            flag = self.rate_matrix_module.rate_mult_use_sigmoid
-            g.write(f'rate_mult_use_sigmoid: {flag}\n')
-            
-            flag = self.rate_matrix_module.exch_use_sigmoid
-            g.write(f'exch_use_sigmoid: {flag}\n')
-        
+        with open(f'{out_folder}/activations_used.tsv','w') as g:
+            act = self.rate_matrix_module.rate_mult_activation
+            g.write(f'activation for rate multipliers: {act}\n')
+            g.write(f'activation for exchangeabiliites: bound_sigmoid\n')
         
         out = self._get_scoring_matrices(t_array=t_array,
                                         sow_intermediates=False)

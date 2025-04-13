@@ -27,7 +27,7 @@ def create_config(load_all: bool):
     
     elif not load_all:
         to_add = OrderedDict({"exchange_range": "[min=FLOAT, max=FLOAT]",
-                              "rate_mult_range": "[min=FLOAT, max=FLOAT]",
+                              "(if rate_mult_activation==bound_sigmoid) rate_mult_range": "[min=FLOAT, max=FLOAT]",
                               "lambda_range": "[min=FLOAT, max=FLOAT]",
                               "(if TKF92) offset_range": "[min=FLOAT, max=FLOAT]",
                               })
@@ -43,6 +43,7 @@ def create_config(load_all: bool):
                          "num_emit_site_classes": "[INT]",
                          "num_tkf_site_classes": "[INT, 1 if indp site classes]",
                          "tkf_err": "[FLOAT = 1e4]",
+                         "rate_mult_activation": '[STR="bound_sigmoid", "softplus"]',
                          
                          "LINEBREAK401": "",
                          
