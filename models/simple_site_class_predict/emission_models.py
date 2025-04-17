@@ -265,6 +265,8 @@ class RateMatFromFile(ModuleBase):
         diag = jnp.einsum("cii->ci", subst_rate_mat) 
         norm_factor = -jnp.sum(diag * equilibrium_distributions, axis=1)[:,None,None]
         subst_rate_mat = subst_rate_mat / norm_factor
+        
+        # after normalizing, multiply by a rate scalar
         rate_mat_times_rho = jnp.einsum( 'c,cij->cij', 
                                          rate_multiplier, 
                                          subst_rate_mat ) 

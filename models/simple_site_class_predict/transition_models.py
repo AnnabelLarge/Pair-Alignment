@@ -154,8 +154,8 @@ class TKF91TransitionLogprobs(ModuleBase):
         
         ### initialize logits for lambda, offset
         # with default values:
-        # init lam: ~0.35769683
-        # init offset: ~0.02017788
+        # init lam: 0.11929100006818771
+        # init offset: 0.0023280500900000334
         self.tkf_lam_mu_logits = self.param('TKF91 lambda, mu',
                                             lambda rng, shape, dtype: init_lam_offset_logits,
                                             init_lam_offset_logits.shape,
