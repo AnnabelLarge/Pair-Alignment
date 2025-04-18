@@ -19,8 +19,8 @@ import jax.numpy as jnp
 import flax.linen as nn
 
 from models.model_utils.BaseClasses import ModuleBase
-from models.mamba_seq_model.model_parts import (UnidirecMambaModule, 
-                                                BidirecMambaModule)
+from models.sequence_embedders.mamba.model_parts import (UnidirecMambaModule, 
+                                                         BidirecMambaModule)
 
 
 ###############################################################################
@@ -83,7 +83,13 @@ class UnidirectResidualMambaLayer(ModuleBase):
         skip = datamat
         
         ### norm
-        datamat = self.norm(datamat)
+        datamat = self.norm(datamat,
+                            mask=padding_mask)
+        
+        # manually mask again, because norm leaves NaNs
+        datamat = jnp.where( padding_mask,
+                            datamat,
+                            0)
         
         # record
         if sow_intermediates:
@@ -219,7 +225,13 @@ class UnidirectMambaWithFeedforward(ModuleBase):
         
         
         ### Norm
-        datamat = self.norm(datamat)
+        datamat = self.norm(datamat,
+                            mask=padding_mask)
+        
+        # manually mask again, because norm leaves NaNs
+        datamat = jnp.where( padding_mask,
+                            datamat,
+                            0)
         
         if sow_intermediates:
             label = f'{self.name}/after second {self.norm_type}Norm'

@@ -20,9 +20,6 @@ def fill_with_default_values(args):
     
     if 'base_alphabet_size' not in provided_args:
         args.base_alphabet_size = args.emission_alphabet_size + 3
-        
-    if 'full_alphabet_size' not in provided_args:
-        args.full_alphabet_size = 44
     
     if 'update_grads' not in provided_args:
         args.update_grads = True
@@ -33,12 +30,20 @@ def fill_with_default_values(args):
         if 'chunk_length' not in provided_args:
             args.chunk_length = 512
         
+        # don't include bos
+        if 'full_alphabet_size' not in provided_args:
+            args.full_alphabet_size = 43
+        
         # missing some things from tkf models
         args.times_from = None
         args.num_site_classes = 1
         
     
     elif args.pred_model_type.startswith('neural_hmm'):
+        # keep bos for now?
+        if 'full_alphabet_size' not in provided_args:
+            args.full_alphabet_size = 44
+            
         if 'chunk_length' not in provided_args:
             args.chunk_length = 512
         

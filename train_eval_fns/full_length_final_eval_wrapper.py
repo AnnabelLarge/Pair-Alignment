@@ -4,6 +4,8 @@
 Created on Thu Jul  4 12:53:15 2024
 
 @author: annabel
+
+used for both feedforward and neural TKF92?
 """
 # regular python
 import numpy as np
@@ -35,13 +37,6 @@ def final_eval_wrapper(dataloader,
                        out_arrs_dir: str, 
                        outfile_prefix: str, 
                        tboard_writer = None):
-    """
-    wrapper for the jitted eval function; not sure if whole thing is 
-      jit-compatible though
-    
-    """ 
-    have_full_length_alignments = (jitted_determine_seqlen_bin is not None)
-    
     ####################################
     ### WHICH INTERMEDIATES TO WRITE   #
     ####################################
@@ -92,10 +87,11 @@ def final_eval_wrapper(dataloader,
         #     - sum_neg_logP; (B,)
         #     - neg_logP_length_normed; (B,)
         #     - perplexity_perSamp; (B,)
+        #     - ece; float
         
         # returned, if using feedforward prediction head:
         #     - acc_perSamp; (B,)
-        #     - cm_perSamp; (B, out_alph_size, out_alph_size)
+        #     - cm_perSamp; (B, out_alph_size-1, out_alph_size-1)
         
         # returned if flag active:
         #     - anc_layer_metrics
@@ -105,8 +101,8 @@ def final_eval_wrapper(dataloader,
         #     - desc_attn_weights 
         #     - final_ancestor_embeddings
         #     - final_descendant_embeddings
-        #     - any outputs from forward_pass_outputs (like final_logits)
-        #     - final_logprobs (i.e. AFTER log_softmax)
+        #     - any outputs from forward_pass_outputs (only relevant for neural TKF92)
+        #     - final_logprobs 
         
         
         #########################################

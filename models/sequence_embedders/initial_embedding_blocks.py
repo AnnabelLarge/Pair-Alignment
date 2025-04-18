@@ -34,7 +34,7 @@ class PlaceholderEmbedding(nn.Module):
     def __call__(self, datamat, training: bool = None):
         ### unpack
         hidden_dim = self.config['hidden_dim']
-        padding_idx = self.config.get('seq_padding_idx', 0)
+        seq_padding_idx = self.config.get('seq_padding_idx', 0)
         
         ### run
         padding_mask_template = jnp.where(datamat == seq_padding_idx, 
@@ -192,6 +192,12 @@ class TAPEEmbedding(ModuleBase):
         # padding positions should already be zeros
         out = datamat + posmat
         out = self.final_layernorm(out)
+        
+        # manually mask again, because layernorm leaves NaNs
+        out = jnp.where( padding_mask,
+                         out,
+                         0 )
+        
         out = self.final_dropout(out, 
                                  deterministic = not training)
         
@@ -238,7 +244,7 @@ class ConvEmbedding(ModuleBase):
                             padding = 'CAUSAL' if self.causal else 'SAME')
         
         
-    def __call__(self, datamat, training = None):
+    def __call__(self, datamat, training):
         ### use this for building padding masks
         padding_mask_template = jnp.where(datamat == self.padding_idx, False, True)[:,:,None]
         

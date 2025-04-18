@@ -68,9 +68,25 @@ class FeedforwardPredict(ModuleBase):
         self.act_type = 'silu'
         self.act= nn.silu
         self.kernel_init = nn.initializers.lecun_normal()
-        self.norm = nn.LayerNorm(reduction_axes = -1, feature_axes = -1)
-        self.output_size = self.config.get("full_alphabet_size", 44)
         self.use_bias = True
+
+        # need a different norm for every instance?
+        norm_lst = []
+        
+        if self.normalize_inputs:
+            norm_lst.append( nn.LayerNorm(reduction_axes = -1, 
+                                               feature_axes = -1) )
+        else:
+            norm_lst.append( lambda x: x )
+        
+        additional_norms = len(self.layer_sizes[1:])
+        for i in range(additional_norms):
+            norm_lst.append( nn.LayerNorm(reduction_axes = -1, 
+                                               feature_axes = -1) )
+        self.norm_lst = norm_lst
+            
+        # DON'T generate <bos>
+        self.output_size = self.config.get("full_alphabet_size", 44) - 1
             
     @nn.compact
     def __call__(self, 
@@ -85,7 +101,6 @@ class FeedforwardPredict(ModuleBase):
         ###   providing previous state) )
         datamat = jnp.concatenate(datamat_lst, axis=-1)
             
-        
         ### mask out padding tokens before passing to any blocks
         new_shape = (padding_mask.shape[0],
                      padding_mask.shape[1],
@@ -98,7 +113,12 @@ class FeedforwardPredict(ModuleBase):
         
         ### initial norm
         if self.normalize_inputs:
-            datamat = self.norm(datamat)
+            datamat = self.norm_lst[0](datamat,
+                                       mask = masking_mat)
+            datamat = jnp.where(masking_mat,
+                                datamat,
+                                0)
+            del masking_mat
             
             if sow_intermediates:
                 label = f'{self.name}/after initial norm'
@@ -143,8 +163,19 @@ class FeedforwardPredict(ModuleBase):
         for i, hid_dim in enumerate(self.layer_sizes[1:]):
             layer_idx = i + 1
             
+            new_shape = (padding_mask.shape[0],
+                         padding_mask.shape[1],
+                         datamat.shape[2])
+            masking_mat = jnp.broadcast_to(padding_mask[...,None], new_shape)
+            del new_shape
+            
             # norm
-            datamat = self.norm(datamat)
+            datamat = self.norm_lst[layer_idx](datamat,
+                                               mask = masking_mat)
+            datamat = jnp.where(masking_mat,
+                                datamat,
+                                0)
+            del masking_mat
             
             if sow_intermediates:
                 label = (f'{self.name}/'+
@@ -196,25 +227,20 @@ class FeedforwardPredict(ModuleBase):
                                 kernel_init = self.kernel_init,
                                 name='Project to Logits')(datamat)
         
-        return {'FPO_final_logits': final_logits}
+        return final_logits
     
 
-    def neg_loglike_in_scan_fn(self, 
-                               forward_pass_outputs, 
-                               true_out,
-                               seq_padding_idx: int = 0):
+    def apply_ce_loss( self, 
+                       final_logits, 
+                       true_out,
+                       length_for_normalization,
+                       seq_padding_idx: int = 0 ):
         """
         Cross-entropy loss per position, using a chunk over alignment length
         true_out is (B, L): the alignment-augmented descendant
         
         return sum(-logP)
         """
-        ### unpack forward pass outputs 
-        ###   here, this only only returns logits: 
-        ###   (B, length_for_scan, output_size)
-        final_logits = forward_pass_outputs['FPO_final_logits']
-        
-        
         ### make padding mask
         output_padding_mask = jnp.where(true_out != seq_padding_idx,
                                         True,
@@ -222,7 +248,8 @@ class FeedforwardPredict(ModuleBase):
         
         
         ### evaluate CrossEnt loss, using the implementation from optax
-        # (B, L, full_alphabet_size) -> (B, L)
+        # (B, L, full_alphabet_size-1) -> (B, L)
+        # won't ever predict <bos>, hence minus one
         CE_loss = optax.softmax_cross_entropy_with_integer_labels(logits = final_logits, 
                                                                   labels = true_out)
         
@@ -232,64 +259,32 @@ class FeedforwardPredict(ModuleBase):
         #  (B, L)
         neg_logP_perSamp_perPos = jnp.multiply(CE_loss, output_padding_mask)
         
-        
-        ### output sum
-        # (B, L) -> (B,)
+        ### get losses
+        # (B,)
         sum_neg_logP = jnp.sum(neg_logP_perSamp_perPos, axis=1)
-        intermeds_to_stack = {'neg_logP_perSamp_perPos': neg_logP_perSamp_perPos, #(B, L)
-                              }
-        return (sum_neg_logP, intermeds_to_stack)
         
-    
-    def compile_metrics_in_scan(self,
-                                forward_pass_outputs, 
-                                seq_padding_idx = 0):
-        # forward pass only returns logits
-        final_logits = forward_pass_outputs['FPO_final_logits']
-        del forward_pass_outputs
-        
-        pred_outputs = jnp.argmax(nn.softmax(final_logits,-1), -1) #(B, L)
-        
-        metrics_in_scan = {'pred_outputs': pred_outputs}
-        return metrics_in_scan
-    
-    
-    def evaluate_loss_after_scan(self, 
-                                 scan_fn_outputs,
-                                 length_for_normalization,
-                                 seq_padding_idx: int = 0,
-                                 **kwargs):
-        # unpack; remove dummy time from sum_neg_logP
-        # (T=1, B) -> (B, )
-        sum_neg_logP, scan_intermediates = scan_fn_outputs
-        sum_neg_logP = sum_neg_logP[0,:]
-        del scan_fn_outputs
-        
-        # normalize by chosen length
+        # (B,)
         neg_logP_length_normed = jnp.divide( sum_neg_logP, 
                                              length_for_normalization )
-        
         
         # final loss is mean ( (1/L)(-logP) ); one vaue
         loss = jnp.mean(neg_logP_length_normed)
         
         # auxilary dictionary to output
-        aux_dict = {'sum_neg_logP': sum_neg_logP,
-                    'neg_logP_length_normed': neg_logP_length_normed}
+        loss_intermediates = {'neg_logP_perSamp_perPos':neg_logP_perSamp_perPos,
+                              'sum_neg_logP': sum_neg_logP,
+                              'neg_logP_length_normed': neg_logP_length_normed}
         
-        # add scan intermediates, which will be of shape 
-        # (num_scan_iters, ..., chunk_len, ...)
-        aux_dict = {**aux_dict, **scan_intermediates}
+        return loss, loss_intermediates
         
-        return loss, aux_dict
-
         
     def compile_metrics(self, 
                         true_out, 
+                        final_logits,
                         loss,
-                        loss_fn_dict,
+                        neg_logP_length_normed,
                         seq_padding_idx = 0,
-                        out_alph_size = 43):
+                        out_alph_size_with_pad = 43):
         """
         metrics include:
             - accuracy + confusion matrix
@@ -306,7 +301,8 @@ class FeedforwardPredict(ModuleBase):
         ##################
         ### adjust sizes #
         ##################
-        ### pred_outputs will be (num_scan_iters, B, chunk_len)
+        ### pred_outputs will be (B, chunk_len)
+        pred_outputs = jnp.argmax(nn.softmax(final_logits,-1), -1)
         pred_outputs = loss_fn_dict['pred_outputs']
         
         # make this compatible even if you're not scanning
@@ -345,10 +341,12 @@ class FeedforwardPredict(ModuleBase):
         def confusion_matrix(true_idx, 
                              pred_idx):
             # true at dim0, pred at dim1
-            cm = jnp.zeros( (out_alph_size, out_alph_size) )
+            cm = jnp.zeros( (out_alph_size_with_pad, out_alph_size_with_pad) )
             indices = (true_idx, pred_idx)
             cm = cm.at[indices].add(1)
-            return cm
+    
+            # don't return padding row/col
+            return cm[1:, 1:]
             
         # vmap this over the batch
         vmapped_fn = jax.vmap(confusion_matrix,

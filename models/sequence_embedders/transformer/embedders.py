@@ -112,7 +112,6 @@ class TransfSeqEmb(SeqEmbBase):
         ### initial embedding: (B,L) -> (B,L,H)
         datamat, padding_mask = self.initial_embed(datamat, training)
         
-        
         ### first transformer block: (B, L, H) -> (B, L, H)
         datamat = self.first_block(datamat = datamat,
                                    padding_mask = padding_mask,
@@ -138,8 +137,8 @@ class TransfSeqEmb(SeqEmbBase):
             
             if sow_intermediates:
                 label = (f'{self.name} {layer_idx}/'+
-                         f'Transf Block {block_idx}/'+f
-                         'after block')
+                         f'Transf Block {block_idx}/'+
+                         f'after block')
                 self.sow_histograms_scalars(mat = datamat, 
                                             label = label, 
                                             which=['scalars'])

@@ -246,7 +246,6 @@ def create_seq_model_tstate(embedding_which,
     
     seq_model_trainstate = TrainState.create(apply_fn=seq_model_instance.apply, 
                                              params=init_params,
-                                             # key=model_init_rngkey,
                                              tx=tx)
     
     # add embedding_which as an attribute
@@ -256,7 +255,6 @@ def create_seq_model_tstate(embedding_which,
 
 
 def feedforward_params_instance( input_shapes, 
-                                 tx, 
                                  model_init_rngkey, 
                                  tabulate_file_loc,
                                  model_config: dict = dict(),
@@ -360,7 +358,6 @@ def create_all_tstates(seq_shapes,
     
     # init
     out = feedforward_params_instance(input_shapes = list_of_shapes, 
-                                      tx = tx, 
                                       model_init_rngkey = outproj_rngkey, 
                                       tabulate_file_loc = tabulate_file_loc,
                                       model_config = pred_config)

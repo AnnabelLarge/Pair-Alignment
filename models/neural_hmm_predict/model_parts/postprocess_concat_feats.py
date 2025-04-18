@@ -108,8 +108,6 @@ class FeedforwardToEvoparams(SelectMask):
     def setup(self):
         # !!! hard set
         self.norm_type = 'layer'
-        self.norm = nn.LayerNorm( reduction_axes= -1, 
-                                  feature_axes=-1 )
         self.act_type = 'silu'
         self.act= nn.silu
         self.kernel_init = nn.initializers.lecun_normal()
@@ -119,6 +117,14 @@ class FeedforwardToEvoparams(SelectMask):
         self.use_anc_emb = self.config['use_anc_emb']
         self.use_desc_emb = self.config['use_desc_emb']
         self.layer_sizes = self.config['layer_sizes']
+        
+        # !!! hard set
+        norm_lst = []
+        for l in range( len(self.layer_sizes) ):
+            norm_lst.append(nn.LayerNorm( reduction_axes= -1, 
+                                          feature_axes=-1 )
+                            )
+        self.norm_lst = norm_lst
         
         # optional
         self.dropout = self.config.get("dropout", 0.0)
@@ -131,7 +137,7 @@ class FeedforwardToEvoparams(SelectMask):
                  training: bool, 
                  sow_intermediates: bool=False):
         ### select (potentially concat) and mask padding
-        datamat, concat_masking_mat = self.process_datamat_lst(datamat_lst,
+        datamat, full_concat_masking_mat = self.process_datamat_lst(datamat_lst,
                                                                padding_mask,
                                                                self.use_anc_emb,
                                                                self.use_desc_emb)
@@ -152,7 +158,13 @@ class FeedforwardToEvoparams(SelectMask):
                 
             # 2.) norm (plus recording to tensorboard)
             #     shouldn't need masking after this
-            datamat = self.norm(datamat, mask=concat_masking_mat)
+            concat_masking_mask = full_concat_masking_mat[...,:datamat.shape[-1]]
+            datamat = self.norm_lst[layer_idx](datamat, 
+                                               mask=concat_masking_mask)
+            datamat = jnp.where(concat_masking_mask,
+                                datamat,
+                                0)
+            del concat_masking_mask
             
             if sow_intermediates:
                 label = (f'{self.name}/'+
@@ -203,127 +215,129 @@ class FeedforwardToEvoparams(SelectMask):
                                             which=['scalars'])
                 del label
         
-        return datamat, concat_masking_mat[:,:,0][:,:,None]
+        return datamat, full_concat_masking_mat[:,:,0][:,:,None]
     
 
-class ConvToEvoparams(SelectMask):
-    """
-    (not used yet)
+
+
+# class ConvToEvoparams(SelectMask):
+#     """
+#     (not used yet), but if you do, update how layernorm is handled!
     
-    inherit process_datamat_lst() from SelectMask
+#     inherit process_datamat_lst() from SelectMask
     
-    apply this blocks as many times as specified by layer_sizes: 
-        [norm -> conv -> activation -> dropout]
+#     apply this blocks as many times as specified by layer_sizes: 
+#         [norm -> conv -> activation -> dropout]
     
-    """
-    config: dict
-    name: str
+#     """
+#     config: dict
+#     name: str
     
-    def setup(self):
-        # !!! hard set
-        self.norm_type = 'layer'
-        self.norm = nn.LayerNorm( reduction_axes= -1, 
-                                  feature_axes=-1 )
-        self.act_type = 'silu'
-        self.act= nn.silu
-        self.kernel_init = nn.initializers.lecun_normal()
+#     def setup(self):
+#         # !!! hard set
+#         self.norm_type = 'layer'
+#         self.norm = nn.LayerNorm( reduction_axes= -1, 
+#                                   feature_axes=-1 )
+#         self.act_type = 'silu'
+#         self.act= nn.silu
+#         self.kernel_init = nn.initializers.lecun_normal()
         
         
-        # required
-        self.use_anc_emb = self.config['use_anc_emb']
-        self.use_desc_emb = self.config['use_desc_emb']
-        self.hidden_size_lst = self.config['hidden_size_lst']
-        self.kern_size_lst = self.config['kern_size_lst']
+#         # required
+#         self.use_anc_emb = self.config['use_anc_emb']
+#         self.use_desc_emb = self.config['use_desc_emb']
+#         self.hidden_size_lst = self.config['hidden_size_lst']
+#         self.kern_size_lst = self.config['kern_size_lst']
         
-        assert len(self.hidden_size_lst) == len(self.kern_size_lst)
+#         assert len(self.hidden_size_lst) == len(self.kern_size_lst)
         
-        # optional
-        self.dropout = self.config.get("dropout", 0.0)
-        
-        
-    @nn.compact
-    def __call__(self, 
-                 datamat_lst: list,
-                 padding_mask: jnp.array,
-                 training: bool, 
-                 sow_intermediates: bool=False):
-        
-        ### select (potentially concat) and mask padding
-        datamat, concat_masking_mat = self.process_datamat_lst(datamat_lst,
-                                                               padding_mask,
-                                                               self.use_anc_emb,
-                                                               self.use_desc_emb)
-        del datamat_lst, padding_mask
+#         # optional
+#         self.dropout = self.config.get("dropout", 0.0)
         
         
-        ### repeat: norm -> conv -> activation -> dropout
-        for layer_idx in range( len(self.kern_size_lst) ):
-            # 1.) record distribution into block
-            if sow_intermediates:
-                label = (f'{self.name}/'+
-                         f'final conv layer {layer_idx}/'+
-                         f'before block')
-                self.sow_histograms_scalars(mat = datamat, 
-                                            label = label, 
-                                            which=['scalars'])
-                del label
+#     @nn.compact
+#     def __call__(self, 
+#                  datamat_lst: list,
+#                  padding_mask: jnp.array,
+#                  training: bool, 
+#                  sow_intermediates: bool=False):
+        
+#         ### select (potentially concat) and mask padding
+#         datamat, concat_masking_mat = self.process_datamat_lst(datamat_lst,
+#                                                                padding_mask,
+#                                                                self.use_anc_emb,
+#                                                                self.use_desc_emb)
+#         del datamat_lst, padding_mask
+        
+        
+#         ### repeat: norm -> conv -> activation -> dropout
+#         for layer_idx in range( len(self.kern_size_lst) ):
+#             # 1.) record distribution into block
+#             if sow_intermediates:
+#                 label = (f'{self.name}/'+
+#                          f'final conv layer {layer_idx}/'+
+#                          f'before block')
+#                 self.sow_histograms_scalars(mat = datamat, 
+#                                             label = label, 
+#                                             which=['scalars'])
+#                 del label
                 
-            # 2.) norm (plus recording to tensorboard)
-            datamat = self.norm(datamat, mask=concat_masking_mat)
+#             # 2.) norm (plus recording to tensorboard)
+#             datamat = self.norm(datamat, mask=concat_masking_mat)
             
-            if sow_intermediates:
-                label = (f'{self.name}/'+
-                         f'final conv layer {layer_idx}/'+
-                         f'after {self.norm_type}')
-                self.sow_histograms_scalars(mat = datamat, 
-                                            label = label, 
-                                            which=['scalars'])
-                del label
+#             if sow_intermediates:
+#                 label = (f'{self.name}/'+
+#                          f'final conv layer {layer_idx}/'+
+#                          f'after {self.norm_type}')
+#                 self.sow_histograms_scalars(mat = datamat, 
+#                                             label = label, 
+#                                             which=['scalars'])
+#                 del label
                     
-            # 3.) convolution+masking, record to tensorboard
-            kernel_size = self.kern_size_lst[layer_idx]
-            hidden_dim = self.hidden_size_lst[layer_idx]
+#             # 3.) convolution+masking, record to tensorboard
+#             kernel_size = self.kern_size_lst[layer_idx]
+#             hidden_dim = self.hidden_size_lst[layer_idx]
             
-            datamat = nn.Conv(features = hidden_dim, 
-                              kernel_size = kernel_size,
-                              kernel_init = self.kernel_init,
-                              padding='CAUSAL',
-                              name=f'{self.name}/final conv layer {layer_idx}')(datamat)
-            datamat = jnp.multiply(datamat, concat_masking_mat)
+#             datamat = nn.Conv(features = hidden_dim, 
+#                               kernel_size = kernel_size,
+#                               kernel_init = self.kernel_init,
+#                               padding='CAUSAL',
+#                               name=f'{self.name}/final conv layer {layer_idx}')(datamat)
+#             datamat = jnp.multiply(datamat, concat_masking_mat)
             
-            if sow_intermediates:
-                label = (f'{self.name}/'+
-                         f'final conv layer {layer_idx}/'+
-                         f'after conv')
-                self.sow_histograms_scalars(mat = datamat, 
-                                            label = label, 
-                                            which=['scalars'])
-                del label
+#             if sow_intermediates:
+#                 label = (f'{self.name}/'+
+#                          f'final conv layer {layer_idx}/'+
+#                          f'after conv')
+#                 self.sow_histograms_scalars(mat = datamat, 
+#                                             label = label, 
+#                                             which=['scalars'])
+#                 del label
             
-            # 4.) optional activation (plus recording to tensorboard)
-            datamat = self.act(datamat)
+#             # 4.) optional activation (plus recording to tensorboard)
+#             datamat = self.act(datamat)
             
-            if sow_intermediates:
-                label = (f'{self.name}/'+
-                         'final conv layer {layer_idx}/'+
-                         'after {self.act_type}')
-                self.sow_histograms_scalars(mat = datamat, 
-                                            label = label, 
-                                            which=['scalars'])
-                del label
+#             if sow_intermediates:
+#                 label = (f'{self.name}/'+
+#                          'final conv layer {layer_idx}/'+
+#                          'after {self.act_type}')
+#                 self.sow_histograms_scalars(mat = datamat, 
+#                                             label = label, 
+#                                             which=['scalars'])
+#                 del label
             
-            # 5.) dropout (plus recording to tensorboard)
-            datamat = nn.Dropout(rate = self.dropout)(datamat,
-                                                      deterministic = not training)
+#             # 5.) dropout (plus recording to tensorboard)
+#             datamat = nn.Dropout(rate = self.dropout)(datamat,
+#                                                       deterministic = not training)
             
-            if sow_intermediates and (self.dropout != 0):
-                label = (f'{self.name}/'+
-                         'final conv layer {layer_idx}/'+
-                         'after block')
-                self.sow_histograms_scalars(mat = datamat, 
-                                            label = label, 
-                                            which=['scalars'])
-                del label
+#             if sow_intermediates and (self.dropout != 0):
+#                 label = (f'{self.name}/'+
+#                          'final conv layer {layer_idx}/'+
+#                          'after block')
+#                 self.sow_histograms_scalars(mat = datamat, 
+#                                             label = label, 
+#                                             which=['scalars'])
+#                 del label
         
-        return datamat, concat_masking_mat
+#         return datamat, concat_masking_mat
     

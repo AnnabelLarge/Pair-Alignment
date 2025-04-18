@@ -508,7 +508,7 @@ class UnidirecMambaModule(ModuleBase):
                                         which=['scalars'])
             
             self.sow_histograms_scalars(mat = z_branch, 
-                                        label = f'{self.name}/z_branch after {self.act_type}Norm', 
+                                        label = f'{self.name}/z_branch after {self.act_type}', 
                                         which=['scalars'])
         
         
@@ -665,9 +665,9 @@ class BidirecMambaModule(ModuleBase):
                              forw_x_branch, 
                              forw_z_branch]
             suffix_lst = ['FORW x_branch after ConvAndSelectiveSSM',
-                          'FORW z_branch after {self.act_type}Norm',
+                          'FORW z_branch after {self.act_type}',
                           'REV x_branch after ConvAndSelectiveSSM',
-                          'REV z_branch after {self.act_type}Norm']
+                          'REV z_branch after {self.act_type}']
             
             for i in range(4):
                 self.sow_histograms_scalars(mat = mats_to_write[i], 

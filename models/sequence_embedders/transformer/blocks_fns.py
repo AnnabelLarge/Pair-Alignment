@@ -111,7 +111,9 @@ class TransfBaseBlock(ModuleBase):
         # normalization
         self.norm_type = 'layer'
         if self.causal:
-            self.norm = nn.LayerNorm(reduction_axes=-1, feature_axes=-1)
+            self.norm = nn.LayerNorm(reduction_axes=-1, 
+                                     feature_axes=-1,
+                                     epsilon=1e-5)
         elif not self.causal:
             self.norm = nn.LayerNorm(reduction_axes= (-2,-1), 
                                      feature_axes=-1)
@@ -171,8 +173,6 @@ class TransfBaseBlock(ModuleBase):
                                                          normalize_qk=False,
                                                          use_bias=self.use_bias)
         
-        
-    
     def __call__(self, 
                  datamat, 
                  padding_mask, 
@@ -190,6 +190,11 @@ class TransfBaseBlock(ModuleBase):
         datamat = self.norm(datamat,
                             mask = padding_mask)
         
+        # manually mask again, because layernorm leaves NaNs
+        datamat = jnp.where( padding_mask,
+                            datamat,
+                            0)
+        
         if sow_intermediates:
             label = f'{self.name}/after first {self.norm_type}Norm'
             self.sow_histograms_scalars(mat = datamat, 
@@ -200,7 +205,7 @@ class TransfBaseBlock(ModuleBase):
         
         ### make masks
         # padding mask is: (B,1,L,L)
-        padding_mask = expand_padding_mask(padding_mask)
+        attn_padding_mask = expand_padding_mask(padding_mask)
         
         # causal mask is: (B,1,L,L)
         # (1,1,max_position_embeddings,max_position_embeddings) -> 
@@ -215,12 +220,12 @@ class TransfBaseBlock(ModuleBase):
                                             )
             causal_mask = causal_mask[:, :, :max_len, :max_len] #(B,1,L,L)
             
-            attention_mask = nn.combine_masks(padding_mask, 
+            attention_mask = nn.combine_masks(attn_padding_mask, 
                                               causal_mask,
                                               dtype=bool)
         
         elif not self.causal:
-            attention_mask = padding_mask.astype(bool)
+            attention_mask = attn_padding_mask.astype(bool)
         
         
         ### self-attention
@@ -255,6 +260,11 @@ class TransfBaseBlock(ModuleBase):
         ### Norm
         datamat = self.norm(datamat,
                             mask = padding_mask)
+        
+        # manually mask again, because layernorm leaves NaNs
+        datamat = jnp.where( padding_mask,
+                            datamat,
+                            0)
         
         if sow_intermediates:
             label = f'{self.name}/after second {self.norm_type}Norm'
@@ -519,6 +529,11 @@ class TapeTransfBlock(TransfBaseBlock):
         datamat = self.norm(datamat,
                             mask = padding_mask)
         
+        # manually mask again, because layernorm leaves NaNs
+        datamat = jnp.where( padding_mask,
+                            datamat,
+                            0)
+        
         if sow_intermediates:
             label = f'{self.name}/after first {self.norm_type}Norm'
             self.sow_histograms_scalars(mat = datamat, 
@@ -568,6 +583,11 @@ class TapeTransfBlock(TransfBaseBlock):
         # don't need to record intermediates; I'll do that in main embedder
         datamat = self.norm(datamat, 
                             mask = padding_mask)
+        
+        # manually mask again, because layernorm leaves NaNs
+        datamat = jnp.where( padding_mask,
+                            datamat,
+                            0)
         
         return datamat
         

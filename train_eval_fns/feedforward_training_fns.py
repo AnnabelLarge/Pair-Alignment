@@ -136,7 +136,7 @@ def train_one_batch(batch,
     true_out = aligned_mats_suffixes[...,0]
     
     
-    ### optionally, one-hot encode the alignment state as an 
+    ### optionally, one-hot encode the previous alignment state as an 
     ### extra input feature (found at dim0=1)
     if add_prev_alignment_info:
         extra_features = activation.one_hot( x = aligned_mats_prefixes[...,1], 
@@ -146,12 +146,13 @@ def train_one_batch(batch,
         
         
     ### length_for_normalization
-    length_for_normalization = jnp.where( true_out != seq_padding_idx, 
+    # don't include pad or eos
+    length_for_normalization = jnp.where( ~jnp.isin(true_out, jnp.array([seq_padding_idx, 1]) ), 
                                           True, 
                                           False ).sum(axis=1)
     
     if norm_loss_by == 'desc_len':
-        num_gaps = jnp.where( true_out == gap_tok, 
+        num_gaps = jnp.where( true_out == (gap_tok-1), 
                               True, 
                               False ).sum(axis=1)
         length_for_normalization = length_for_normalization - num_gaps
@@ -214,7 +215,7 @@ def train_one_batch(batch,
                                             sow_intermediates = finalpred_sow_outputs,
                                             mutable=mut,
                                             rngs={'dropout': finalpred_key})
-        forward_pass_outputs, pred_sow_dict = out
+        final_logits, pred_sow_dict = out
         del out, mut
         
         pred_layer_metrics = {'histograms': pred_sow_dict.get( 'histograms', dict() ),
@@ -222,35 +223,20 @@ def train_one_batch(batch,
                               }
         
         
-        ### evaluate loglike in parts
-        # this calculates sum of logprob over length of alignment
-        out = finalpred_instance.neg_loglike_in_scan_fn(forward_pass_outputs = forward_pass_outputs,
-                                                        true_out = true_out,
-                                                        seq_padding_idx = seq_padding_idx)
-        sum_neg_logP_raw, intermeds_to_stack = out
+        ### evaluate loglike
+        out = finalpred_instance.apply_ce_loss( final_logits = final_logits,
+                                                true_out = true_out,
+                                                length_for_normalization = length_for_normalization,
+                                                seq_padding_idx = seq_padding_idx )        
+        loss, loss_intermeds = out
         del out
         
-        # some metrics need output from forward pass, so calculate those here
-        to_add = finalpred_instance.compile_metrics_in_scan(forward_pass_outputs = forward_pass_outputs, 
-                                                            seq_padding_idx = seq_padding_idx)
-        intermeds_to_stack = {**intermeds_to_stack, **to_add}
-        
-        # final loss calculation: normalize by desired alignment length, 
-        #   possibly logsumexp across timepoints
-        out = finalpred_instance.evaluate_loss_after_scan(scan_fn_outputs = (sum_neg_logP_raw, intermeds_to_stack),
-                                                 length_for_normalization = length_for_normalization,
-                                                 seq_padding_idx = seq_padding_idx)
-        loss, aux_dict = out
-        del intermeds_to_stack, out, sum_neg_logP_raw  
-        
-        ### return EVERYTHING
-        aux_dict['embeddings_aux_dict'] = embeddings_aux_dict
-        aux_dict['pred_layer_metrics'] = pred_layer_metrics
-        
-        for key, val in forward_pass_outputs.items():
-            if key.startswith('FPO_'):
-                aux_dict[key] = val
-                
+        # create aux dictionary
+        aux_dict = {'sum_neg_logP': loss_intermeds['sum_neg_logP'],
+                    'neg_logP_length_normed': loss_intermeds['neg_logP_length_normed'],
+                    'final_logits': final_logits,
+                    'embeddings_aux_dict': embeddings_aux_dict,
+                    'pred_layer_metrics': pred_layer_metrics}
         return (loss, aux_dict)
     
     
@@ -265,21 +251,26 @@ def train_one_batch(batch,
     del all_grads
     
     # aux_dict contains:
-    #     - intermediate metrics collected during scan
-    #     - intermediates from pred_layer_metrics
-    #     - neg_logP_length_normed (B,): loss per sample
-    #     - sum_neg_logP (B,): loss per sample NOT NORMALIZED BY LENGTH YET 
-    #     - all forward pass outputs: logprob emit match, logprob emit ins,
-    #         logprob transitions, and substitution rate matrics for tkf models
+    #   - final_logits (B, L)
+    #   - neg_logP_length_normed (B,): loss per sample
+    #   - sum_neg_logP (B,): loss per sample NOT NORMALIZED BY LENGTH YET 
+    #   - sowed dictionaries
     
-    ### evaluate metrics
-    metrics_dict = finalpred_instance.compile_metrics(true_out = true_out,
-                                                      loss = batch_loss,
-                                                      loss_fn_dict = aux_dict,
-                                                      seq_padding_idx = seq_padding_idx)
     
-    batch_ave_perpl = jnp.mean(metrics_dict['perplexity_perSamp'])
-    batch_ave_acc = jnp.mean(metrics_dict['acc_perSamp'])
+    # get other metrics
+    #   normally, because the gap token is the last element in the alphabet,
+    #   out_alph_size_with_pad = gap_tok + 1, but here, I've removed <bos>,
+    #   which was encoded as 1. Entire alphabet shifted down, so now 
+    #   out_alph_size_with_pad = gap_tok
+    metrics = finalpred_instance.compile_metrics( true_out = true_out,     
+                                                  final_logits = aux_dict['final_logits'],
+                                                  loss = batch_loss,
+                                                  neg_logP_length_normed = aux_dict['neg_logP_length_normed'],
+                                                  seq_padding_idx = 0,
+                                                  out_alph_size_with_pad = gap_tok )
+    
+    batch_ave_perpl = jnp.mean(metrics['perplexity_perSamp'])
+    batch_ave_acc = jnp.mean(metrics['acc_perSamp'])
         
     
     ###########################
@@ -343,9 +334,6 @@ def train_one_batch(batch,
                 'batch_ave_acc': batch_ave_acc,
                 'batch_ave_perpl': batch_ave_perpl
                 }
-    for key, val in aux_dict.items():
-            if key.startswith('FPO_'):
-                out_dict[key] = val
     
     ### controlled by boolean flag
     def save_to_out_dict(value_to_save, flag, varname_to_write):
@@ -386,10 +374,9 @@ def train_one_batch(batch,
     #     - anc_aux (structure varies depending on model)
     #     - batch_loss; float
     #     - batch_ave_perpl; float
-    #     - neg_logP_length_normed (B,); the loss per sample
-    #     - all forward pass outputs: logprob emit match, logprob emit ins,
-    #         logprob transitions, and substitution rate matrics for tkf models
     #     - batch_ave_acc; float 
+    #     - sum_neg_logP (B,); the loss per sample BEFORE normalizing by length
+    #     - neg_logP_length_normed (B,); the loss per sample
     
     # returned if flag active:
     #     - anc_layer_metrics
@@ -510,12 +497,13 @@ def eval_one_batch(batch,
         
         
     ### length_for_normalization
-    length_for_normalization = jnp.where( true_out != seq_padding_idx, 
+    # don't include pad or eos
+    length_for_normalization = jnp.where( ~jnp.isin(true_out, jnp.array([seq_padding_idx, 1]) ), 
                                           True, 
                                           False ).sum(axis=1)
-    
+                                         
     if norm_loss_by == 'desc_len':
-        num_gaps = jnp.where( true_out == gap_tok, 
+        num_gaps = jnp.where( true_out == (gap_tok-1), 
                               True, 
                               False ).sum(axis=1)
         length_for_normalization = length_for_normalization - num_gaps
@@ -575,7 +563,7 @@ def eval_one_batch(batch,
                                          sow_intermediates = finalpred_sow_outputs,
                                          mutable=mut
                                          )
-    forward_pass_outputs, pred_sow_dict = out
+    final_logits, pred_sow_dict = out
     del mut, out
         
     pred_layer_metrics = {'histograms': pred_sow_dict.get( 'histograms', dict() ),
@@ -583,51 +571,36 @@ def eval_one_batch(batch,
                           }
     
     
-    ### evaluate loglike in parts
-    # this calculates sum of logprob over length of alignment
-    out = finalpred_instance.neg_loglike_in_scan_fn(forward_pass_outputs = forward_pass_outputs,
-                                                   true_out = true_out,
-                                                   seq_padding_idx = seq_padding_idx)
-    sum_neg_logP_raw, intermeds_to_stack = out
+    ### evaluate loglike
+    out = finalpred_instance.apply_ce_loss( final_logits = final_logits,
+                                            true_out = true_out,
+                                            length_for_normalization = length_for_normalization,
+                                            seq_padding_idx = seq_padding_idx )        
+    loss, loss_intermeds = out
     del out
-        
-    # some metrics need output from forward pass, so calculate those here
-    to_add = finalpred_instance.compile_metrics_in_scan(forward_pass_outputs = forward_pass_outputs, 
-                                                        seq_padding_idx = seq_padding_idx)
-    intermeds_to_stack = {**intermeds_to_stack, **to_add}
     
-    # possibly return forward pass outputs
-    if return_forward_pass_outputs:
-        for key in forward_pass_outputs:
-            if key.startswith('FPO_'):
-                intermeds_to_stack[key] = forward_pass_outputs[key] 
-        
-    
-    ### final loss calculation: normalize by desired alignment length, 
-    ###   possibly logsumexp across timepoints
-    out = finalpred_instance.evaluate_loss_after_scan(scan_fn_outputs = (sum_neg_logP_raw, intermeds_to_stack),
-                                             length_for_normalization = length_for_normalization,
-                                             seq_padding_idx = seq_padding_idx)
-    loss, loss_fn_dict = out
-    del out, sum_neg_logP_raw  
-    
-    
-    ### evaluate metrics
-    metrics_dict = finalpred_instance.compile_metrics(true_out = true_out,
-                                                      loss = loss,
-                                                      loss_fn_dict = loss_fn_dict,
-                                                      seq_padding_idx = seq_padding_idx)
+    # get other metrics
+    #   normally, because the gap token is the last element in the alphabet,
+    #   out_alph_size_with_pad = gap_tok + 1, but here, I've removed <bos>,
+    #   which was encoded as 1. Entire alphabet shifted down, so now 
+    #   out_alph_size_with_pad = gap_tok
+    metrics = finalpred_instance.compile_metrics( true_out = true_out,     
+                                                  final_logits = final_logits,
+                                                  loss = loss,
+                                                  neg_logP_length_normed = loss_intermeds['neg_logP_length_normed'],
+                                                  seq_padding_idx = 0,
+                                                  out_alph_size_with_pad = gap_tok )
     
     ##########################################
     ### COMPILE FINAL DICTIONARY TO RETURN   #
     ##########################################
     ### things that always get returned
     out_dict = {'batch_loss': loss,
-                'sum_neg_logP': loss_fn_dict['sum_neg_logP'],
-                'neg_logP_length_normed': loss_fn_dict['neg_logP_length_normed']}
+                'sum_neg_logP': loss_intermeds['sum_neg_logP'],
+                'neg_logP_length_normed': loss_intermeds['neg_logP_length_normed']}
     
     # will have: perplexity_perSamp, ece, acc_perSamp, cm_perSamp
-    out_dict = {**out_dict, **metrics_dict}
+    out_dict = {**out_dict, **metrics}
     
     
     ### optional things to add
@@ -668,25 +641,18 @@ def eval_one_batch(batch,
                            flag = return_desc_embs,
                            varname_to_write = 'final_descendant_embeddings')
     
-    if 'neg_logP_perSamp_perPos' in loss_fn_dict.keys():
-        write_optional_outputs(value_to_save = loss_fn_dict['neg_logP_perSamp_perPos'],
-                               flag = return_final_logprobs,
-                               varname_to_write = 'final_logprobs')
-    
-    
-    # instead of "final_logits," write whatever comes out of forward_pass_outputs
-    if return_forward_pass_outputs:
-        for varname_to_write, value_to_save in intermed_dict.items():
-            if varname_to_write.startswith('FPO_'):
-                out_dict[varname_to_write] = value_to_save
-    
+    write_optional_outputs(value_to_save = loss_intermeds['neg_logP_perSamp_perPos'],
+                           flag = return_final_logprobs,
+                           varname_to_write = 'final_logprobs')
+
     # always returned from out_dict:
     #     - loss; float
     #     - sum_neg_logP; (B,)
     #     - neg_logP_length_normed; (B,)
     #     - perplexity_perSamp; (B,)
     #     - acc_perSamp; (B,)
-    #     - cm_perSamp; (B, out_alph_size, out_alph_size)
+    #     - cm_perSamp; (B, out_alph_size-1, out_alph_size-1)
+    #     - ece; float
         
     # returned if flag active:
     #     - anc_layer_metrics
@@ -696,10 +662,6 @@ def eval_one_batch(batch,
     #     - desc_attn_weights 
     #     - final_ancestor_embeddings
     #     - final_descendant_embeddings
-    #     - any outputs from forward_pass_outputs (like final_logits)
     #     - final_logprobs (i.e. AFTER log_softmax)
          
-    
-    # DEBUG: add extra values
-    # out_dict = {**out_dict, **loss_fn_dict}
     return out_dict

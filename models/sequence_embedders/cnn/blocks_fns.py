@@ -112,6 +112,11 @@ class ConvnetBlock(ModuleBase):
         datamat = self.norm(datamat, 
                             mask = padding_mask)
         
+        # manually mask again, because layernorm leaves NaNs
+        datamat = jnp.where( padding_mask,
+                            datamat,
+                            0)
+        
         # record
         if sow_intermediates:
             self.sow_histograms_scalars(mat = datamat, 

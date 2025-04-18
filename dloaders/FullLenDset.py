@@ -194,7 +194,7 @@ def load_aligned_mats(data_dir,
     ### if alignments are longer than toss_alignments_longer_than, 
     ###   then toss the samples
     if toss_alignments_longer_than:
-        eos_locs = np.argwhere(mat[:,:,0] == 2)
+        eos_locs = np.argwhere(mat[...,0] == 2)
         idxes_to_keep = eos_locs[ eos_locs[:, 1] <= toss_alignments_longer_than ][:, 0]
         mat = mat[idxes_to_keep, :, :]
         
@@ -215,20 +215,20 @@ def load_aligned_mats(data_dir,
     # <eos> = 5
     
     # find match pos; (B, L)
-    gapped_seqs = mat[:,:,[0,1]]
+    gapped_seqs = mat[...,[0,1]]
     tmp = np.where( (gapped_seqs >= 3) & (gapped_seqs <= 22), 1, 0 ).sum(axis=2) 
     matches = np.where(tmp == 2, 1, 0)
     del tmp
     
     # find ins pos i.e. where ancestor is gap; (B,L)
-    ins = np.where(gapped_seqs[:,:,0] == gap_idx, 2, 0)
+    ins = np.where(gapped_seqs[...,0] == gap_idx, 2, 0)
     
     # find del pos i.e. where descendant is gap; (B,L)
-    dels = np.where(gapped_seqs[:,:,1] == gap_idx, 3, 0)
+    dels = np.where(gapped_seqs[...,1] == gap_idx, 3, 0)
     
     # bos, eos
-    bos = jnp.where(mat == bos_idx, 4, 0)[:,:,0]
-    eos = jnp.where(mat == eos_idx, 5, 0)[:,:,0]
+    bos = jnp.where(mat == bos_idx, 4, 0)[...,0]
+    eos = jnp.where(mat == eos_idx, 5, 0)[...,0]
     
     
     ### concatenate
@@ -239,14 +239,26 @@ def load_aligned_mats(data_dir,
     zero_padded_mat = np.concatenate([gapped_seqs, alignment[...,None]], axis=-1)
     
     # these use -9 as padding token: (B, L, 2)
-    neg_nine_padded_mat = mat[:,:,[2,3]]
+    neg_nine_padded_mat = mat[...,[2,3]]
     
     
     ### model-specific transformations
     # feedforward: add 20 to insert sites in descendant, toss ancestor
+    # move all except <pad> and <bos> down by one
     if pred_model_type == 'feedforward':
-        ins_pos = np.argwhere( zero_padded_mat[:,:,0] == gap_idx )
+        # add 20 to insert sites
+        ins_pos = np.argwhere( zero_padded_mat[...,0] == gap_idx )
         zero_padded_mat[ins_pos[:,0], ins_pos[:,1], 1] += emission_alphabet_size
+        
+        # toss ancestor
+        zero_padded_mat = zero_padded_mat[...,1:]
+        
+        # move all tokens down (except <bos> and <pad>)
+        shifted_desc = np.where( np.isin(zero_padded_mat[...,0], np.array([0,1]) ),
+                                 zero_padded_mat[...,0],
+                                 zero_padded_mat[...,0] -1 )
+        zero_padded_mat[...,0] = shifted_desc
+        
     
     # pairHMM: don't need alignment indices
     elif pred_model_type.startswith('pairhmm'):
@@ -640,5 +652,24 @@ class FullLenDset(Dataset):
         
         elif (times_from is None):
             return 0
+
+
+
+if __name__ == '__main__':
+    test_dset = FullLenDset( data_dir = 'example_data', 
+                             split_prefixes = ['TwoSamp'],
+                             pred_model_type = 'feedforward',
+                             use_scan_fns = False,
+                             times_from_array = np.array([1]),
+                             emission_alphabet_size= 20,
+                             single_time_from_file = False,
+                             chunk_length = 513,
+                             toss_alignments_longer_than = None,
+                             seq_padding_idx = 0,
+                             align_padding_idx = -9,
+                             gap_idx = 43
+                             )
+    x = test_dset[0]
+    
     
     

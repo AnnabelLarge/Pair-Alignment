@@ -94,7 +94,8 @@ def base_hmm_load_all(indel_model_type: Literal["tkf91", "tkf92"],
 
 
 def base_hmm_fit_indel_params(indel_model_type: Literal["tkf91", "tkf92"],
-                              loss_type: Literal["joint", "cond", "conditional"]):
+                              loss_type: Literal["joint", "cond", "conditional"],
+                              in_dict=None):
     # mostly the same as above, so just do above and change a few entries
     dict_to_modify = base_hmm_load_all(indel_model_type = indel_model_type,
                                        loss_type = loss_type)
@@ -305,7 +306,6 @@ def all_local(indel_model_type: Literal["tkf91", "tkf92"],
 
 def neural_hmm_params_instance( input_shapes,
                                 dummy_t_array,
-                                tx, 
                                 model_init_rngkey, 
                                 tabulate_file_loc,
                                 preset_name, 
@@ -425,7 +425,6 @@ def create_all_tstates(seq_shapes,
     preset_name = pred_config['preset_name']
     out = neural_hmm_params_instance(input_shapes = list_of_shapes, 
                                     dummy_t_array = dummy_t_array, 
-                                    tx = tx, 
                                     model_init_rngkey = outproj_rngkey, 
                                     tabulate_file_loc = tabulate_file_loc,
                                     preset_name = preset_name,
@@ -435,7 +434,6 @@ def create_all_tstates(seq_shapes,
     
     finalpred_trainstate = TrainState.create( apply_fn=finalpred_instance.apply, 
                                               params=init_params,
-                                              # key=model_init_rngkey,
                                               tx=tx)
     
     all_trainstates = (ancestor_trainstate, 
@@ -448,11 +446,12 @@ def create_all_tstates(seq_shapes,
     
     
     ### determine concatenation function
-    if pred_config['use_precomputed_indices']:
-        from models.sequence_embedders.concatenation_fns import extract_embs as concat_fn
+    from models.sequence_embedders.concatenation_fns import extract_embs as concat_fn
+
+    # if pred_config['use_precomputed_indices']:
     
-    elif not pred_config['use_precomputed_indices']:
-        raise NotImplementedError('need to fix dimensional issues before using this')
+    # elif not pred_config['use_precomputed_indices']:
+    #     raise NotImplementedError('need to fix dimensional issues before using this')
         # from models.sequence_embedders.concatenation_fns import combine_one_hot_embeddings as concat_fn
         
     return all_trainstates, all_instances, concat_fn

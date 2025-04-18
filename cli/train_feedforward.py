@@ -86,6 +86,9 @@ def train_feedforward(args, dataloader_dict: dict):
     
     # create a new logfile
     with open(args.logfile_name,'w') as g:
+        if not args.update_grads:
+            g.write('DEBUG MODE: DISABLING GRAD UPDATES\n\n')
+            
         g.write(f'Feedforward from sequence embedders\n')
         g.write(f'Ancestor Embedder: {args.anc_model_type}\n')
         g.write(f'Descendant Embedder: {args.desc_model_type}\n')
@@ -127,14 +130,8 @@ def train_feedforward(args, dataloader_dict: dict):
     global_seq_max_length = max([training_dset.global_seq_max_length,
                                  test_dset.global_seq_max_length])
     largest_seqs = (args.batch_size, global_seq_max_length)
+    max_dim1 = args.chunk_length
     
-    if args.use_scan_fns:
-        max_dim1 = args.chunk_length
-    
-    elif not args.use_scan_fns:
-        max_dim1 = max([training_dset.global_align_max_length,
-                        test_dset.global_align_max_length]) - 1
-      
     largest_aligns = (args.batch_size, max_dim1)
     del max_dim1
     
@@ -267,14 +264,6 @@ def train_feedforward(args, dataloader_dict: dict):
             batch_max_seqlen = batch_max_seqlen.item()
             batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch)
             batch_max_alignlen = batch_max_alignlen.item()
-            
-            # I've had so much trouble with this ugh
-            if args.use_scan_fns:
-                err = (f'batch_max_alignlen (not including bos) is: '+
-                       f'{batch_max_alignlen - 1}'+
-                       f', which is not divisible by length for scan '+
-                       f'({args.chunk_length})')
-                assert (batch_max_alignlen - 1) % args.chunk_length == 0, err
             
             # # !!!!!!!!!!!!!!! BELOW IS FOR DEBUG-ONLY !!!!!!!!!!!!!!! 
             # # record values before gradient update
@@ -430,14 +419,6 @@ def train_feedforward(args, dataloader_dict: dict):
             batch_max_seqlen = batch_max_seqlen.item()
             batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch)
             batch_max_alignlen = batch_max_alignlen.item()
-            
-            # I've had so much trouble with this ugh
-            if args.use_scan_fns:
-                err = (f'batch_max_alignlen (not including bos) is: '+
-                       f'{batch_max_alignlen - 1}'+
-                       f', which is not divisible by length for scan '+
-                       f'({args.chunk_length})')
-                assert (batch_max_alignlen - 1) % args.chunk_length == 0, err
             
             eval_metrics = eval_fn_jitted(batch=batch, 
                                           all_trainstates=all_trainstates,
@@ -604,9 +585,6 @@ def train_feedforward(args, dataloader_dict: dict):
             del epoch_cpu_start, epoch_cpu_end
             del epoch_real_start, epoch_real_end
             
-            # save the trainstates for later use
-            best_trainstates = all_trainstates
-            
             # rage quit
             break
         
@@ -710,7 +688,7 @@ def train_feedforward(args, dataloader_dict: dict):
                                              jitted_determine_seqlen_bin = jitted_determine_seqlen_bin,
                                              jitted_determine_alignlen_bin = jitted_determine_alignlen_bin,
                                              eval_fn_jitted = eval_fn_jitted,
-                                             out_alph_size = args.full_alphabet_size,
+                                             out_alph_size = args.full_alphabet_size - 1,
                                              save_arrs = args.save_arrs,
                                              save_per_sample_losses = args.save_per_sample_losses,
                                              interms_for_tboard = args.interms_for_tboard, 
