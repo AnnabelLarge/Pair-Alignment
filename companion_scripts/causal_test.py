@@ -17,211 +17,209 @@ from jax import numpy as jnp
 ###############################################################################
 # B = 1, L = 7
 key = jax.random.key(0)
-# unaligned_seq = jnp.array( [[1,3,4,6,2,0]] )
+unaligned_seq = jnp.array( [[1,3,4,6,2,0]] )
 
-# ###################################
-# ### initial embedding functions   #
-# ###################################
-# from models.sequence_embedders.initial_embedding_blocks import ( EmbeddingWithPadding,
-                                                                  # PlaceholderEmbedding ,
-                                                                  # TAPEEmbedding,
-                                                                  # ConvEmbedding )
-# def test_initial_embedding_blocks(model, variable_dict):
-#     whole_seq_result,_ = model.apply( datamat=unaligned_seq,
-#                                       variables=variable_dict,
-#                                       training=False)
-#     per_site_result = []
-#     for l in range(1,unaligned_seq.shape[1]+1):
-#         clipped_input = unaligned_seq[:,:l]
-#         last_site_result,_ = model.apply( datamat=clipped_input,
-#                                           variables=variable_dict,
-#                                           training=False )
-#         last_site_result = last_site_result[:,-1,:][:,None,:]
-#         per_site_result.append(last_site_result)
-#     per_site_result = jnp.concatenate( per_site_result, axis=1 )
+###################################
+### initial embedding functions   #
+###################################
+from models.sequence_embedders.initial_embedding_blocks import ( EmbeddingWithPadding,
+                                                                   PlaceholderEmbedding ,
+                                                                   TAPEEmbedding,
+                                                                   ConvEmbedding )
+def test_initial_embedding_blocks(model, variable_dict):
+    whole_seq_result,_ = model.apply( datamat=unaligned_seq,
+                                      variables=variable_dict,
+                                      training=False)
+    per_site_result = []
+    for l in range(1,unaligned_seq.shape[1]+1):
+        clipped_input = unaligned_seq[:,:l]
+        last_site_result,_ = model.apply( datamat=clipped_input,
+                                          variables=variable_dict,
+                                          training=False )
+        last_site_result = last_site_result[:,-1,:][:,None,:]
+        per_site_result.append(last_site_result)
+    per_site_result = jnp.concatenate( per_site_result, axis=1 )
     
-#     assert jnp.allclose(per_site_result, whole_seq_result)
-
-    
-# model = PlaceholderEmbedding( config = {'hidden_dim': 10},
-#                               name = 'mod',
-#                               causal = True )
-# test_initial_embedding_blocks(model, variable_dict = {})
-# del model
-
-
-# model = EmbeddingWithPadding( config = {'hidden_dim': 10},
-#                               name = 'mod',
-#                               causal = True )
-# init_params = model.init( rngs=key,
-#                           datamat=jnp.zeros( unaligned_seq.shape,dtype=int ) )
-# test_initial_embedding_blocks(model, variable_dict = init_params)
-# del model, init_params
-
-
-# model = TAPEEmbedding( config = {'hidden_dim': 10},
-#                         name = 'mod',
-#                         causal = True )
-# init_params = model.init( rngs=key,
-#                           datamat=jnp.zeros( unaligned_seq.shape,dtype=int ),
-#                           training=False )
-# test_initial_embedding_blocks(model, variable_dict = init_params)
-# del model, init_params
-
-
-# for conv_kern_size in [1, 3, 20]:
-#     model = ConvEmbedding( config = {'base_alphabet_size': 23,
-#                                      'conv_emb_kernel_size': conv_kern_size,
-#                                      'hidden_dim': 10},
-#                            name = 'mod',
-#                            causal = True )
-#     init_params = model.init( rngs=key,
-#                               datamat=jnp.zeros( unaligned_seq.shape,dtype=int ),
-#                               training=False )
-#     test_initial_embedding_blocks(model, variable_dict = init_params)
-#     del model, init_params, conv_kern_size
-
-# print('All initial_embedding_blocks pass')
+    assert jnp.allclose(per_site_result, whole_seq_result)
 
     
-# ############
-# ### CNNs   #
-# ############
-# def test_neural_embedding_blocks(model, variable_dict):
-#     whole_seq_result = model.apply( datamat=unaligned_seq,
-#                                       variables=variable_dict,
-#                                       training=False,
-#                                       sow_intermediates=False)
-#     if type(whole_seq_result) == tuple:
-#         whole_seq_result = whole_seq_result[1]
+model = PlaceholderEmbedding( config = {'hidden_dim': 10},
+                              name = 'mod',
+                              causal = True )
+test_initial_embedding_blocks(model, variable_dict = {})
+del model
+
+
+model = EmbeddingWithPadding( config = {'hidden_dim': 10},
+                              name = 'mod',
+                              causal = True )
+init_params = model.init( rngs=key,
+                          datamat=jnp.zeros( unaligned_seq.shape,dtype=int ) )
+test_initial_embedding_blocks(model, variable_dict = init_params)
+del model, init_params
+
+
+model = TAPEEmbedding( config = {'hidden_dim': 10},
+                        name = 'mod',
+                        causal = True )
+init_params = model.init( rngs=key,
+                          datamat=jnp.zeros( unaligned_seq.shape,dtype=int ),
+                          training=False )
+test_initial_embedding_blocks(model, variable_dict = init_params)
+del model, init_params
+
+
+for conv_kern_size in [1, 3, 20]:
+    model = ConvEmbedding( config = {'base_alphabet_size': 23,
+                                      'conv_emb_kernel_size': conv_kern_size,
+                                      'hidden_dim': 10},
+                            name = 'mod',
+                            causal = True )
+    init_params = model.init( rngs=key,
+                              datamat=jnp.zeros( unaligned_seq.shape,dtype=int ),
+                              training=False )
+    test_initial_embedding_blocks(model, variable_dict = init_params)
+    del model, init_params, conv_kern_size
+
+    
+############
+### CNNs   #
+############
+def test_neural_embedding_blocks(model, variable_dict):
+    whole_seq_result = model.apply( datamat=unaligned_seq,
+                                      variables=variable_dict,
+                                      training=False,
+                                      sow_intermediates=False)
+    if type(whole_seq_result) == tuple:
+        whole_seq_result = whole_seq_result[1]
         
-#     per_site_result = []
-#     for l in range(1,unaligned_seq.shape[1]+1):
-#         clipped_input = unaligned_seq[:,:l]
-#         last_site_result = model.apply( datamat=clipped_input,
-#                                           variables=variable_dict,
-#                                           training=False,
-#                                           sow_intermediates=False )
-#         if type(last_site_result) == tuple:
-#             last_site_result = last_site_result[1]
+    per_site_result = []
+    for l in range(1,unaligned_seq.shape[1]+1):
+        clipped_input = unaligned_seq[:,:l]
+        last_site_result = model.apply( datamat=clipped_input,
+                                          variables=variable_dict,
+                                          training=False,
+                                          sow_intermediates=False )
+        if type(last_site_result) == tuple:
+            last_site_result = last_site_result[1]
         
-#         last_site_result = last_site_result[:,-1,:][:,None,:]
-#         per_site_result.append(last_site_result)
-#     per_site_result = jnp.concatenate( per_site_result, axis=1 )
+        last_site_result = last_site_result[:,-1,:][:,None,:]
+        per_site_result.append(last_site_result)
+    per_site_result = jnp.concatenate( per_site_result, axis=1 )
     
-#     assert jnp.allclose(per_site_result, whole_seq_result)
-    
-    
-# from models.sequence_embedders.cnn.embedders import CNNSeqEmb
-# from models.sequence_embedders.cnn.blocks_fns import ConvnetBlock
-
-# config = {'kern_size_lst': [1,3,5],
-#           'hidden_dim': 10}
-# model = CNNSeqEmb( initial_embed_module = EmbeddingWithPadding,
-#                     first_block_module = ConvnetBlock,
-#                     subsequent_block_module = ConvnetBlock,
-#                     causal = True,
-#                     config = config,
-#                     name = 'mod' )
-# init_params = model.init( rngs=key,
-#                           datamat=jnp.zeros(unaligned_seq.shape,dtype=int),
-#                           training=False,
-#                           sow_intermediates=False)
-# test_neural_embedding_blocks(model, variable_dict=init_params)
-# del config, model, init_params
-
-
-# #############
-# ### LSTMs   #
-# #############
-# from models.sequence_embedders.lstm.embedders import LSTMSeqEmb
-# from models.sequence_embedders.lstm.blocks_fns import UnidirecLSTMLayer
-
-# for n in [1, 3]:
-#     config = {'n_layers': n,
-#               'hidden_dim': 10}
-#     model = LSTMSeqEmb( initial_embed_module = EmbeddingWithPadding,
-#                         first_block_module = UnidirecLSTMLayer,
-#                         subsequent_block_module = UnidirecLSTMLayer,
-#                         causal = True,
-#                         config = config,
-#                         name = 'mod' )
-#     init_params = model.init( rngs=key,
-#                               datamat=jnp.zeros(unaligned_seq.shape,dtype=int),
-#                               training=False,
-#                               sow_intermediates=False)
-#     test_neural_embedding_blocks(model, variable_dict=init_params)
-#     del config, model, init_params, n
-
-
-###################
-### Transformers  #
-###################
-# from models.sequence_embedders.transformer.embedders import TransfSeqEmb
-# from models.sequence_embedders.transformer.blocks_fns import (TransfBaseBlock,
-#                                                               RoPETransfBlock,
-#                                                               TransfBaseBlockWithAbsPosEmbedding,
-#                                                               TapeTransfBlock)
-
-# for n in [1, 3]:
-#     config = {'num_heads': 2,
-#               'num_blocks': n,
-#               'hidden_dim': 10}
-    # model = TransfSeqEmb( initial_embed_module = EmbeddingWithPadding,
-    #                     first_block_module = TransfBaseBlockWithAbsPosEmbedding,
-    #                     subsequent_block_module = TransfBaseBlock,
-    #                     causal = True,
-    #                     config = config,
-    #                     name = 'mod' )
-    # init_params = model.init( rngs=key,
-    #                           datamat=jnp.zeros(unaligned_seq.shape,dtype=int),
-    #                           training=False,
-    #                           sow_intermediates=False)
-    # test_neural_embedding_blocks(model, variable_dict=init_params)
-    # del config, model, init_params
-    
-    # config = {'num_heads': 2,
-    #           'num_blocks': n,
-    #           'hidden_dim': 12}
-    # model = TransfSeqEmb( initial_embed_module = EmbeddingWithPadding,
-    #                     first_block_module = RoPETransfBlock,
-    #                     subsequent_block_module = RoPETransfBlock,
-    #                     causal = True,
-    #                     config = config,
-    #                     name = 'mod' )
-    # init_params = model.init( rngs=key,
-    #                           datamat=jnp.zeros(unaligned_seq.shape,dtype=int),
-    #                           training=False,
-    #                           sow_intermediates=False)
-    # test_neural_embedding_blocks(model, variable_dict=init_params)
-    # del config, model, init_params, n
+    assert jnp.allclose(per_site_result, whole_seq_result)
     
     
+from models.sequence_embedders.cnn.embedders import CNNSeqEmb
+from models.sequence_embedders.cnn.blocks_fns import ConvnetBlock
 
-# ####################
-# ### Mamba modules  #
-# ####################
-# from models.sequence_embedders.mamba.embedders import MambaSeqEmb
-# from models.sequence_embedders.mamba.blocks_fns import UnidirectResidualMambaLayer
+config = {'kern_size_lst': [1,3,5],
+          'hidden_dim': 10}
+model = CNNSeqEmb( initial_embed_module = EmbeddingWithPadding,
+                    first_block_module = ConvnetBlock,
+                    subsequent_block_module = ConvnetBlock,
+                    causal = True,
+                    config = config,
+                    name = 'mod' )
+init_params = model.init( rngs=key,
+                          datamat=jnp.zeros(unaligned_seq.shape,dtype=int),
+                          training=False,
+                          sow_intermediates=False)
+test_neural_embedding_blocks(model, variable_dict=init_params)
+del config, model, init_params
 
-# for n in [1, 3]:
-#     config = {'num_blocks': n,
-#               'hidden_dim': 10,
-#               'expansion_factor': 2,
-#               }
-#     model = MambaSeqEmb( initial_embed_module = EmbeddingWithPadding,
-#                         first_block_module = UnidirectResidualMambaLayer,
-#                         subsequent_block_module = UnidirectResidualMambaLayer,
-#                         causal = True,
-#                         config = config,
-#                         name = 'mod' )
-#     init_params = model.init( rngs=key,
-#                               datamat=jnp.zeros(unaligned_seq.shape,dtype=int),
-#                               training=False,
-#                               sow_intermediates=False)
-#     test_neural_embedding_blocks(model, variable_dict=init_params)
-#     del config, model, init_params
-# del unaligned_seq
+
+#############
+### LSTMs   #
+#############
+from models.sequence_embedders.lstm.embedders import LSTMSeqEmb
+from models.sequence_embedders.lstm.blocks_fns import UnidirecLSTMLayer
+
+for n in [1, 3]:
+    config = {'n_layers': n,
+              'hidden_dim': 10}
+    model = LSTMSeqEmb( initial_embed_module = EmbeddingWithPadding,
+                        first_block_module = UnidirecLSTMLayer,
+                        subsequent_block_module = UnidirecLSTMLayer,
+                        causal = True,
+                        config = config,
+                        name = 'mod' )
+    init_params = model.init( rngs=key,
+                              datamat=jnp.zeros(unaligned_seq.shape,dtype=int),
+                              training=False,
+                              sow_intermediates=False)
+    test_neural_embedding_blocks(model, variable_dict=init_params)
+    del config, model, init_params, n
+
+
+##################
+## Transformers  #
+##################
+from models.sequence_embedders.transformer.embedders import TransfSeqEmb
+from models.sequence_embedders.transformer.blocks_fns import (TransfBaseBlock,
+                                                              RoPETransfBlock,
+                                                              TransfBaseBlockWithAbsPosEmbedding,
+                                                              TapeTransfBlock)
+
+for n in [1, 3]:
+    config = {'num_heads': 2,
+              'num_blocks': n,
+              'hidden_dim': 10}
+    model = TransfSeqEmb( initial_embed_module = EmbeddingWithPadding,
+                        first_block_module = TransfBaseBlockWithAbsPosEmbedding,
+                        subsequent_block_module = TransfBaseBlock,
+                        causal = True,
+                        config = config,
+                        name = 'mod' )
+    init_params = model.init( rngs=key,
+                              datamat=jnp.zeros(unaligned_seq.shape,dtype=int),
+                              training=False,
+                              sow_intermediates=False)
+    test_neural_embedding_blocks(model, variable_dict=init_params)
+    del config, model, init_params
+    
+    config = {'num_heads': 2,
+              'num_blocks': n,
+              'hidden_dim': 12}
+    model = TransfSeqEmb( initial_embed_module = EmbeddingWithPadding,
+                        first_block_module = RoPETransfBlock,
+                        subsequent_block_module = RoPETransfBlock,
+                        causal = True,
+                        config = config,
+                        name = 'mod' )
+    init_params = model.init( rngs=key,
+                              datamat=jnp.zeros(unaligned_seq.shape,dtype=int),
+                              training=False,
+                              sow_intermediates=False)
+    test_neural_embedding_blocks(model, variable_dict=init_params)
+    del config, model, init_params, n
+    
+    
+
+####################
+### Mamba modules  #
+####################
+from models.sequence_embedders.mamba.embedders import MambaSeqEmb
+from models.sequence_embedders.mamba.blocks_fns import UnidirectResidualMambaLayer
+
+for n in [1, 3]:
+    config = {'num_blocks': n,
+              'hidden_dim': 10,
+              'expansion_factor': 2,
+              }
+    model = MambaSeqEmb( initial_embed_module = EmbeddingWithPadding,
+                        first_block_module = UnidirectResidualMambaLayer,
+                        subsequent_block_module = UnidirectResidualMambaLayer,
+                        causal = True,
+                        config = config,
+                        name = 'mod' )
+    init_params = model.init( rngs=key,
+                              datamat=jnp.zeros(unaligned_seq.shape,dtype=int),
+                              training=False,
+                              sow_intermediates=False)
+    test_neural_embedding_blocks(model, variable_dict=init_params)
+    del config, model, init_params
+del unaligned_seq
 
 
 ###############################################################################
@@ -358,13 +356,13 @@ for l in range(1,anc.shape[1]+1):
                                     training=False,
                                     sow_intermediates=False )
     
-    to_ap = last_site_result_dict['FPO_logprob_emit_match'][:,:,-1,...][:,:,None,:,:]
+    to_ap = last_site_result_dict['FPO_logprob_emit_match'][:,:,-1,:,:][:,:,None,:,:]
     per_site_result['FPO_logprob_emit_match'].append(to_ap)
 
-    to_ap = last_site_result_dict['FPO_logprob_transits'][:,:,-1,...][:,:,None,:,:]
+    to_ap = last_site_result_dict['FPO_logprob_transits'][:,:,-1,:,:][:,:,None,:,:]
     per_site_result['FPO_logprob_transits'].append(to_ap)
     
-    to_ap = last_site_result_dict['FPO_logprob_emit_indel'][:,-1,...][:,None,:]
+    to_ap = last_site_result_dict['FPO_logprob_emit_indel'][:,-1,:][:,None,:]
     per_site_result['FPO_logprob_emit_indel'].append(to_ap)
     
     
@@ -385,3 +383,4 @@ pred = jnp.concatenate( per_site_result['FPO_logprob_emit_indel'],axis=1)
 true = whole_seq_result_dict['FPO_logprob_emit_indel']
 assert jnp.allclose(pred, true)
 
+print('[PASS] all model blocks are properly causal')
