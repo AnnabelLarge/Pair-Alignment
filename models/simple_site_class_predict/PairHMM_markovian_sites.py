@@ -1139,6 +1139,46 @@ class MarkovPairHMM(ModuleBase):
         return logP_perSamp_raw
     
     
+    def _return_bound_sigmoid_limits(self):
+        ### rate_matrix_module
+        # exchangeabilities
+        exchange_min_val = self.rate_matrix_module.exchange_min_val
+        exchange_max_val = self.rate_matrix_module.exchange_max_val
+        
+        #rate multiplier
+        if self.rate_matrix_module.rate_mult_activation == 'bound_sigmoid':
+            rate_mult_min_val = self.rate_matrix_module.rate_mult_min_val
+            rate_mult_max_val = self.rate_matrix_module.rate_mult_max_val
+        
+        
+        ### transitions_module
+        # insert rate lambda
+        lam_min_val = self.transitions_module.lam_min_val
+        lam_max_val = self.transitions_module.lam_max_val
+        
+        # offset (for deletion rate mu)
+        offs_min_val = self.transitions_module.offs_min_val
+        offs_max_val = self.transitions_module.offs_max_val
+        
+        # r extension probability
+        r_extend_min_val = self.transitions_module.r_extend_min_val
+        r_extend_max_val = self.transitions_module.r_extend_max_val
+        
+        params_range = { "exchange_min_val": exchange_min_val,
+                         "exchange_max_val": exchange_max_val,
+                         "rate_mult_min_val": rate_mult_min_val,
+                         "rate_mult_max_val": rate_mult_max_val,
+                         "lam_min_val": lam_min_val,
+                         "lam_max_val": lam_max_val,
+                         "offs_min_val": offs_min_val,
+                         "offs_max_val": offs_max_val,
+                         "r_extend_min_val": r_extend_min_val,
+                         "r_extend_max_val": r_extend_max_val,
+                         }
+        
+        return params_range
+    
+    
 class MarkovPairHMMLoadAll(MarkovPairHMM):
     """
     same as MarkovPairHMM, but load values (i.e. no free parameters)

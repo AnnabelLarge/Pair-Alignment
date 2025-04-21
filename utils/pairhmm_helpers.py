@@ -17,6 +17,14 @@ def safe_log(x):
 
 def bounded_sigmoid(x, min_val, max_val, *args, **kwargs):
     return min_val + (max_val - min_val) / (1 + jnp.exp(-x))
+    
+def bounded_sigmoid_inverse(y, min_val, max_val, eps=1e-4):
+    """
+    note: this is only for logit initialization; jnp.clip has bad 
+          gradients at extremes
+    """
+    y = jnp.clip(y, min_val + eps, max_val - eps)
+    return safe_log( (y - min_val) / (max_val - y) )
 
 def concat_along_new_last_axis(arr_lst):
     return jnp.concatenate( [arr[...,None] for arr in arr_lst], 
