@@ -61,6 +61,9 @@ def fill_with_default_values(args):
     
         if args.pred_model_type == 'pairhmm_indp_sites':
             args.pred_config['num_tkf_site_classes'] = 1
+
+        if 'full_alphabet_size' not in provided_args:
+            args.full_alphabet_size = 44
         
     
 def enforce_valid_defaults(args):
@@ -89,7 +92,6 @@ def share_top_level_args(args):
         args.anc_enc_config['seq_padding_idx'] = args.seq_padding_idx
         args.desc_dec_config['seq_padding_idx'] = args.seq_padding_idx
     
-    
     elif args.pred_model_type.startswith('neural_hmm'):
         args.anc_enc_config['base_alphabet_size'] = args.base_alphabet_size
         args.desc_dec_config['base_alphabet_size'] = args.base_alphabet_size
@@ -109,3 +111,6 @@ def share_top_level_args(args):
     args.pred_config['align_padding_idx'] = args.align_padding_idx
     args.pred_config['base_alphabet_size'] = args.base_alphabet_size
     args.pred_config['full_alphabet_size'] = args.full_alphabet_size
+
+
+    

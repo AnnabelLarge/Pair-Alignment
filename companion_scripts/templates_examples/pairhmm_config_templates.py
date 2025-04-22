@@ -85,7 +85,7 @@ def make_pairhmm_train_config(load_all: bool):
                            "forward_pass_outputs":"[BOOL]",
                            }),
                        "save_per_sample_losses": "[BOOL]",
-                       "update_grads": "[BOOL]"
+                       "update_grads": "[BOOL]",
                        "histogram_output_freq": "[INT]",
                        
                        "LINEBREAK104":"",
@@ -98,7 +98,7 @@ def make_pairhmm_train_config(load_all: bool):
 
 
 if __name__ == "__main__":
-    to_write = make_pairhmm_train_config(load_all = False)
+    to_write = make_pairhmm_train_config(load_all = True)
     
     with open(f'pairHMM_train_template.json','w') as g:
         g.write(to_write)
