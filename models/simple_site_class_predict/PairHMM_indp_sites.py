@@ -731,7 +731,7 @@ class IndpPairHMMLoadAll(IndpPairHMMFitBoth):
             self.transitions_module = TKF92TransitionLogprobsFromFile(config = self.config,
                                                      name = f'tkf92 indel model')
             
-    def write_params(self, **kwargs):
+    def write_params(self, t_array, **kwargs):
         ##########################
         ### the final matrices   #
         ##########################  
