@@ -269,14 +269,16 @@ class MarkovPairHMM(ModuleBase):
         ### normalize
         if self.norm_loss_by == 'desc_len':
             # where descendant is not pad or gap
-            mask = (aligned_inputs[...,1] !=0) & (aligned_inputs[...,1] !=self.gap_tok)
-
+            banned_toks = jnp.array([0,1,2,self.gap_tok])
+            
         elif self.norm_loss_by == 'align_len':
             # where descendant is not pad (but could be gap)
-            mask = (aligned_inputs[...,1] != 0).sum(axis=1)
+            banned_toks = jnp.array([0,1,2])
         
-        # don't count <bos> or <eos>, so always subtract 2
-        length_for_normalization = mask.sum(axis=1) - 2
+        mask = ~jnp.isin( aligned_inputs[...,1], banned_toks)
+        length_for_normalization = mask.sum(axis=1)
+        del mask
+        
         joint_neg_logP_length_normed = joint_neg_logP / length_for_normalization
         loss = jnp.mean(joint_neg_logP_length_normed)
         
@@ -314,10 +316,13 @@ class MarkovPairHMM(ModuleBase):
         B = aligned_inputs.shape[0]
         L_align = aligned_inputs.shape[1]
         
-        # get lengths; subtract two to remove <bos> and <eos>
-        align_len = ~jnp.isin( aligned_inputs[...,0], jnp.array([0,1,2]) ).sum(axis=1)
-        anc_len = ~jnp.isin( aligned_inputs[...,0], jnp.array([0,1,2,self.gap_tok]) ).sum(axis=1)
-        desc_len = ~jnp.isin( aligned_inputs[...,1], jnp.array([0,1,2,self.gap_tok]) ).sum(axis=1)
+        # get lengths, not including <bos> and <eos>
+        align_len = ~jnp.isin( aligned_inputs[...,0], jnp.array([0,1,2]) )
+        anc_len = ~jnp.isin( aligned_inputs[...,0], jnp.array([0,1,2,self.gap_tok]) )
+        desc_len = ~jnp.isin( aligned_inputs[...,1], jnp.array([0,1,2,self.gap_tok]) )
+        align_len = align_len.sum(axis=1)
+        anc_len = anc_len.sum(axis=1)
+        desc_len = desc_len.sum(axis=1)
         
         # get score matrices
         out = self._get_scoring_matrices( t_array=t_array,
@@ -1045,7 +1050,7 @@ class MarkovPairHMM(ModuleBase):
         
     
     def _init_rate_matrix_module(self, config):
-        mod = RateMatFromFile( config = self.config,
+        mod = RateMatFitBoth( config = self.config,
                                name = f'get rate matrix' )
         return mod, 'GTR'
     
@@ -1240,7 +1245,7 @@ class MarkovPairHMMLoadAll(MarkovPairHMM):
     def _init_rate_matrix_module(self, config):
         mod = RateMatFromFile( config = self.config,
                                name = f'get rate matrix' )
-        return mode, 'GTR'
+        return mod, 'GTR'
 
 
 

@@ -107,12 +107,12 @@ def init_pairhmm_markov_sites( seq_shapes,
     ######################
     ### Protein models   #
     ######################
-    if pred_config['preset_name'] == 'load_all':
+    if pred_config['preset_name'] == 'fit_all':
         from models.simple_site_class_predict.PairHMM_markovian_sites import MarkovPairHMM
         pairhmm_instance = MarkovPairHMM(config = pred_config,
                                          name = 'MarkovPairHMM')
     
-    elif pred_config['preset_name'] == 'fit_all':
+    elif pred_config['preset_name'] == 'load_all':
         from models.simple_site_class_predict.PairHMM_markovian_sites import MarkovPairHMMLoadAll
         pairhmm_instance = MarkovPairHMMLoadAll(config = pred_config,
                                                 name = 'MarkovPairHMMLoadAll')
