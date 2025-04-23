@@ -9,6 +9,8 @@ models:
 =======
 MarkovPairHMM
 MarkovPairHMMLoadAll
+MarkovHKY85PairHMM
+MarkovHKY85PairHMMLoadAll
 
 """
 import pickle
@@ -28,7 +30,9 @@ from models.simple_site_class_predict.emission_models import (LogEqulVecFromCoun
                                                               RateMatFromFile,
                                                               RateMatFitBoth,
                                                               SiteClassLogprobs,
-                                                              SiteClassLogprobsFromFile)
+                                                              SiteClassLogprobsFromFile,
+                                                              HKY85,
+                                                              HKY85FromFile)
 from models.simple_site_class_predict.transition_models import (TKF92TransitionLogprobs,
                                                         TKF92TransitionLogprobsFromFile)
 from utils.pairhmm_helpers import (bounded_sigmoid,
@@ -91,8 +95,6 @@ def flip_sequences( inputs,
     
 class MarkovPairHMM(ModuleBase):
     """
-    THIS ASSUMES GAP TOKEN IS 43!!!
-    
     main methods:
     =============
         - setup    
@@ -124,6 +126,7 @@ class MarkovPairHMM(ModuleBase):
     def setup(self):
         self.num_site_classes = self.config['num_emit_site_classes']
         self.norm_loss_by = self.config['norm_loss_by']
+        self.gap_tok = self.config['gap_tok']
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
         
         ### how to score emissions from indel sites
@@ -142,8 +145,9 @@ class MarkovPairHMM(ModuleBase):
     
         ### rate matrix to score emissions from match sites
         # init with values from LG08
-        self.rate_matrix_module = RateMatFitBoth(config = self.config,
-                                                 name = f'get rate matrix')
+        out = self._init_rate_matrix_module(self.config)
+        self.rate_matrix_module, self.subst_model_type = out
+        del out
         
         
         ### Has to be TKF92 joint
@@ -265,8 +269,7 @@ class MarkovPairHMM(ModuleBase):
         ### normalize
         if self.norm_loss_by == 'desc_len':
             # where descendant is not pad or gap
-            # ASSUME gap token is 43
-            mask = (aligned_inputs[...,1] !=0) & (aligned_inputs[...,1] !=43)
+            mask = (aligned_inputs[...,1] !=0) & (aligned_inputs[...,1] !=self.gap_tok)
 
         elif self.norm_loss_by == 'align_len':
             # where descendant is not pad (but could be gap)
@@ -312,9 +315,9 @@ class MarkovPairHMM(ModuleBase):
         L_align = aligned_inputs.shape[1]
         
         # get lengths; subtract two to remove <bos> and <eos>
-        align_len = (aligned_inputs[...,0] != 0).sum(axis=1) - 2
-        anc_len = ( (aligned_inputs[...,0] !=0) & (aligned_inputs[...,0] !=43) ).sum(axis=1) - 2
-        desc_len = ( (aligned_inputs[...,1] !=0) & (aligned_inputs[...,1] !=43) ).sum(axis=1) - 2
+        align_len = ~jnp.isin( aligned_inputs[...,0], jnp.array([0,1,2]) ).sum(axis=1)
+        anc_len = ~jnp.isin( aligned_inputs[...,0], jnp.array([0,1,2,self.gap_tok]) ).sum(axis=1)
+        desc_len = ~jnp.isin( aligned_inputs[...,1], jnp.array([0,1,2,self.gap_tok]) ).sum(axis=1)
         
         # get score matrices
         out = self._get_scoring_matrices( t_array=t_array,
@@ -690,14 +693,20 @@ class MarkovPairHMM(ModuleBase):
         if 'exchangeabilities_logits_vec' in dir(self.rate_matrix_module):
             exch_logits = self.rate_matrix_module.exchangeabilities_logits_vec
             exchangeabilities = self.rate_matrix_module.exchange_activation( exch_logits )
+        
+            if self.subst_model_type == 'GTR':
+                np.savetxt( f'{out_folder}/PARAMS_exchangeabilities.tsv', 
+                            np.array(exchangeabilities), 
+                            fmt = '%.4f',
+                            delimiter= '\t' )
+                
+                with open(f'{out_folder}/PARAMS_exchangeabilities.npy','wb') as g:
+                    jnp.save(g, exchangeabilities)
             
-            np.savetxt( f'{out_folder}/PARAMS_exchangeabilities.tsv', 
-                        np.array(exchangeabilities), 
-                        fmt = '%.4f',
-                        delimiter= '\t' )
-            
-            with open(f'{out_folder}/PARAMS_exchangeabilities.npy','wb') as g:
-                jnp.save(g, exchangeabilities)
+            elif self.subst_model_type == 'HKY85':
+                with open(f'{out_folder}/PARAMS_HKY85_model.txt','w') as g:
+                    g.write(f'transition rate, ti: {exchangeabilities[1]}')
+                    g.write(f'transition rate, tv: {exchangeabilities[0]}')
                 
         # emissions: rate multipliers
         if 'rate_mult_logits' in dir(self.rate_matrix_module):
@@ -1034,7 +1043,11 @@ class MarkovPairHMM(ModuleBase):
         
         return posterior_log_marginals
         
-
+    
+    def _init_rate_matrix_module(self, config):
+        mod = RateMatFromFile( config = self.config,
+                               name = f'get rate matrix' )
+        return mod, 'GTR'
     
     def _get_scoring_matrices( self,
                                t_array,
@@ -1178,7 +1191,10 @@ class MarkovPairHMM(ModuleBase):
         
         return params_range
     
-    
+
+###############################################################################
+### Variants   ################################################################
+###############################################################################
 class MarkovPairHMMLoadAll(MarkovPairHMM):
     """
     same as MarkovPairHMM, but load values (i.e. no free parameters)
@@ -1197,6 +1213,7 @@ class MarkovPairHMMLoadAll(MarkovPairHMM):
     def setup(self):
         self.num_site_classes = self.config['num_emit_site_classes']
         self.norm_loss_by = self.config['norm_loss_by']
+        self.gap_tok = self.config['gap_tok']
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
         
         ### how to score emissions from indel sites
@@ -1205,8 +1222,9 @@ class MarkovPairHMMLoadAll(MarkovPairHMM):
         
         
         ### rate matrix to score emissions from match sites
-        self.rate_matrix_module = RateMatFromFile(config = self.config,
-                                                 name = f'get rate matrix')
+        out = self._init_rate_matrix_module(self.config)
+        self.rate_matrix_module, self.subst_model_type = out
+        del out
         
         ### probability of site classes
         self.site_class_probability_module = SiteClassLogprobsFromFile(config = self.config,
@@ -1218,197 +1236,34 @@ class MarkovPairHMMLoadAll(MarkovPairHMM):
     
     def write_params(self, **kwargs):
         pass
-
-
-
-
-
-
-
-### TODO: uncomment and update only if flax models still return nan gradients
-# class WithForLoopMarkovSitesJointPairHMM(MarkovSitesJointPairHMM):
-#     """
-#     same as MarkovSitesJointPairHMM, but replace scan with for loop
-#     """
-#     config: dict
-#     name: str
     
-#     def __call__(self,
-#                  aligned_inputs,
-#                  t_array,
-#                  sow_intermediates: bool):
-#         T = t_array.shape[0]
-#         B = aligned_inputs.shape[0]
-#         L = aligned_inputs.shape[1]
-#         C = self.num_site_classes
-        
-#         ############################
-#         ### get logprob matrices   #
-#         ############################
-#         ### emissions from indels
-#         logprob_emit_at_indel = self.indel_prob_module( sow_intermediates = sow_intermediates )
-        
-        
-#         ### emissions from match sites
-#         # this is already rho * chi * pi
-#         rate_mat_times_rho = self.rate_matrix_module(logprob_equl = logprob_emit_at_indel,
-#                                                      sow_intermediates = sow_intermediates)
-        
-#         # rate_mat_times_rho: (C, alph, alph)
-#         # time: (T,)
-#         # output: (T, C, alph, alph)
-#         to_expm = jnp.multiply( rate_mat_times_rho[None, ...],
-#                                 t_array[..., None,None,None] )
-#         cond_prob_emit_at_match = expm(to_expm)
-#         cond_logprob_emit_at_match = safe_log (cond_prob_emit_at_match )
-#         joint_logprob_emit_at_match = cond_logprob_emit_at_match + logprob_emit_at_indel[None,:,:,None]
-#         del to_expm
-        
-        
-#         ### transition logprobs
-#         # (T,C,4,4)
-#         logprob_transit = self.transitions_module(t_array = t_array,
-#                                                   sow_intermediates = sow_intermediates)
-        
-        
-        
-#         ### probability of being in any particular class
-#         log_class_probs = self.site_class_probability_module(sow_intermediates = sow_intermediates)
-        
-        
-#         ######################################
-#         ### initialize with <start> -> any   #
-#         ######################################
-#         prev_state = aligned_inputs[:,0,2] # B,
-#         curr_state = aligned_inputs[:,1,2] # B,
-#         anc_toks =    aligned_inputs[:,1,0] # B,
-#         desc_toks =   aligned_inputs[:,1,1] # B,
-        
-#         # for easier indexing: code <eos> as 4
-#         curr_state = jnp.where( curr_state != 5, curr_state, 4)
-        
-        
-#         ### emissions
-#         e = jnp.zeros( (T, C, B,) )
+    def _init_rate_matrix_module(self, config):
+        mod = RateMatFromFile( config = self.config,
+                               name = f'get rate matrix' )
+        return mode, 'GTR'
 
-#         # match
-#         e = e + jnp.where( curr_state == 1,
-#                            joint_logprob_emit_at_match[:,:,anc_toks-3, desc_toks-3],
-#                            0 )
-#         # ins (score descendant)
-#         e = e + jnp.where( curr_state == 2,
-#                            logprob_emit_at_indel[:,desc_toks-3],
-#                            0 )
-#         # del (score ancestor)
-#         e = e + jnp.where( curr_state == 3,
-#                            logprob_emit_at_indel[:,anc_toks-3],
-#                            0 )
-        
-        
-#         ### transitions
-#         tmp = jnp.take_along_axis(arr = logprob_transit, 
-#                                   indices = prev_state[None, None, :, None]-1, 
-#                                   axis=2)
-        
-#         tr = jnp.take_along_axis( arr = tmp,
-#                                   indices = curr_state[None, None, :, None]-1,
-#                                   axis = 3)
-#         tr = tr[...,0] + log_class_probs[None, :, None]
-        
-#         # init_carry = {'alpha': (tr + e),
-#         #               'state': curr_state}
-        
-        
-#         ##########################################################
-#         ### for loop over length dimension to end of alignment   #
-#         ##########################################################
-#         # idx_arr = jnp.array( [i for i in range(2, aligned_inputs.shape[1])] )
-        
-#         alpha = tr + e
-#         for pos in range(2, aligned_inputs.shape[1]):
-#             prev_state = aligned_inputs[:,pos-1,2]
-#             curr_state = aligned_inputs[:,  pos,2]
-#             anc_toks =   aligned_inputs[:,  pos,0]
-#             desc_toks =  aligned_inputs[:,  pos,1]
-            
-#             # for easier indexing: code <eos> as 4
-#             curr_state = jnp.where( curr_state != 5, curr_state, 4)
-            
-            
-#             ### emissions
-#             e = jnp.zeros( (T, C, B,) )
-#             e = e + jnp.where( curr_state == 1,
-#                                 joint_logprob_emit_at_match[:,:,anc_toks-3, desc_toks-3],
-#                                 0 )
-#             e = e + jnp.where( curr_state == 2,
-#                                 logprob_emit_at_indel[:,desc_toks-3],
-#                                 0 )
-#             e = e + jnp.where( curr_state == 3,
-#                                 logprob_emit_at_indel[:,anc_toks-3],
-#                                 0 )
-            
-            
-#             ### transition probabilities
-#             tmp = jnp.take_along_axis(arr = logprob_transit, 
-#                                       indices = prev_state[None, None, :, None]-1, 
-#                                       axis=2)
-            
-#             tr = jnp.take_along_axis( arr = tmp,
-#                                       indices = curr_state[None, None, :, None]-1,
-#                                       axis = 3)
-            
-#             tr = tr[...,0]
-#             del tmp
 
-#             def main_body(in_carry):
-#                 # (T, C_prev, A, A), (C_curr) -> (T, C_prev, C_curr, A)
-#                 tr_per_class = tr[:, :, None, :] + log_class_probs[None, None, :, None]
-                
-#                 # like dot product with C_prev, C_curr
-#                 # output is T, C, B
-#                 return e + logsumexp(in_carry[:, :, None, :] + tr_per_class, 
-#                                       axis=1)
-            
-#             def end(in_carry):
-#                 # output is T, C, B
-#                 return tr + in_carry
-            
-#             ### alpha update, in log space ONLY if curr_state is not pad
-#             alpha = jnp.where(curr_state != 0,
-#                                   jnp.where( curr_state != 4,
-#                                               main_body(alpha),
-#                                               end(alpha) ),
-#                                   alpha )
-            
-            
-#         # T, B
-#         logprob_perSamp_perTime = logsumexp(alpha, axis=1)
-        
-#         ### marginalize over times
-#         # (B,)
-#         if t_array.shape[0] > 1:
-#             neg_logP = self.marginalize_over_times(logprob_perSamp_perTime = logprob_perSamp_perTime,
-#                                         exponential_dist_param = self.exponential_dist_param,
-#                                         t_array = t_array)
-#         else:
-#             neg_logP = logprob_perSamp_perTime[0,:]
-        
-        
-#         ### normalize
-#         if self.norm_loss_by == 'desc_len':
-#             # don't count <bos>
-#             predicate = (aligned_inputs[...,0] !=0) & (aligned_inputs[...,0] !=43)
-#             length_for_normalization = predicate.sum(axis=1) - 1
-        
-#         elif self.norm_loss_by == 'align_len':
-#             # don't count <bos>
-#             length_for_normalization = (aligned_inputs[...,0] != 0).sum(axis=1) - 1
-        
-#         logprob_perSamp_length_normed = neg_logP / length_for_normalization
-#         loss = -jnp.mean(logprob_perSamp_length_normed)
-        
-#         out = {'loss': loss,
-#                'neg_logP': neg_logP,
-#                'neg_logP_length_normed': logprob_perSamp_length_normed}
-        
-#         return out
+
+class MarkovHKY85PairHMM(MarkovPairHMM):
+    """
+    Identical to MarkovPairHMM, but uses the HKY85 substitution model.
+    """
+    config: dict
+    name: str
+
+    def _init_rate_matrix_module(self, config):
+        mod = HKY85( config = self.config,
+                               name = f'get rate matrix' )
+        return mod, 'HKY85'
+
+class MarkovHKY85PairHMMLoadAll(MarkovPairHMMLoadAll):
+    """
+    Identical to MarkovPairHMMLoadAll, but uses the HKY85 substitution model.
+    """
+    config: dict
+    name: str
+
+    def _init_rate_matrix_module(self, config):
+        mod = HKY85FromFile( config = self.config,
+                               name = f'get rate matrix' )
+        return mod, 'HKY85'

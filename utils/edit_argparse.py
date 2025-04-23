@@ -24,6 +24,8 @@ def fill_with_default_values(args):
     if 'update_grads' not in provided_args:
         args.update_grads = True
     
+    if 'gap_tok' not in provided_args:
+        args.gap_tok = 43
     
     ### extra defaults
     if args.pred_model_type == 'feedforward':
@@ -101,10 +103,10 @@ def share_top_level_args(args):
         args.pred_config['emission_alphabet_size'] = args.emission_alphabet_size
         args.pred_config['exchang_config']['emission_alphabet_size'] = args.emission_alphabet_size
         args.pred_config['equilibr_config']['emission_alphabet_size'] = args.emission_alphabet_size
-        
 
     elif args.pred_model_type.startswith('pairhmm'):
         args.pred_config['emission_alphabet_size'] = args.emission_alphabet_size
+        args.pred_config['gap_tok'] = args.gap_tok
     
     args.pred_config['norm_loss_by'] = args.norm_loss_by
     args.pred_config['seq_padding_idx'] = args.seq_padding_idx

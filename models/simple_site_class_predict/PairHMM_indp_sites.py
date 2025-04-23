@@ -9,11 +9,8 @@ models here:
 ============
 'IndpPairHMMFitBoth', 
 'IndpPairHMMLoadAll',
-
-
-not used:
-=========
-'IndpPairHMMFitRateMult',
+'IndpHKY85PairHMMFitBoth', 
+'IndpHKY85PairHMMLoadAll',
 
 
 main methods for all models:
@@ -45,7 +42,9 @@ from models.simple_site_class_predict.emission_models import (LogEqulVecFromCoun
                                                               RateMatFromFile,
                                                               RateMatFitBoth,
                                                               SiteClassLogprobs,
-                                                              SiteClassLogprobsFromFile)
+                                                              SiteClassLogprobsFromFile,
+                                                              HKY85,
+                                                              HKY85FromFile)
 from models.simple_site_class_predict.transition_models import (TKF91TransitionLogprobs,
                                                                 TKF92TransitionLogprobs,
                                                                 TKF91TransitionLogprobsFromFile,
@@ -88,6 +87,7 @@ class IndpPairHMMFitBoth(ModuleBase):
         num_emit_site_classes = self.config['num_emit_site_classes']
         self.indel_model_type = self.config['indel_model_type']
         self.norm_loss_by = self.config['norm_loss_by']
+        self.gap_tok = self.config['gap_tok']
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
         
         ### how to score emissions from indel sites
@@ -100,8 +100,9 @@ class IndpPairHMMFitBoth(ModuleBase):
         
         
         ### rate matrix to score emissions from match sites
-        self.rate_matrix_module = RateMatFitBoth(config = self.config,
-                                                 name = f'get rate matrix')
+        out = self._init_rate_matrix_module(self.config)
+        self.rate_matrix_module, self.subst_model_type = out
+        del out
         
         
         ### now need probabilities for rate classes themselves
@@ -396,13 +397,19 @@ class IndpPairHMMFitBoth(ModuleBase):
             exch_logits = self.rate_matrix_module.exchangeabilities_logits_vec
             exchangeabilities = self.rate_matrix_module.exchange_activation( exch_logits )
             
-            np.savetxt( f'{out_folder}/PARAMS_exchangeabilities.tsv', 
-                        np.array(exchangeabilities), 
-                        fmt = '%.4f',
-                        delimiter= '\t' )
+            if self.subst_model_type == 'GTR':
+                np.savetxt( f'{out_folder}/PARAMS_exchangeabilities.tsv', 
+                            np.array(exchangeabilities), 
+                            fmt = '%.4f',
+                            delimiter= '\t' )
+                
+                with open(f'{out_folder}/PARAMS_exchangeabilities.npy','wb') as g:
+                    jnp.save(g, exchangeabilities)
             
-            with open(f'{out_folder}/PARAMS_exchangeabilities.npy','wb') as g:
-                jnp.save(g, exchangeabilities)
+            elif self.subst_model_type == 'HKY85':
+                with open(f'{out_folder}/PARAMS_HKY85_model.txt','w') as g:
+                    g.write(f'transition rate, ti: {exchangeabilities[1]}')
+                    g.write(f'transition rate, tv: {exchangeabilities[0]}')
                 
         # emissions: rate multipliers
         if 'rate_mult_logits' in dir(self.rate_matrix_module):
@@ -469,7 +476,12 @@ class IndpPairHMMFitBoth(ModuleBase):
                 g.write(f'mean indel length: ')
                 [g.write(f'{elem}\t') for elem in mean_indel_lengths]
                 g.write('\n')
-        
+    
+    
+    def _init_rate_matrix_module(self, config):
+        mod = RateMatFromFile( config = self.config,
+                               name = f'get rate matrix' )
+        return mod, 'GTR'
         
     def _get_scoring_matrices(self,
                              t_array,
@@ -663,6 +675,11 @@ class IndpPairHMMFitBoth(ModuleBase):
         return params_range
 
 
+
+
+###############################################################################
+### Variants   ################################################################
+###############################################################################
 class IndpPairHMMLoadAll(IndpPairHMMFitBoth):
     """
     same as IndpPairHMMFitBoth, but load values (i.e. no free parameters)
@@ -681,6 +698,7 @@ class IndpPairHMMLoadAll(IndpPairHMMFitBoth):
         num_emit_site_classes = self.config['num_emit_site_classes']
         self.indel_model_type = self.config['indel_model_type']
         self.norm_loss_by = self.config['norm_loss_by']
+        self.gap_tok = self.config['gap_tok']
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
         
         ### how to score emissions from indel sites
@@ -689,8 +707,9 @@ class IndpPairHMMLoadAll(IndpPairHMMFitBoth):
         
         
         ### rate matrix to score emissions from match sites
-        self.rate_matrix_module = RateMatFromFile(config = self.config,
-                                                 name = f'get rate matrix')
+        out = self._init_rate_matrix_module(self.config)
+        self.rate_matrix_module, self.subst_model_type = out
+        del out
         
         
         ### probability of site classes
@@ -710,54 +729,36 @@ class IndpPairHMMLoadAll(IndpPairHMMFitBoth):
             
     def write_params(self, **kwargs):
         pass
-
-
-
-
-
-
-
     
     
-# class IndpPairHMMFitRateMult(IndpPairHMMFitBoth):
-#     """
-#     same as IndpPairHMMFitBoth, but now keep LG08 exchangeabilites
+    def _init_rate_matrix_module(self, config):
+        mod = RateMatFromFile( config = self.config,
+                               name = f'get rate matrix' )
+        return mod, 'GTR'
+
+
+def IndpHKY85FitAll(IndpPairHMMFitBoth):
+    """
+    Identical to IndpPairHMMFitBoth, but uses the HKY85 substitution model.
+    """
+    config: dict
+    name: str
+
+    def _init_rate_matrix_module(self, config):
+        mod = HKY85( config = self.config,
+                               name = f'get rate matrix' )
+        return mod, 'HKY85'
+
+
+class IndpHKY85LoadAll(IndpPairHMMLoadAll):
+    """
+    Identical to IndpPairHMMLoadAll, but uses the HKY85 substitution model.
+    """
+    config: dict
+    name: str
+
+    def _init_rate_matrix_module(self, config):
+        mod = HKY85FromFile( config = self.config,
+                               name = f'get rate matrix' )
+        return mod, 'HKY85'
     
-#     inherits everything except setup
-#     """
-#     config: dict
-#     name: str
-    
-#     def setup(self):
-#         num_emit_site_classes = self.config['num_emit_site_classes']
-#         self.indel_model_type = self.config['indel_model_type']
-#         self.norm_loss_by = self.config['norm_loss_by']
-#         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
-        
-#         ### how to score emissions from indel sites
-#         if num_emit_site_classes == 1:
-#             self.indel_prob_module = LogEqulVecFromCounts(config = self.config,
-#                                                        name = f'get equilibrium')
-#         elif num_emit_site_classes > 1:
-#             self.indel_prob_module = LogEqulVecPerClass(config = self.config,
-#                                                      name = f'get equilibrium')
-        
-        
-#         ### rate matrix to score emissions from match sites
-#         self.rate_matrix_module = RateMatFitRateMult(config = self.config,
-#                                                  name = f'get rate matrix')
-        
-        
-#         ### now need probabilities for rate classes themselves
-#         self.site_class_probability_module = SiteClassLogprobs(config = self.config,
-#                                                   name = f'get site class probabilities')
-        
-        
-#         ### TKF91 or TKF92
-#         if self.indel_model_type == 'tkf91':
-#             self.transitions_module = TKF91TransitionLogprobs(config = self.config,
-#                                                      name = f'tkf91 indel model')
-        
-#         elif self.indel_model_type == 'tkf92':
-#             self.transitions_module = TKF92TransitionLogprobs(config = self.config,
-#                                                      name = f'tkf92 indel model')

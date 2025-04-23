@@ -114,6 +114,7 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     training_dl = dataloader_dict['training_dl']
     test_dset = dataloader_dict['test_dset']
     test_dl = dataloader_dict['test_dl']
+
     args.pred_config['training_dset_emit_counts'] = training_dset.emit_counts
     args.pred_config['training_dset_aa_counts'] = training_dset.emit_counts
     

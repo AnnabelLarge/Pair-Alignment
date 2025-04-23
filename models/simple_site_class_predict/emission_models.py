@@ -485,18 +485,41 @@ class HKY85(RateMatFitBoth):
     
     def setup(self):
         self.num_emit_site_classes = self.config['num_emit_site_classes']
-        out  = self.config.get( 'exchange_range',
-                               (1e-4, 10) )
-        self.exchange_min_val, self.exchange_max_val = out
-        del out
+        self.rate_mult_activation = self.config['rate_mult_activation']
         
-        out  = self.config.get( 'rate_mult_range',
-                               (0.01, 10) )
-        self.rate_mult_min_val, self.rate_mult_max_val = out
-        del out
+        if self.rate_mult_activation not in ['bound_sigmoid', 'softplus']:
+            raise ValueError('Pick either: bound_sigmoid, softplus')
+            
+            
+        ########################
+        ### RATE MULTIPLIERS   #
+        ########################
+        # activation
+        if self.rate_mult_activation == 'bound_sigmoid':
+            out  = self.config.get( 'rate_mult_range',
+                                   (0.01, 10) )
+            self.rate_mult_min_val, self.rate_mult_max_val = out
+            del out
+            
+            self.rate_multiplier_activation = partial(bounded_sigmoid,
+                                                      min_val = self.rate_mult_min_val,
+                                                      max_val = self.rate_mult_max_val)
+        
+        elif self.rate_mult_activation == 'softplus':
+            self.rate_multiplier_activation = jax.nn.softplus
         
         
-        ### EXCHANGEABILITIES: (A_from=4, A_to=4)
+        # initializers
+        if self.num_emit_site_classes > 1:
+            self.rate_mult_logits = self.param('rate_multipliers',
+                                               nn.initializers.normal(),
+                                               (self.num_emit_site_classes,),
+                                               jnp.float32)
+            
+        
+        #########################
+        ### EXCHANGEABILITIES   #
+        #########################
         ti_tv_vec = self.param('exchangeabilities',
                                nn.initializers.normal(),
                                (2,),
@@ -510,13 +533,16 @@ class HKY85(RateMatFitBoth):
                                                          ti_tv_vec[0], 
                                                          ti_tv_vec[1] ] )
         
-        ### RATE MULTIPLIERS: (c-1,)
-        if self.num_emit_site_classes > 1:
-            # first class automatically has rate multiplier of one
-            self.rate_mult_logits = self.param('rate_multipliers',
-                                               nn.initializers.normal(),
-                                               (self.num_emit_site_classes-1,),
-                                               jnp.float32)
+        out  = self.config.get( 'exchange_range',
+                               (1e-4, 12) )
+        
+        self.exchange_min_val, self.exchange_max_val = out
+        del out
+        
+        self.exchange_activation = partial(bounded_sigmoid,
+                                           min_val = self.exchange_min_val,
+                                           max_val = self.exchange_max_val)
+        
 
 class HKY85FromFile(RateMatFromFile):
     """

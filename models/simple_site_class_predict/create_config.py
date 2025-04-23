@@ -35,8 +35,7 @@ def create_config(load_all: bool):
     else:
         to_add = {}
     
-    out = OrderedDict( {"load_all_params": "[BOOL]",
-                        "(if indp sites) preset_name": "[ STR: ('load', 'fit_rate_mult_only', 'fit_rate_mult_and_matrix') ]",
+    out = OrderedDict( {"preset_name": "[ STR: ('load_all', 'fit_all', 'hky85_load_all', 'hky85_fit_all') ]",
                          "times_from": "[ STR: ('geometric', 't_array_from_file') ]",
                          "exponential_dist_param": "[FLOAT]",
                          'indel_model_type': '[STR="tkf91", "tkf92"]',

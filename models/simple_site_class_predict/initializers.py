@@ -21,10 +21,8 @@ def init_pairhmm_indp_sites( seq_shapes,
     for independent site classses over substitution models, either TKF91 or TKF92
     """
     preset_names = ['load_all',
-                    'fit_rate_mult_only',
-                    'fit_rate_mult_and_matrix',
+                    'fit_all',
                     'hky85_load_all',
-                    'hky85_fit_indel_only',
                     'hky85_fit_all']
     assert pred_config['preset_name'] in preset_names, f'valid options: {preset_names}'
     
@@ -40,12 +38,7 @@ def init_pairhmm_indp_sites( seq_shapes,
         pairhmm_instance = IndpPairHMMLoadAll(config = pred_config,
                                        name = 'IndpPairHMMLoadAll')
     
-    elif pred_config['preset_name'] == 'fit_rate_mult_only':
-        from models.simple_site_class_predict.PairHMM_indp_sites import IndpPairHMMFitRateMult
-        pairhmm_instance = IndpPairHMMFitRateMult(config = pred_config,
-                                                   name = 'IndpPairHMMFitRateMult')
-    
-    elif pred_config['preset_name'] == 'fit_rate_mult_and_matrix':
+    elif pred_config['preset_name'] == 'fit_all':
         from models.simple_site_class_predict.PairHMM_indp_sites import IndpPairHMMFitBoth
         pairhmm_instance = IndpPairHMMFitBoth(config = pred_config,
                                                name = 'IndpPairHMMFitBoth')
@@ -55,12 +48,12 @@ def init_pairhmm_indp_sites( seq_shapes,
     ### DNA (HKY85) models   #
     ##########################
     elif pred_config['preset_name'] == 'hky85_load_all':
-        from models.simple_site_class_predict.HKY85_indp_sites import IndpHKY85LoadAll
+        from models.simple_site_class_predict.PairHMM_indp_sites import IndpHKY85LoadAll
         pairhmm_instance = IndpHKY85LoadAll(config = pred_config,
                                             name = 'IndpHKY85LoadAll')
     
     elif pred_config['preset_name'] == 'hky85_fit_all':
-        from models.simple_site_class_predict.HKY85_indp_sites import IndpHKY85FitAll
+        from models.simple_site_class_predict.PairHMM_indp_sites import IndpHKY85FitAll
         pairhmm_instance = IndpHKY85FitAll(config = pred_config,
                                             name = 'IndpHKY85FitAll')
     
@@ -103,26 +96,40 @@ def init_pairhmm_markov_sites( seq_shapes,
                                ):
     """
     for markovian site classses
-    
-    TODO: update with whichever indel model works best from independent
-     site modeling experiments: fitting both rate matrix and rate multiplier,
-     or just fitting rate multiplier
     """
-    # if pred_config['preset_name'] == 'DEBUG_markovian_code':
-    #     from models.simple_site_class_predict.HKY85_indp_sites import OneClassMarkovHKY85FitAll
-    #     pairhmm_instance = OneClassMarkovHKY85FitAll(config = pred_config,
-    #                                         name = 'OneClassMarkovHKY85FitAll')
+    preset_names = ['load_all',
+                    'fit_all',
+                    'hky85_load_all',
+                    'hky85_fit_all']
+    assert pred_config['preset_name'] in preset_names, f'valid options: {preset_names}'
     
-    if not pred_config['load_all_params']:
-        ### uncomment for jax.lax.scan version
+    
+    ######################
+    ### Protein models   #
+    ######################
+    if pred_config['preset_name'] == 'load_all':
         from models.simple_site_class_predict.PairHMM_markovian_sites import MarkovPairHMM
         pairhmm_instance = MarkovPairHMM(config = pred_config,
                                          name = 'MarkovPairHMM')
     
-    elif pred_config['load_all_params']:
+    elif pred_config['preset_name'] == 'fit_all':
         from models.simple_site_class_predict.PairHMM_markovian_sites import MarkovPairHMMLoadAll
         pairhmm_instance = MarkovPairHMMLoadAll(config = pred_config,
                                                 name = 'MarkovPairHMMLoadAll')
+    
+    
+    ##########################
+    ### DNA (HKY85) models   #
+    ##########################
+    elif pred_config['preset_name'] == 'hky85_fit_all':
+        from models.simple_site_class_predict.PairHMM_markovian_sites import MarkovHKY85PairHMM
+        pairhmm_instance = MarkovHKY85PairHMM(config = pred_config,
+                                            name = 'MarkovHKY85PairHMM')
+    
+    elif pred_config['preset_name'] == 'hky85_load_all':
+        from models.simple_site_class_predict.PairHMM_markovian_sites import MarkovHKY85PairHMMLoadAll
+        pairhmm_instance = MarkovHKY85PairHMMLoadAll(config = pred_config,
+                                            name = 'MarkovHKY85PairHMMLoadAll')
     
     
     ### tabulate and save the model
