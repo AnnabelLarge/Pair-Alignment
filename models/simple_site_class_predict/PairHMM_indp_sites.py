@@ -313,6 +313,10 @@ class IndpPairHMMFitBoth(ModuleBase):
             g.write(f'activation for rate multipliers: {act}\n')
             g.write(f'activation for exchangeabiliites: bound_sigmoid\n')
         
+        
+        ##########################
+        ### the final matrices   #
+        ##########################  
         out = self._get_scoring_matrices(t_array=t_array,
                                         sow_intermediates=False)
         
@@ -728,7 +732,75 @@ class IndpPairHMMLoadAll(IndpPairHMMFitBoth):
                                                      name = f'tkf92 indel model')
             
     def write_params(self, **kwargs):
-        pass
+        ##########################
+        ### the final matrices   #
+        ##########################  
+        out = self._get_scoring_matrices(t_array=t_array,
+                                        sow_intermediates=False)
+        
+        
+        rate_mat_times_rho_per_class = out['rate_mat_times_rho_per_class']
+        for c in range(rate_mat_times_rho_per_class.shape[0]):
+            mat_to_save = rate_mat_times_rho_per_class[c,...]
+            
+            with open(f'{out_folder}/class-{c}_rate_matrix_times_rho.npy', 'wb') as g:
+                np.save(g, mat_to_save)
+            
+            np.savetxt( f'{out_folder}/ASCII_class-{c}_rate_matrix_times_rho.tsv', 
+                        np.array(mat_to_save), 
+                        fmt = '%.4f',
+                        delimiter= '\t' )
+            
+            del mat_to_save, g
+            
+
+        # matrix that you apply expm() to
+        to_expm = np.squeeze( out['to_expm'] )
+        
+        with open(f'{out_folder}/to_expm.npy', 'wb') as g:
+            np.save(g, to_expm)
+        
+        if len(to_expm.shape) <= 2:
+            np.savetxt( f'{out_folder}/ASCII_to_expm.tsv', 
+                        to_expm, 
+                        fmt = '%.4f',
+                        delimiter= '\t' )
+        
+        del to_expm, g
+        
+        # other emission matrices; exponentiate them first
+        for key in ['logprob_emit_at_indel', 
+                    'joint_logprob_emit_at_match']:
+            mat = np.exp(out[key])
+            new_key = key.replace('logprob','prob')
+            
+            with open(f'{out_folder}/{new_key}.npy', 'wb') as g:
+                np.save(g, mat)
+            
+            mat = np.squeeze(mat)
+            if len(mat.shape) <= 2:
+                np.savetxt( f'{out_folder}/ASCII_{new_key}.tsv', 
+                            np.array(mat), 
+                            fmt = '%.4f',
+                            delimiter= '\t' )
+            
+            del key, mat, g
+            
+        for key, mat in out['all_transit_matrices'].items():
+            mat = np.exp(mat)
+            new_key = key.replace('logprob','prob')
+            
+            with open(f'{out_folder}/{new_key}_transit_matrix.npy', 'wb') as g:
+                np.save(g, mat)
+            
+            mat = np.squeeze(mat)
+            if len(mat.shape) <= 2:
+                np.savetxt( f'{out_folder}/ASCII_{new_key}_transit_matrix.tsv', 
+                            np.array(mat), 
+                            fmt = '%.4f',
+                            delimiter= '\t' )
+            
+            del key, mat, g
     
     
     def _init_rate_matrix_module(self, config):
