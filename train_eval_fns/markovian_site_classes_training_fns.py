@@ -272,9 +272,9 @@ def label_class_posteriors(batch,
     clipped_aligned_mats = batch_aligned_mats[:, :max_align_len, :]
     del batch
     
-    out = pairhmm_trainstate.apply_fn( variables = pairhmm_trainstate.params,
+    out_tup = pairhmm_trainstate.apply_fn( variables = pairhmm_trainstate.params,
                                        aligned_inputs = clipped_aligned_mats,
                                        t_array = t_array,
                                        method=pairhmm_instance.get_class_posterior_marginals )
 
-    return out
+    return out_tup

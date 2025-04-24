@@ -119,7 +119,7 @@ def init_full_len_dset( args,
         times_from_array, single_time_from_file = init_time_array(training_argparse)
 
         # emission alphabet size
-        emission_alphabet_size = 4 if 'hky85' in args.pred_config['preset_name'] else 20
+        emission_alphabet_size = 4 if 'hky85' in training_argparse.pred_config['preset_name'] else 20
         
     
     

@@ -46,18 +46,18 @@ def main():
                         type = str,
                         help='Load configs from file or folder of files, in json format.')
     
-    # OLD OPTION: needed to resuming training
-    parser.add_argument(f'-training_wkdir',
-                      type = str,
-                      help = 'training working directory to resume from')
+    # # OLD OPTION: needed to resuming training
+    # parser.add_argument(f'-training_wkdir',
+    #                   type = str,
+    #                   help = 'training working directory to resume from')
     
     # parse the arguments
     args = parser.parse_args()
     
     
     # ### UNCOMMENT TO RUN IN SPYDER IDE
-    # args.task = 'train'
-    # args.configs = 'markovian_example_config.json'
+    # args.task = 'label_class_post'
+    # args.configs = 'eval.json'
     
     
     ### helper function to open a single config file and extract additional arguments
@@ -265,7 +265,7 @@ def main():
     ###########################################################################
     ### EVAL: label class posterior marginals for markovian class sites   #####
     ###########################################################################
-    elif task == 'label_class_post':
+    elif args.task == 'label_class_post':
         ### read argparse
         assert args.configs.endswith('.json'), print("input is one JSON file")
         print(f'EVALUATING WITH: {args.configs}')
@@ -294,7 +294,7 @@ def main():
         labeling_fn( args, 
                      dload_lst, 
                      training_argparse )
-            
+        
     
 if __name__ == '__main__':
     main()

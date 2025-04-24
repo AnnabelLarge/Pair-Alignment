@@ -44,11 +44,13 @@ from utils.pairhmm_helpers import (bounded_sigmoid,
 ################################################
 def log_dot_bigger(log_vec, log_mat):
     broadcasted_sum = log_vec[:, :, None, :] + log_mat
-    out = jnp.where( broadcasted_sum.sum() < 0,
-                     logsumexp(broadcasted_sum, axis=1),
-                     jnp.zeros(log_vec.shape)
-                     )
-    return out
+    
+    ### SOMETHING WEIRD HERE
+    # out = jnp.where( broadcasted_sum.sum() < 0,
+    #                  logsumexp(broadcasted_sum, axis=1),
+    #                  jnp.zeros(log_vec.shape)
+    #                  )
+    return logsumexp(broadcasted_sum, axis=1)
 
 def _expand_dims_like(x, target):
     return x.reshape(list(x.shape) + [1] * (target.ndim - x.ndim))
@@ -778,11 +780,16 @@ class MarkovPairHMM(ModuleBase):
                 g.write('\n')
                 
     
+    ###########################################################################
+    ### for forward-backward algo   ###########################################
+    ###########################################################################
     def forward_with_interms( self,
                               aligned_inputs,
                               logprob_emit_at_indel,
                               joint_logprob_emit_at_match,
                               joint_transit ):
+        L_align = aligned_inputs.shape[1]
+        
         ######################################################
         ### initialize with <start> -> any (curr pos is 1)   #
         ######################################################
@@ -871,6 +878,8 @@ class MarkovPairHMM(ModuleBase):
                                logprob_emit_at_indel,
                                joint_logprob_emit_at_match,
                                joint_transit ):
+        L_align = aligned_inputs.shape[1]
+         
         ######################################
         ### flip inputs, transition matrix   #
         ######################################
@@ -939,7 +948,7 @@ class MarkovPairHMM(ModuleBase):
             
             return (new_alpha, new_alpha)
         
-        idx_arr = jnp.array( [i for i in range(2, L)] )
+        idx_arr = jnp.array( [i for i in range(2, L_align)] )
         out = jax.lax.scan( f = scan_fn,
                             init = init_alpha,
                             xs = idx_arr,
@@ -953,6 +962,7 @@ class MarkovPairHMM(ModuleBase):
         stacked_outputs = jnp.concatenate( [ init_alpha[None,...],
                                              stacked_outputs ],
                                           axis=0)
+        
         
         ### swap the sequence back; final output should always be (T, C, B, L-1)
         # reshape: (L-1, T, C, B) -> (B, L-1, T, C)
@@ -992,7 +1002,7 @@ class MarkovPairHMM(ModuleBase):
         increases from there, and the posterior marginal at <eos> should be all zeros 
           (because it's an invalid value)
         """
-        T = time.shape[0]
+        T = t_array.shape[0]
         B = aligned_inputs.shape[0]
         L = aligned_inputs.shape[1]
         
@@ -1009,19 +1019,19 @@ class MarkovPairHMM(ModuleBase):
         
         
         ### each are: (T, C, B, L-1) 
-        forward_stacked_outputs = self.forward_with_interms( aligned_inputs,
+        forward_stacked_outputs_raw = self.forward_with_interms( aligned_inputs,
                                                              logprob_emit_at_indel,
                                                              joint_logprob_emit_at_match,
                                                              joint_transit )
         
-        backward_stacked_outputs = self.backward_with_interms( aligned_inputs,
+        backward_stacked_outputs_raw = self.backward_with_interms( aligned_inputs,
                                                                logprob_emit_at_indel,
                                                                joint_logprob_emit_at_match,
                                                                joint_transit )
         
         # can get the denominator from backwards outputs before masking
-        joint_logprob = logsumexp(backward_stacked_outputs[..., 0], axis=1)
-       
+        joint_logprob = logsumexp(backward_stacked_outputs_raw[..., 0], axis=1)
+        
         
         ### mask and combine 
         invalid_tok_mask = ~jnp.isin(aligned_inputs[...,0], jnp.array([0,1,2]))
@@ -1030,26 +1040,30 @@ class MarkovPairHMM(ModuleBase):
         # reduce to (T, C, B, L-2) 
         forward_pad = invalid_tok_mask[:, 1:]
         forward_pad = jnp.broadcast_to( forward_pad[None,None,...], (T, C, B, L-1) )
-        forward_stacked_outputs = forward_stacked_outputs * forward_pad
+        forward_stacked_outputs = forward_stacked_outputs_raw * forward_pad
         
         # mask out padding tokens and "final" value at <bos>
         # reduce to (T, C, B, L-2) 
         backwards_pad = invalid_tok_mask[:, :-1]
         backwards_pad = jnp.broadcast_to( backwards_pad[None,None,...], (T, C, B, L-1) )
-        backward_stacked_outputs = backward_stacked_outputs * backwards_pad
+        backward_stacked_outputs = backward_stacked_outputs_raw * backwards_pad
+        
         
         # combine; wherever there's padding and <eos>, the sum should be zero
-        for_times_back = forward_logprobs_per_pos[..., :-1] + backward_logprobs_per_pos[..., 1:]
+        for_times_back = forward_stacked_outputs[..., :-1] + backward_stacked_outputs[..., 1:]
         
-        invalid_pos = (( forward_logprobs_per_pos[..., :-1] == 0 ) &
-                       ( backward_logprobs_per_pos[..., :-1] == 0 ) &
+        invalid_pos = (( forward_stacked_outputs[..., :-1] == 0 ) &
+                       ( backward_stacked_outputs[..., 1:] == 0 ) &
                        ( for_times_back == 0 ) )
         
         posterior_log_marginals = jnp.where( ~invalid_pos, 
                                              for_times_back - joint_logprob[:, None, :, None],
                                              0 )
         
-        return posterior_log_marginals
+        return (posterior_log_marginals, 
+                ~invalid_pos,
+                forward_stacked_outputs_raw, 
+                backward_stacked_outputs_raw)
         
     
     def _init_rate_matrix_module(self, config):

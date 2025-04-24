@@ -627,19 +627,10 @@ class LogEqulVecPerClass(ModuleBase):
         emission_alphabet_size = self.config['emission_alphabet_size']
         num_emit_site_classes = self.config['num_emit_site_classes']
         
-        ### bias the intial guess
-        init_guess = jnp.array( [[0.01, 0.02, 0.03, 0.04],
-                                 [0.04, 0.03, 0.02, 0.01]] )
-        
         self.logits = self.param('Equilibrium distr.',
-                                  lambda *_: init_guess,
+                                  nn.initializers.normal(),
                                   (num_emit_site_classes, emission_alphabet_size),
                                   jnp.float32)
-        
-        # self.logits = self.param('Equilibrium distr.',
-        #                          nn.initializers.normal(),
-        #                          (num_emit_site_classes, emission_alphabet_size),
-        #                          jnp.float32)
         
     def __call__(self,
                  sow_intermediates: bool,

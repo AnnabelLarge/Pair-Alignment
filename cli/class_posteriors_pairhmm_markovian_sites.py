@@ -14,6 +14,9 @@ from functools import partial
 import platform
 import argparse
 import json
+from tqdm import tqdm
+import numpy as np
+from scipy.special import logsumexp
 
 # jax/flax stuff
 import jax
@@ -28,6 +31,11 @@ from train_eval_fns.build_optimizer import build_optimizer
 from utils.sequence_length_helpers import determine_alignlen_bin
 from models.simple_site_class_predict.initializers import init_pairhmm_markov_sites as init_pairhmm
 from train_eval_fns.markovian_site_classes_training_fns import ( label_class_posteriors )
+
+
+def make_dir(folder, path):
+    if folder not in os.listdir(path):
+        os.mkdir(f'{path}/{folder}')
 
 
 def class_posteriors_pairhmm_markovian_sites( args, 
@@ -56,9 +64,18 @@ def class_posteriors_pairhmm_markovian_sites( args,
     ### 1: SETUP   ############################################################
     ###########################################################################
     ### create the eval working directory, if it doesn't exist
-    args.out_arrs_dir = f'{args.training_wkdir}/class_marginals'    
-    if 'class_marginals' not in os.listdir(args.training_wkdir):
-        os.mkdir(args.out_arrs_dir)
+    make_dir(args.eval_wkdir, '.')
+    
+    with open(f'{args.eval_wkdir}/README_markovian_class_marginals.txt','w') as g:
+        g.write(f'Using parameters from: {args.training_wkdir}\n')
+        g.write(f'Number of markovian site classes: {training_argparse.pred_config["num_emit_site_classes"]}\n')
+        g.write(f'Annotating sequences in: {args.test_dset_splits}\n')
+    
+    args.class_marginals_dir = f'{args.eval_wkdir}/class_marginals'   
+    args.params_dir = f'{args.eval_wkdir}/params'
+    
+    make_dir(args.class_marginals_dir.split('/')[-1], args.eval_wkdir)
+    make_dir(args.params_dir.split('/')[-1], args.eval_wkdir)
     
     
     ### extract data from dataloader_dict
@@ -101,7 +118,7 @@ def class_posteriors_pairhmm_markovian_sites( args,
                         tx = tx, 
                         model_init_rngkey = jax.random.key(0),
                         pred_config = training_argparse.pred_config,
-                        tabulate_file_loc = args.model_ckpts_dir)
+                        tabulate_file_loc = args.params_dir)
     blank_tstate, pairhmm_instance = out
     del out
     
@@ -111,7 +128,7 @@ def class_posteriors_pairhmm_markovian_sites( args,
         
     best_pairhmm_trainstate = flax.serialization.from_state_dict( blank_tstate, 
                                                                   state_dict )
-    del blank_tstate, state_dict
+    del blank_tstate
     
     
     ### part+jit label_class_posteriors function
@@ -132,8 +149,16 @@ def class_posteriors_pairhmm_markovian_sites( args,
     ### write the parameters again
     best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
                                       t_array = t_array,
-                                      out_folder = args.out_arrs_dir,
+                                      out_folder = args.params_dir,
                                       method = pairhmm_instance.write_params )
+    
+    with open(f'{args.params_dir}/TRAINING_ARGPARSE.pkl','wb') as g:
+        pickle.dump(training_argparse, g)
+    
+    with open(f'{args.params_dir}/FINAL_PRED.pkl', 'wb') as g:
+        pickle.dump(state_dict, g)
+    
+    del state_dict
     
     
     ###########################################################################
@@ -144,12 +169,16 @@ def class_posteriors_pairhmm_markovian_sites( args,
         batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch)
         batch_max_alignlen = batch_max_alignlen.item()
         
-        marginals = eval_fn_jitted( batch=batch, 
-                                    max_align_len=batch_max_alignlen )
+        out = eval_fn_jitted( batch=batch, 
+                              max_align_len=batch_max_alignlen )
+        # marginals, mask, fw_carry, bkw_carry = out
+        log_marginals = out[0]
+        mask = out[1]
+        del out
         
-        with open(f'{out_arrs_dir}/dset-pt-{batch_idx}_class_posterior_marginals.npy', 'wb') as g:
-            np.save(g, marginals)
+        with open(f'{args.class_marginals_dir}/dset-pt-{batch_idx}_class_posterior_marginals.npy', 'wb') as g:
+            jnp.save(g, np.exp(log_marginals)*mask )
         
         label_df = test_dset.retrieve_sample_names(batch[-1])
-        label_df.to_csv('{out_arrs_dir}/dset-pt-{batch_idx}_ROW-LABELS_class_posterior_marginals.npy', sep='\t', index_col=0)
+        label_df.to_csv(f'{args.class_marginals_dir}/dset-pt-{batch_idx}_ROW-LABELS_class_posterior_marginals.tsv', sep='\t')
         
