@@ -35,6 +35,10 @@ from models.simple_site_class_predict.initializers import init_pairhmm_indp_site
 from train_eval_fns.indp_site_classes_training_fns import ( eval_one_batch,
                                                             final_eval_wrapper )
 
+from utils.edit_argparse import (enforce_valid_defaults,
+                                 fill_with_default_values,
+                                 share_top_level_args)
+
 
 def eval_pairhmm_indp_sites(args, 
                             dataloader_dict: dict,

@@ -52,10 +52,6 @@ from train_eval_fns.markovian_site_classes_training_fns import ( train_one_batch
                                                             eval_one_batch,
                                                             final_eval_wrapper )
 
-from utils.edit_argparse import (enforce_valid_defaults,
-                                 fill_with_default_values,
-                                 share_top_level_args)
-
 
 def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     ###########################################################################
