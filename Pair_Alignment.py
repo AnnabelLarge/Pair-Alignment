@@ -256,7 +256,7 @@ def main():
             with open(training_argparse_filename,'rb') as g:
                 training_argparse = pickle.load(g)
             
-            first_training_argparse.gap_tok = 43
+            training_argparse.gap_tok = 43
             eval_fn( this_run_args, 
                      dload_lst_for_all, 
                      training_argparse )
