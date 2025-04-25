@@ -1,7 +1,0 @@
-training_wkdir	RESULTS_2indp-classes_TKF92_bound-sigmoid
-init_value	0.005
-peak_value	0.005
-end_value	0.005
-warmup_steps	0
-weight_decay	0
-every_k_schedule	1

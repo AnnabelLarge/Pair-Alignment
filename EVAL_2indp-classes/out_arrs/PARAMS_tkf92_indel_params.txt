@@ -1,6 +1,0 @@
-insert rate, lambda: 0.0684288889169693
-deletion rate, mu: 0.07053811103105545
-used tkf beta approximation? False
-
-extension prob, r: 0.6658287048339844	
-mean indel length: 2.9924771785736084	

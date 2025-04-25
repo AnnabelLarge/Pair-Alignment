@@ -1,3 +1,0 @@
-	ancestor	descendant	pfam	anc_seq_len	desc_seq_len	alignment_len	num_matches	num_ins	num_del	joint_logP	joint_logP/normlength	joint_perplexity	cond_logP	cond_logP/normlength	cond_perplexity	anc_logP	anc_logP/normlength	anc_perplexity	desc_logP	desc_logP/normlength	desc_perplexity	dataloader_idx
-2	I1NCF6_SOYBN/349-1239	B9S7R0_RICCO/23-919	PF05994	891	897	902	886	11	5	3528.7896	3.9339905	51.110527	918.6062	1.0240872	2.7845526	2610.1833	2.9294987	18.718245	2626.7373	2.9283583	18.69691	2
-3	U5CR85_AMBTC/1-880	M4CQG8_BRARP/340-1232	PF05994	880	893	908	865	28	15	3960.8762	4.4354715	84.39191	1388.8301	1.5552409	4.736227	2572.0461	2.9227798	18.5929	2605.5547	2.9177544	18.499699	3

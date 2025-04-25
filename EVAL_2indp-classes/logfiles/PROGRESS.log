@@ -1,9 +1,0 @@
-Loading from RESULTS_2indp-classes_TKF92_bound-sigmoid to eval new data
-PairHMM with independent site classes over emissions
-Indel model: tkf92
-  - Number of site classes for emissions: 2
-  - Normalizing losses by: desc_len
-
-1: model init
-
-2: eval

@@ -181,6 +181,11 @@ def eval_pairhmm_markovian_sites( args,
     ###########################################
     ### update the logfile with final losses  #
     ###########################################
+    # save the trainstate again
+    with open(f'{args.model_ckpts_dir}/FINAL_PRED.pkl', 'wb') as g:
+        model_state_dict = flax.serialization.to_state_dict(best_pairhmm_trainstate)
+        pickle.dump(model_state_dict, g)
+        
     to_write = {'RUN': args.training_wkdir}
     to_write = {**to_write, **test_summary_stats}
     
