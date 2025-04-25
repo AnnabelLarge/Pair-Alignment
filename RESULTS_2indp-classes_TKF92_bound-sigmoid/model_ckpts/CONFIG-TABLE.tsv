@@ -1,0 +1,23 @@
+training_wkdir	RESULTS_2indp-classes_TKF92_bound-sigmoid
+rng_seednum	10
+data_dir	DATA_cherries
+train_dset_splits	['FAMCLAN-CHERRIES_split1', 'FAMCLAN-CHERRIES_split2', 'FAMCLAN-CHERRIES_split3', 'FAMCLAN-CHERRIES_split4', 'FAMCLAN-CHERRIES_split5', 'FAMCLAN-CHERRIES_split6', 'FAMCLAN-CHERRIES_split7']
+test_dset_splits	['FAMCLAN-CHERRIES_split8', 'FAMCLAN-CHERRIES_split9']
+toss_alignments_longer_than	513
+bos_eos_as_match	False
+batch_size	25000
+emission_alphabet_size	20
+num_epochs	100
+early_stop_cond1_atol	1e-05
+early_stop_cond2_gap	3
+patience	10
+norm_loss_by	desc_len
+save_per_sample_losses	False
+pred_model_type	pairhmm_indp_sites
+task	batched_train
+configs	CONFIGS_indp_1/
+seq_padding_idx	0
+align_padding_idx	-9
+base_alphabet_size	23
+full_alphabet_size	44
+update_grads	True

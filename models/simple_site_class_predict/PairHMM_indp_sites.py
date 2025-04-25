@@ -483,7 +483,7 @@ class IndpPairHMMFitBoth(ModuleBase):
     
     
     def _init_rate_matrix_module(self, config):
-        mod = RateMatFromFile( config = self.config,
+        mod = RateMatFitBoth( config = self.config,
                                name = f'get rate matrix' )
         return mod, 'GTR'
         

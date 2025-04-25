@@ -1,0 +1,17 @@
+RUN	RESULTS_2indp-classes_TKF92_bound-sigmoid
+joint_ave_loss	3744.8330078125
+joint_ave_loss_seqlen_normed	4.1847310066223145
+joint_perplexity	67.751220703125
+cond_ave_loss	1153.7181396484375
+cond_ave_loss_seqlen_normed	1.2896640300750732
+cond_perplexity	3.760389804840088
+anc_ave_loss	2591.11474609375
+anc_ave_loss_seqlen_normed	2.9261393547058105
+anc_perplexity	18.65557098388672
+desc_ave_loss	2616.14599609375
+desc_ave_loss_seqlen_normed	2.9230563640594482
+desc_perplexity	18.598304748535156
+joint_ece	65.67583465576172
+cond_ece	3.631566286087036
+anc_ece	18.65546989440918
+desc_ece	18.59804344177246

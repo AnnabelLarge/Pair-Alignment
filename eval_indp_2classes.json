@@ -1,0 +1,12 @@
+{
+    "training_wkdir": "RESULTS_2indp-classes_TKF92_bound-sigmoid",
+    "eval_wkdir": "EVAL_2indp-classes",
+
+    "data_dir": "example_data",
+    "test_dset_splits": ["twoSamp",
+                         "twoSamp"],
+    "toss_alignments_longer_than": null,
+    "batch_size": 2,
+    "bos_eos_as_match": false
+
+}

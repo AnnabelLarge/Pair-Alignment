@@ -56,8 +56,8 @@ def main():
     
     
     # ### UNCOMMENT TO RUN IN SPYDER IDE
-    # args.task = 'label_class_post'
-    # args.configs = 'eval.json'
+    # args.task = 'eval'
+    # args.configs = 'eval_indp_2classes.json'
     
     
     ### helper function to open a single config file and extract additional arguments
@@ -219,7 +219,6 @@ def main():
         
         with open(first_training_argparse_filename,'rb') as g:
             first_training_argparse = pickle.load(g)
-        first_training_argparse.gap_tok = 43
         
         pred_model_type = first_training_argparse.pred_model_type
         
@@ -256,7 +255,6 @@ def main():
             with open(training_argparse_filename,'rb') as g:
                 training_argparse = pickle.load(g)
             
-            training_argparse.gap_tok = 43
             eval_fn( this_run_args, 
                      dload_lst_for_all, 
                      training_argparse )
