@@ -4,13 +4,16 @@
 Created on Wed Apr  9 16:04:59 2025
 
 @author: annabel_large
+
+P(class=c|emissions) = P(emissions | class=c) P(class=c) / P( emissions )
+
 """
 import numpy as np
 import pickle
 from scipy.linalg import expm
 from scipy.special import logsumexp
 
-in_folder = 'EVAL-TEST-SET_tkf92_4-indp-class'
+in_folder = 'RESULTS_2indp-classes_TKF92_bound-sigmoid'
 model_ckpts_folder = f'{in_folder}/model_ckpts'
 out_arrs_folder = f'{in_folder}/out_arrs'
 
