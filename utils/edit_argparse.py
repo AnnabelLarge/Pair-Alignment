@@ -106,8 +106,8 @@ def share_top_level_args(args):
 
     elif args.pred_model_type.startswith('pairhmm'):
         args.pred_config['emission_alphabet_size'] = args.emission_alphabet_size
-        args.pred_config['gap_tok'] = args.gap_tok
     
+    args.pred_config['gap_tok'] = args.gap_tok
     args.pred_config['norm_loss_by'] = args.norm_loss_by
     args.pred_config['seq_padding_idx'] = args.seq_padding_idx
     args.pred_config['align_padding_idx'] = args.align_padding_idx
