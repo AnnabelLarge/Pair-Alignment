@@ -263,7 +263,8 @@ class MarkovPairHMM(ModuleBase):
         if t_array.shape[0] > 1:
             joint_neg_logP = -self._marginalize_over_times(logprob_perSamp_perTime = joint_logprob_perSamp_perTime,
                                         exponential_dist_param = self.exponential_dist_param,
-                                        t_array = t_array)
+                                        t_array = t_array,
+                                        sow_intermediates=sow_intermediates)
         else:
             joint_neg_logP = -joint_logprob_perSamp_perTime[0,:]
         
@@ -575,7 +576,8 @@ class MarkovPairHMM(ModuleBase):
         if t_array.shape[0] > 1:
             joint_neg_logP = -self._marginalize_over_times(logprob_perSamp_perTime = joint_logprob_perSamp_perTime,
                                         exponential_dist_param = self.exponential_dist_param,
-                                        t_array = t_array)
+                                        t_array = t_array,
+                                        sow_intermediates = sow_intermediates)
         else:
             joint_neg_logP = -joint_logprob_perSamp_perTime[0,:]
         
@@ -1156,7 +1158,9 @@ class MarkovPairHMM(ModuleBase):
     def _marginalize_over_times(self,
                                logprob_perSamp_perTime,
                                exponential_dist_param,
-                               t_array):
+                               t_array,
+                               sow_intermediates: bool):
+        ### constants to add (multiply by)
         # logP(t_k) = exponential distribution
         logP_time = ( jnp.log(exponential_dist_param) - 
                       (exponential_dist_param * t_array) )
@@ -1165,11 +1169,28 @@ class MarkovPairHMM(ModuleBase):
         # kind of a hack, but repeat the last time array value
         log_t_grid = jnp.concatenate( [log_t_grid, log_t_grid[-1][None] ], axis=0)
         
+        
+        ### add in log space, multiply in probability space; then apply logsumexp
         logP_perSamp_perTime_withConst = ( logprob_perSamp_perTime +
                                            logP_time[:,None] +
                                            log_t_grid[:,None] )
         
+        if sow_intermediates:
+            lab = f'{self.name}/time_marginalization/before logsumexp'
+            self.sow_histograms_scalars(mat= logP_perSamp_perTime_withConst, 
+                                        label=lab, 
+                                        which='scalars')
+            del lab
+        
+        
         logP_perSamp_raw = logsumexp(logP_perSamp_perTime_withConst, axis=0)
+        
+        if sow_intermediates:
+            lab = f'{self.name}/time_marginalization/after logsumexp'
+            self.sow_histograms_scalars(mat= logP_perSamp_raw, 
+                                        label=lab, 
+                                        which='scalars')
+            del lab
         
         return logP_perSamp_raw
     

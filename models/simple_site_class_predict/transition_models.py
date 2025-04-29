@@ -692,3 +692,33 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
                                                joint_matrix=joint_matrix)
         return matrix_dict, False
     
+
+
+###############################################################################
+### placeholders   ############################################################
+###############################################################################
+class NoTransitionLogprobs(ModuleBase):
+    """
+    Used as a placeholder when you don't want to score transitions
+    
+    Only relevant for independent site class model, basic TKF91/TKF92 model; 
+      you need transitions for markovian site class model
+    """
+    config: dict
+    name: str
+    
+    def __call__(self,
+                 t_array,
+                 class_probs,
+                 sow_intermediates = False):
+        
+        T = t_array.shape[0]
+        C = class_probs.shape[0]
+        
+        joint_matrix = jnp.zeros( (T, C, C, 4, 4) )
+        cond_matrix = jnp.zeros( (T, C, C, 4, 4) )
+        marginal_matrix = jnp.zeros( (C, C, 2, 2) )
+        use_approx = False
+        
+        return matrix_dict, use_approx
+        

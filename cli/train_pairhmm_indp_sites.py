@@ -219,6 +219,12 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     all_epoch_times = np.zeros( (args.num_epochs,2) )
     
     for epoch_idx in tqdm(range(args.num_epochs)):
+        ### at the start, always save the model parameters
+        with open(finalpred_save_model_filename, 'wb') as g:
+            model_state_dict = flax.serialization.to_state_dict(pairhmm_trainstate)
+            pickle.dump(model_state_dict, g)
+        
+        
         epoch_real_start = wall_clock_time()
         epoch_cpu_start = process_time()
         
@@ -402,7 +408,8 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
             
             # save models to regular python pickles too (in case training is 
             #   interrupted)
-            with open(finalpred_save_model_filename, 'wb') as g:
+            new_outfile = finalpred_save_model_filename.replace('.pkl','_BEST.pkl')
+            with open(new_outfile, 'wb') as g:
                 model_state_dict = flax.serialization.to_state_dict(pairhmm_trainstate)
                 pickle.dump(model_state_dict, g)
             
