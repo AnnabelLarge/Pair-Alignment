@@ -51,6 +51,14 @@ from train_eval_fns.indp_site_classes_training_fns import ( train_one_batch,
                                                             eval_one_batch,
                                                             final_eval_wrapper )
 
+def save_to_pickle(out_file, obj):
+    with open(out_file, 'wb') as g:
+        pickle.dump(obj, g)
+
+def save_trainstate(out_file, tstate_obj):
+    model_state_dict = flax.serialization.to_state_dict(tstate_obj)
+    save_to_pickle(out_file, model_state_dict)
+        
 
 def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     ###########################################################################
@@ -89,11 +97,19 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
             g.write('DEBUG MODE: DISABLING GRAD UPDATES\n\n')
         
         g.write( f'PairHMM with independent site classes over emissions\n' )
-        g.write( f'Indel model: {args.pred_config["indel_model_type"]}\n' )
+        g.write( f'Preset: args.pred_config["preset_name"]\n')
+        g.write( f'Indel model: {args.pred_config.get("indel_model_type","None")}\n' )
         g.write( (f'  - Number of site classes for emissions: '+
                   f'{args.pred_config["num_emit_site_classes"]}\n' )
                 )
-        g.write( f'  - Normalizing losses by: {args.norm_loss_by}\n' )
+        
+        if 'gtr' not in args.pred_config["preset_name"]:
+            g.write( f'  - Normalizing losses by: {args.norm_loss_by}\n' )
+        
+        elif 'gtr' in args.pred_config["preset_name"]:
+            g.write( f'  - Normalizing losses by: align length '+
+                     f'(same as desc length, because we remove gap '+
+                     f'positions) \n' )
     
     # extra files to record if you use tkf approximations
     with open(f'{args.out_arrs_dir}/TRAIN_tkf_approx.tsv','w') as g:
@@ -172,7 +188,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     print()
     
     parted_train_fn = partial( train_one_batch,
-                               indel_model_type = args.pred_config['indel_model_type'],
+                               indel_model_type = args.pred_config.get('indel_model_type', None),
                                t_array = t_array, 
                                interms_for_tboard = args.interms_for_tboard,
                                update_grads = args.update_grads )
@@ -219,12 +235,6 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     all_epoch_times = np.zeros( (args.num_epochs,2) )
     
     for epoch_idx in tqdm(range(args.num_epochs)):
-        ### at the start, always save the model parameters
-        with open(finalpred_save_model_filename, 'wb') as g:
-            model_state_dict = flax.serialization.to_state_dict(pairhmm_trainstate)
-            pickle.dump(model_state_dict, g)
-        
-        
         epoch_real_start = wall_clock_time()
         epoch_cpu_start = process_time()
         
@@ -239,6 +249,21 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
         train_cpu_start = process_time()
         
         for batch_idx, batch in enumerate(training_dl):   
+            ### at the start of the BATCH, always save the model parameters 
+            ###   and what samples are in the batch
+            new_tstate_outfile = finalpred_save_model_filename.replace('.pkl',
+                                                                       '_BEFORE-UPDATE.pkl')
+            save_trainstate(out_file=new_tstate_outfile,
+                            tstate_obj=pairhmm_trainstate)
+            del new_tstate_outfile
+            
+            new_batch_outfile = f'{args.model_ckpts_dir}/current_training_batch.pkl'
+            save_to_pickle(out_file=new_batch_outfile,
+                           obj=batch)
+            del new_batch_outfile
+            
+            
+            ### carry on with training
             batch_epoch_idx = epoch_idx * len(training_dl) + batch_idx  
             
             rngkey_for_training_batch = jax.random.fold_in(training_rngkey, epoch_idx+batch_idx)
@@ -249,9 +274,28 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
             del out
             
             
+            ### save the model parameters again
+            new_tstate_outfile = finalpred_save_model_filename.replace('.pkl',
+                                                                       '_AFTER-UPDATE.pkl')
+            save_trainstate(out_file=new_tstate_outfile,
+                            tstate_obj=pairhmm_trainstate)
+            del new_tstate_outfile
+            
             if train_metrics["used_tkf_beta_approx"]:
                 with open(f'{args.out_arrs_dir}/TRAIN_tkf_approx.tsv','a') as g:
                     g.write('epoch {epoch_idx}, batch {batch_idx}: {train_metrics["used_tkf_beta_approx"]}\n')
+            
+            
+            ### record metrics to tensorboard
+            interm_rec = batch_epoch_idx % args.histogram_output_freq == 0
+            final_rec = (batch_idx == len(training_dl)) & (epoch_idx == args.num_epochs)
+            
+            write_optional_outputs_during_training_hmms( writer_obj = writer, 
+                                                    pairhmm_trainstate = pairhmm_trainstate,
+                                                    global_step = batch_epoch_idx, 
+                                                    dict_of_values = train_metrics, 
+                                                    interms_for_tboard = args.interms_for_tboard, 
+                                                    write_histograms_flag = interm_rec or final_rec )
             
             
 #__4___8__12: batch level (three tabs)
@@ -269,11 +313,11 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
                 with open(f'{args.model_ckpts_dir}/TRAINING_ARGPARSE.pkl', 'wb') as g:
                     pickle.dump(args, g)
                 
-                # save all trainstate objects
-                new_outfile = finalpred_save_model_filename.replace('.pkl','_BROKEN.pkl')
-                with open(new_outfile, 'wb') as g:
-                    model_state_dict = flax.serialization.to_state_dict(pairhmm_trainstate)
-                    pickle.dump(model_state_dict, g)
+                # # save all trainstate objects
+                # new_outfile = finalpred_save_model_filename.replace('.pkl','_BROKEN.pkl')
+                # with open(new_outfile, 'wb') as g:
+                #     model_state_dict = flax.serialization.to_state_dict(pairhmm_trainstate)
+                #     pickle.dump(model_state_dict, g)
                 
                 raise RuntimeError( ('NaN loss detected; saved intermediates '+
                                     'and quit training') )
@@ -286,16 +330,6 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
             ave_epoch_train_perpl += train_metrics['batch_ave_joint_perpl'] * weight
             del weight
             
-            # record metrics
-            interm_rec = batch_epoch_idx % args.histogram_output_freq == 0
-            final_rec = (batch_idx == len(training_dl)) & (epoch_idx == args.num_epochs)
-            
-            write_optional_outputs_during_training_hmms( writer_obj = writer, 
-                                                    pairhmm_trainstate = pairhmm_trainstate,
-                                                    global_step = batch_epoch_idx, 
-                                                    dict_of_values = train_metrics, 
-                                                    interms_for_tboard = args.interms_for_tboard, 
-                                                    write_histograms_flag = interm_rec or final_rec )
             
             
 #__4___8: epoch level (two tabs)
@@ -409,9 +443,8 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
             # save models to regular python pickles too (in case training is 
             #   interrupted)
             new_outfile = finalpred_save_model_filename.replace('.pkl','_BEST.pkl')
-            with open(new_outfile, 'wb') as g:
-                model_state_dict = flax.serialization.to_state_dict(pairhmm_trainstate)
-                pickle.dump(model_state_dict, g)
+            save_trainstate(out_file=new_outfile, 
+                            tstate_obj=pairhmm_trainstate)
             
             
 #__4___8: epoch level (two tabs) 
