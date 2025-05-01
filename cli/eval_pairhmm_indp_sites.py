@@ -54,7 +54,7 @@ def eval_pairhmm_indp_sites(args,
     del err
 
     prev_model_ckpts_dir = f'{os.getcwd()}/{args.training_wkdir}/model_ckpts'
-    pairhmm_savemodel_filename = prev_model_ckpts_dir + '/'+ f'FINAL_PRED.pkl'
+    pairhmm_savemodel_filename = prev_model_ckpts_dir + '/'+ f'FINAL_PRED_BEST.pkl'
     
     fill_with_default_values(training_argparse)
     enforce_valid_defaults(training_argparse)

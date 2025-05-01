@@ -118,7 +118,7 @@ class GTRPairHMM(ModuleBase):
                                              sow_intermediates=sow_intermediates )
         
         loss = jnp.mean( aux_dict['joint_neg_logP_length_normed'] )
-        aux_dict['used_tkf_beta_approx'] = False
+        aux_dict['used_tkf_beta_approx'] = np.array([False])
         
         return loss, aux_dict
     
@@ -174,7 +174,7 @@ class GTRPairHMM(ModuleBase):
                                         t_array=t_array,
                                         joint_logprob_emit_at_match=joint_logprob_emit_at_match,
                                         sow_intermediates=sow_intermediates )
-        out['used_tkf_beta_approx'] = False
+        out['used_tkf_beta_approx'] =  np.array([False])
         
         
         #####################################

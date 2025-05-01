@@ -67,7 +67,7 @@ def main():
     
     # ## UNCOMMENT TO RUN IN SPYDER IDE
     # args.task = 'train'
-    # args.configs = 'hky85-tkf92_recover-params.json'
+    # args.configs = 'CONFIG_DRY-RUN_gtr_60-indp-site.json'
     
     
     
