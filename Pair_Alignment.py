@@ -43,7 +43,7 @@ def main():
                         choices = valid_tasks,
                         help='What do you want to do? Pick from: {valid_tasks}')
     
-    parser.add_argument('-config',
+    parser.add_argument('-configs',
                         type = str,
                         required=True,
                         help='Load configs from file or folder of files, in json format.')
@@ -67,7 +67,7 @@ def main():
     
     # ## UNCOMMENT TO RUN IN SPYDER IDE
     # args.task = 'train'
-    # args.configs = 'markovian_example_config.json'
+    # args.configs = 'config.json'
     
     
     

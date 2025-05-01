@@ -265,10 +265,10 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
                     g.write(f'epoch {epoch_idx}, batch {batch_idx}:\n')
                     
                     g.write(f'beta was zero:\n')
-                    g.write(f'{eval_metrics["used_tkf_beta_approx"][1]}\n')
+                    g.write(f'{train_metrics["used_tkf_beta_approx"][1]}\n')
                     
                     g.write(f'gamma was undefined:\n')
-                    g.write(f'{eval_metrics["used_tkf_beta_approx"][2]}\n\n')
+                    g.write(f'{train_metrics["used_tkf_beta_approx"][2]}\n\n')
             
             
             ### record metrics to tensorboard
