@@ -834,7 +834,7 @@ class IndpPairHMMLoadAll(IndpPairHMMFitBoth):
         return mod, 'GTR'
 
 
-def IndpHKY85FitAll(IndpPairHMMFitBoth):
+class IndpHKY85FitAll(IndpPairHMMFitBoth):
     """
     Identical to IndpPairHMMFitBoth, but uses the HKY85 substitution model.
     """
@@ -843,7 +843,7 @@ def IndpHKY85FitAll(IndpPairHMMFitBoth):
 
     def _init_rate_matrix_module(self, config):
         mod = HKY85( config = self.config,
-                               name = f'get rate matrix' )
+                     name = f'get rate matrix' )
         return mod, 'HKY85'
 
 
