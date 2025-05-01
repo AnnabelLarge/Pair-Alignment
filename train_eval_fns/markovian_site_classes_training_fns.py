@@ -207,9 +207,16 @@ def final_eval_wrapper(dataloader,
         eval_metrics = eval_fn_jitted(batch=batch, 
                                       max_align_len=batch_max_alignlen)
         
-        if eval_metrics["used_tkf_beta_approx"]:
-            with open(f'{args.out_arrs_dir}/FINAL-EVAL_tkf_approx.tsv','a') as g:
-                g.write(f'batch {batch_idx} of {outfile_prefix}: {eval_metrics["used_tkf_beta_approx"]}\n')
+        # record if you used any approximations
+        if eval_metrics["used_tkf_beta_approx"][0].any():
+            with open(f'{out_arrs_dir}/FINAL-EVAL_tkf_approx.tsv','a') as g:
+                g.write(f'batch {batch_idx}:\n')
+                
+                g.write(f'beta was zero:\n')
+                g.write(f'{eval_metrics["used_tkf_beta_approx"][1]}\n')
+                
+                g.write(f'gamma was undefined:\n')
+                g.write(f'{eval_metrics["used_tkf_beta_approx"][2]}\n\n')
         
         
         #########################################

@@ -43,9 +43,23 @@ def logsumexp_with_arr_lst(arr_lst, coeffs = None):
 
 def log_one_minus_x(x):
     """
-    calculate log( exp(log(1)) - exp(log(x)) ),
-      which is log( 1 - x )
+    calculate log( exp(log(1)) - exp(log(x)) ), which is log( 1 - x )
     """
+    a_for_logsumexp = concat_along_new_last_axis( [jnp.zeros(x.shape), x] )
+    b_for_logsumexp = jnp.array([1.0, -1.0])
+    out = logsumexp(a = a_for_logsumexp,
+                    b = b_for_logsumexp,
+                    axis = -1)
+    
+    return out
+
+def log_one_minus_x_with_floor(x, floor = 1e6 ):
+    """
+    calculate log( exp(log(1)) - exp(log(x)) ), which is log( 1 - x ), or just 
+      return the floor value (but this will kill the gradient!)
+    """
+    x = jnp.minimum(x, floor)  # avoid exp overflow or NaN
+    
     a_for_logsumexp = concat_along_new_last_axis( [jnp.zeros(x.shape), x] )
     b_for_logsumexp = jnp.array([1.0, -1.0])
     out = logsumexp(a = a_for_logsumexp,

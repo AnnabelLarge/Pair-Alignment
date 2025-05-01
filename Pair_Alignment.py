@@ -11,6 +11,7 @@ import os
 import argparse
 import jax
 import pickle
+import shutil
 
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update("jax_debug_infs", True)
@@ -33,7 +34,8 @@ def main():
                     'eval',
                     'batched_train',
                     'batched_eval',
-                    'label_class_post']
+                    'label_class_post',
+                    'continue_train']
     
     parser.add_argument('-task',
                         type=str,
@@ -41,23 +43,32 @@ def main():
                         choices = valid_tasks,
                         help='What do you want to do? Pick from: {valid_tasks}')
     
-    # needed for most options 
-    parser.add_argument('-configs',
+    parser.add_argument('-config',
                         type = str,
+                        required=True,
                         help='Load configs from file or folder of files, in json format.')
     
-    # OLD OPTION: needed to resuming training
-    parser.add_argument(f'-training_wkdir',
-                      type = str,
-                      help = 'training working directory to resume from')
+    # only needed when continuing training
+    parser.add_argument('-new_training_wkdir',
+                        type = str,
+                        help='ONLY FOR CONTINUE_TRAIN OPTION; Name for a new training working dir')
+    
+    parser.add_argument('-prev_model_ckpts_dir',
+                        type = str,
+                        help='ONLY FOR CONTINUE_TRAIN OPTION; Path to previous trainstate, argparse object')
+    
+    parser.add_argument('-tstate_to_load',
+                        type = str,
+                        help='ONLY FOR CONTINUE_TRAIN OPTION; The name of the tstate object to load')
     
     # parse the arguments
     args = parser.parse_args()
     
     
-    # ### UNCOMMENT TO RUN IN SPYDER IDE
+    # ## UNCOMMENT TO RUN IN SPYDER IDE
     # args.task = 'train'
-    # args.configs = 'gtr_indp_sites_example_config.json'
+    # args.configs = 'markovian_example_config.json'
+    
     
     
     ### helper function to open a single config file and extract additional arguments
@@ -155,6 +166,33 @@ def main():
                       dload_lst_for_all )
             
             del this_run_args
+    
+    elif args.task == 'continue_train':
+        # read argparse
+        assert args.configs.endswith('.json'), print("input is one JSON file")
+        print(f'CONTINUE TRAINING WITH: {args.configs}, IN NEW DIR {args.new_training_wkdir}')
+        args_from_training_config = read_config_file(args.configs)
+        
+        # import correct wrappers, dataloader initializers
+        if args_from_training_config.pred_model_type == 'pairhmm_indp_sites':
+            from cli.cont_training_pairhmm_indp_sites import cont_training_pairhmm_indp_sites as cont_train_fn
+            from dloaders.init_counts_dset import init_counts_dset as init_dataloaders
+        
+        else:
+            raise NotImplementedError('Cannot continue training yet!')
+        
+
+        # train model
+        dload_lst = init_dataloaders( args_from_training_config,
+                                      'train',
+                                      training_argparse = None )
+        
+        cont_train_fn( args=args_from_training_config, 
+                       dataloader_dict=dload_lst,
+                       new_training_wkdir=args.new_training_wkdir,
+                       prev_model_ckpts_dir=args.prev_model_ckpts_dir,
+                       tstate_to_load=args.tstate_to_load
+                       )
       
     
     ###########################################################################

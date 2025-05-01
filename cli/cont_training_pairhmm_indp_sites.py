@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Fri Feb  7 12:33:01 2025
+Created on Wed Apr 30 19:20:41 2025
 
 @author: annabel
-
-train a pair hmm, under markovian site class model assumption
-
 """
 # general python
 import os
@@ -22,6 +19,7 @@ from functools import partial
 import platform
 import argparse
 import json
+from contextlib import contextmanager
 
 # jax/flax stuff
 import jax
@@ -41,43 +39,62 @@ from utils.edit_argparse import (enforce_valid_defaults,
                                  fill_with_default_values,
                                  share_top_level_args)
 from utils.setup_training_dir import setup_training_dir
-from utils.sequence_length_helpers import determine_alignlen_bin
 from utils.tensorboard_recording_utils import (write_times,
                                                write_optional_outputs_during_training_hmms)
 from utils.write_timing_file import write_timing_file
 
 # specific to training this model
-from models.simple_site_class_predict.initializers import init_pairhmm_markov_sites as init_pairhmm
-from train_eval_fns.markovian_site_classes_training_fns import ( train_one_batch,
+from models.simple_site_class_predict.initializers import init_pairhmm_indp_sites as init_pairhmm
+from train_eval_fns.indp_site_classes_training_fns import ( train_one_batch,
                                                             eval_one_batch,
                                                             final_eval_wrapper )
 
+def save_to_pickle(out_file, obj):
+    with open(out_file, 'wb') as g:
+        pickle.dump(obj, g)
 
-def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
+def save_trainstate(out_file, tstate_obj):
+    model_state_dict = flax.serialization.to_state_dict(tstate_obj)
+    save_to_pickle(out_file, model_state_dict)
+    
+    
+def cont_training_pairhmm_indp_sites(args, 
+                                     dataloader_dict,
+                                     new_training_wkdir,
+                                     prev_model_ckpts_dir,
+                                     tstate_to_load):
+    
     ###########################################################################
     ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES   #########################
     ###########################################################################
-    err = (f"{args.pred_model_type} is not pairhmm_markovian_sites; "+
-           f"using the wrong training script")
-    assert args.pred_model_type == 'pairhmm_markovian_sites', err
+    # final where model pickles, previous argparses are
+    err = (f"{args.pred_model_type} is not pairhmm_indp_sites; "+
+           f"using the wrong eval script")
+    assert args.pred_model_type == 'pairhmm_indp_sites', err
     del err
+
+    pairhmm_savemodel_filename = prev_model_ckpts_dir + '/'+ tstate_to_load
+    prev_argparse_obj = prev_model_ckpts_dir + '/' + 'TRAINING_ARGPARSE.pkl'
+    with open(prev_argparse_obj,'rb') as f:
+        epoch_ended = pickle.load(f).epoch_idx
+    del prev_argparse_obj, f
     
-    
-    ### edit the argparse object in-place
     fill_with_default_values(args)
     enforce_valid_defaults(args)
     share_top_level_args(args)
-    
-    if not args.update_grads:
-        print('DEBUG MODE: DISABLING GRAD UPDATES')
-    
+
     
     ###########################################################################
     ### 1: SETUP   ############################################################
     ###########################################################################
     ### initial setup of misc things
-    # setup the working directory (if not done yet) and this run's sub-directory
+    # setup the working directory to continue training in (if not done yet) 
+    #   and this run's sub-directory
+    err = 'pick a new training directory'
+    assert args.training_wkdir != new_training_wkdir, err
+    args.training_wkdir = new_training_wkdir
     setup_training_dir(args)
+    del err
     
     # initial random key, to carry through execution
     rngkey = jax.random.key(args.rng_seednum)
@@ -87,14 +104,21 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     
     # create a new logfile
     with open(args.logfile_name,'w') as g:
-        if not args.update_grads:
-            g.write('DEBUG MODE: DISABLING GRAD UPDATES\n\n')
-            
-        g.write(f'PairHMM TKF92 with markovian site classes over emissions\n')
-        g.write( (f'  - Number of site classes: '+
+        g.write( f'CONTINUING TRAINING AT EPOCH: {epoch_ended-1}\n\n' )
+        g.write( f'PairHMM with independent site classes over emissions\n' )
+        g.write( f'Preset: args.pred_config["preset_name"]\n')
+        g.write( f'Indel model: {args.pred_config.get("indel_model_type","None")}\n' )
+        g.write( (f'  - Number of site classes for emissions: '+
                   f'{args.pred_config["num_emit_site_classes"]}\n' )
                 )
-        g.write(f'  - Normalizing losses by: {args.norm_loss_by}\n')
+        
+        if 'gtr' not in args.pred_config["preset_name"]:
+            g.write( f'  - Normalizing losses by: {args.norm_loss_by}\n' )
+        
+        elif 'gtr' in args.pred_config["preset_name"]:
+            g.write( f'  - Normalizing losses by: align length '+
+                     f'(same as desc length, because we remove gap '+
+                     f'positions) \n' )
     
     # extra files to record if you use tkf approximations
     with open(f'{args.out_arrs_dir}/TRAIN_tkf_approx.tsv','w') as g:
@@ -103,7 +127,7 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     with open(f'{args.out_arrs_dir}/FINAL-EVAL_tkf_approx.tsv','w') as g:
         g.write('Used tkf beta approximation in the following locations:\n')
         
-    
+        
     ### save updated config, provide filename for saving model parameters
     finalpred_save_model_filename = args.model_ckpts_dir + '/'+ f'FINAL_PRED.pkl'
     write_config(args = args, out_dir = args.model_ckpts_dir)
@@ -114,9 +138,9 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     training_dl = dataloader_dict['training_dl']
     test_dset = dataloader_dict['test_dset']
     test_dl = dataloader_dict['test_dl']
-
     args.pred_config['training_dset_emit_counts'] = training_dset.emit_counts
     args.pred_config['training_dset_aa_counts'] = training_dset.emit_counts
+    
     
     
     ###########################################################################
@@ -138,58 +162,71 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     num_timepoints = test_dset.retrieve_num_timepoints(times_from = args.pred_config['times_from'])
     dummy_t_array = jnp.empty( (num_timepoints, ) )
     
+    # counts array
+    B = args.batch_size
+    alph = args.emission_alphabet_size
+    num_states = training_dset.num_transitions
+    dummy_subCounts = jnp.empty( (B, alph, alph) )
+    dummy_insCounts = jnp.empty( (B, alph) )
+    dummy_delCounts = jnp.empty( (B, alph) )
+    dummy_transCounts = jnp.empty( (B, num_states, num_states) )
     
-    ### init sizes
-    # (B, L, 3)
-    max_dim1 = test_dset.global_align_max_length 
-    largest_aligns = jnp.empty( (args.batch_size, max_dim1, 3), dtype=int )
-    del max_dim1
-    
-    ### fn to handle jit-compiling according to alignment length
-    parted_determine_alignlen_bin = partial(determine_alignlen_bin,  
-                                            chunk_length = args.chunk_length,
-                                            seq_padding_idx = args.seq_padding_idx)
-    jitted_determine_alignlen_bin = jax.jit(parted_determine_alignlen_bin)
-    del parted_determine_alignlen_bin
-    
+    seq_shapes = [dummy_subCounts,
+                  dummy_insCounts,
+                  dummy_delCounts,
+                  dummy_transCounts]
     
     ### initialize functions
-    out = init_pairhmm( seq_shapes = largest_aligns, 
+    out = init_pairhmm( seq_shapes = seq_shapes, 
                         dummy_t_array = dummy_t_array,
                         tx = tx, 
                         model_init_rngkey = model_init_rngkey,
                         pred_config = args.pred_config,
-                        tabulate_file_loc = args.model_ckpts_dir)
-    pairhmm_trainstate, pairhmm_instance = out
+                        tabulate_file_loc = args.model_ckpts_dir
+                        )
+    blank_tstate, pairhmm_instance = out
     del out
     
+    # load values
+    with open(pairhmm_savemodel_filename, 'rb') as f:
+        state_dict = pickle.load(f)
+        
+    pairhmm_trainstate = flax.serialization.from_state_dict( blank_tstate, 
+                                                             state_dict )
+    del blank_tstate, state_dict
     
+    
+    ###########################################################################
+    ### EVERYTHING BELOW IS COPIED+PASTED FROM ORIGINAL TRAINING CLI!!!   #####
+    ###########################################################################
     ### part+jit training function
+    # note: if you want to use a different time per sample, will
+    #  have to change this jit compilation
     t_array = test_dset.return_time_array()
     print('Using times:')
     print(t_array)
+    print()
     
     parted_train_fn = partial( train_one_batch,
+                               indel_model_type = args.pred_config.get('indel_model_type', None),
+                               t_array = t_array, 
                                interms_for_tboard = args.interms_for_tboard,
-                               t_array = t_array,
-                               update_grads = args.update_grads
-                              )
-    
-    train_fn_jitted = jax.jit(parted_train_fn, 
-                              static_argnames = ['max_align_len'])
+                               update_grads = args.update_grads )
+    train_fn_jitted = jax.jit(parted_train_fn)
     del parted_train_fn
     
     
     ### part+jit eval function
+    # note: if you want to use a different time per sample, will
+    #  have to change this jit compilation
     parted_eval_fn = partial( eval_one_batch,
                               t_array = t_array,
                               pairhmm_instance = pairhmm_instance,
                               interms_for_tboard = {'finalpred_sow_outputs': False},
                               return_all_loglikes = False )
-    
-    eval_fn_jitted = jax.jit(parted_eval_fn, 
-                              static_argnames = ['max_align_len'])
+    eval_fn_jitted = jax.jit(parted_eval_fn)
     del parted_eval_fn
+    
     
     
     ###########################################################################
@@ -217,40 +254,55 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     all_eval_set_times = np.zeros( (args.num_epochs,2) )
     all_epoch_times = np.zeros( (args.num_epochs,2) )
     
-    for epoch_idx in tqdm(range(args.num_epochs)):
+    for epoch_idx in tqdm(range(epoch_ended-1, args.num_epochs)):
         epoch_real_start = wall_clock_time()
         epoch_cpu_start = process_time()
         
         ave_epoch_train_loss = 0
         ave_epoch_train_perpl = 0
-
+        
 #__4___8: epoch level (two tabs)          
         ##############################################
         ### 3.1: train and update model parameters   #
         ##############################################
-        # start timer
         train_real_start = wall_clock_time()
         train_cpu_start = process_time()
         
-        for batch_idx, batch in enumerate(training_dl):
-            batch_epoch_idx = epoch_idx * len(training_dl) + batch_idx
-
-#__4___8__12: batch level (three tabs)          
-            # unpack briefly to get max len and number of samples in the 
-            #   batch; place in some bin (this controls how many jit 
-            #   compilations you do)
-            batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch).item()
+        for batch_idx, batch in enumerate(training_dl):   
+            ### at the start of the BATCH, always save the model parameters 
+            ###   and what samples are in the batch
+            new_tstate_outfile = finalpred_save_model_filename.replace('.pkl',
+                                                                       '_BEFORE-UPDATE.pkl')
+            save_trainstate(out_file=new_tstate_outfile,
+                            tstate_obj=pairhmm_trainstate)
+            del new_tstate_outfile
             
-            ### run function to train on one batch of samples
+            new_batch_outfile = f'{args.model_ckpts_dir}/current_training_batch.pkl'
+            save_to_pickle(out_file=new_batch_outfile,
+                           obj=batch)
+            del new_batch_outfile
+            
+            
+            ### carry on with training
+            batch_epoch_idx = epoch_idx * len(training_dl) + batch_idx  
+            
             rngkey_for_training_batch = jax.random.fold_in(training_rngkey, epoch_idx+batch_idx)
+            # print('disabling jit in training function')
+            # with jax.disable_jit():
             out = train_fn_jitted(batch=batch, 
                                   training_rngkey=rngkey_for_training_batch, 
-                                  pairhmm_trainstate=pairhmm_trainstate, 
-                                  max_align_len = batch_max_alignlen )
+                                  pairhmm_trainstate=pairhmm_trainstate)
             train_metrics, pairhmm_trainstate = out
             del out
             
-            # record if you used any approximations
+            
+            ### save the model parameters again
+            new_tstate_outfile = finalpred_save_model_filename.replace('.pkl',
+                                                                       '_AFTER-UPDATE.pkl')
+            save_trainstate(out_file=new_tstate_outfile,
+                            tstate_obj=pairhmm_trainstate)
+            del new_tstate_outfile
+            
             if train_metrics["used_tkf_beta_approx"][0].any():
                 with open(f'{args.out_arrs_dir}/TRAIN_tkf_approx.tsv','a') as g:
                     g.write(f'epoch {epoch_idx}, batch {batch_idx}:\n')
@@ -260,7 +312,19 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
                     
                     g.write(f'gamma was undefined:\n')
                     g.write(f'{train_metrics["used_tkf_beta_approx"][2]}\n\n')
-                    
+            
+            
+            ### record metrics to tensorboard
+            interm_rec = batch_epoch_idx % args.histogram_output_freq == 0
+            final_rec = (batch_idx == len(training_dl)) & (epoch_idx == args.num_epochs)
+            
+            write_optional_outputs_during_training_hmms( writer_obj = writer, 
+                                                    pairhmm_trainstate = pairhmm_trainstate,
+                                                    global_step = batch_epoch_idx, 
+                                                    dict_of_values = train_metrics, 
+                                                    interms_for_tboard = args.interms_for_tboard, 
+                                                    write_histograms_flag = interm_rec or final_rec )
+            
             
 #__4___8__12: batch level (three tabs)
             ################################################################
@@ -268,16 +332,20 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
             ###      and quit training                                     #
             ################################################################
             if jnp.isnan( train_metrics['batch_loss'] ):
+                with open(args.logfile_name,'a') as g:
+                    g.write('\n')
+                    g.write(f'NaN loss at epoch {epoch_idx}, batch {batch_idx}\n')
+                    
                 # save the argparse object by itself
                 args.epoch_idx = epoch_idx
                 with open(f'{args.model_ckpts_dir}/TRAINING_ARGPARSE.pkl', 'wb') as g:
                     pickle.dump(args, g)
                 
-                # save all trainstate objects
-                new_outfile = finalpred_save_model_filename.replace('.pkl','_BROKEN.pkl')
-                with open(new_outfile, 'wb') as g:
-                    model_state_dict = flax.serialization.to_state_dict(pairhmm_trainstate)
-                    pickle.dump(model_state_dict, g)
+                # # save all trainstate objects
+                # new_outfile = finalpred_save_model_filename.replace('.pkl','_BROKEN.pkl')
+                # with open(new_outfile, 'wb') as g:
+                #     model_state_dict = flax.serialization.to_state_dict(pairhmm_trainstate)
+                #     pickle.dump(model_state_dict, g)
                 
                 raise RuntimeError( ('NaN loss detected; saved intermediates '+
                                     'and quit training') )
@@ -290,17 +358,8 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
             ave_epoch_train_perpl += train_metrics['batch_ave_joint_perpl'] * weight
             del weight
             
-            # record metrics
-            interm_rec = batch_epoch_idx % args.histogram_output_freq == 0
-            final_rec = (batch_idx == len(training_dl)) & (epoch_idx == args.num_epochs)
-            write_optional_outputs_during_training_hmms(writer_obj = writer, 
-                                                    pairhmm_trainstate = pairhmm_trainstate,
-                                                    global_step = batch_epoch_idx, 
-                                                    dict_of_values = train_metrics, 
-                                                    interms_for_tboard = args.interms_for_tboard, 
-                                                    write_histograms_flag = interm_rec or final_rec)
             
-        
+            
 #__4___8: epoch level (two tabs)
         ### manage timing
         # stop timer
@@ -337,26 +396,19 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
         eval_cpu_start = process_time()
         
         for batch_idx, batch in enumerate(test_dl):
-            # unpack briefly to get max len and number of samples in the 
-            #   batch; place in some bin (this controls how many jit 
-            #   compilations you do)
-            batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch).item()
-                
             eval_metrics = eval_fn_jitted(batch=batch, 
-                                          pairhmm_trainstate=pairhmm_trainstate,
-                                          max_align_len=batch_max_alignlen)
+                                          pairhmm_trainstate=pairhmm_trainstate)
             batch_loss = jnp.mean( eval_metrics['joint_neg_logP_length_normed'] )
             
-#__4___8__12: batch level (three tabs)
             ### add to total loss for this epoch; weight by number of
             ###   samples/valid tokens in this batch
             weight = args.batch_size / len(test_dset)
             ave_epoch_test_loss += batch_loss * weight
             ave_epoch_test_perpl += jnp.mean( eval_metrics['joint_perplexity_perSamp'] ) * weight
-            del weight    
-        
-            
-#__4___8: epoch level (two tabs) 
+            del weight
+    
+    
+#__4___8: epoch level (two tabs)
         ### manage timing
         # stop timer
         eval_real_end = wall_clock_time()
@@ -418,9 +470,9 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
             
             # save models to regular python pickles too (in case training is 
             #   interrupted)
-            with open(finalpred_save_model_filename, 'wb') as g:
-                model_state_dict = flax.serialization.to_state_dict(pairhmm_trainstate)
-                pickle.dump(model_state_dict, g)
+            new_outfile = finalpred_save_model_filename.replace('.pkl','_BEST.pkl')
+            save_trainstate(out_file=new_outfile, 
+                            tstate_obj=pairhmm_trainstate)
             
             
 #__4___8: epoch level (two tabs) 
@@ -465,11 +517,9 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
             
             # rage quit
             break
-        
 
-#__4___8: epoch level (two tabs) 
-        ### before next epoch, do this stuff
-        # remember this epoch's loss for next iteration
+
+        ### before next epoch, remember this epoch's loss for next iteration
         prev_test_loss = ave_epoch_test_loss
         
         # record time spent at this epoch
@@ -478,6 +528,7 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
         all_epoch_times[epoch_idx, 0] = epoch_real_end - epoch_real_start
         all_epoch_times[epoch_idx, 1] = epoch_cpu_end - epoch_cpu_start
         
+        # write to tensorboard
         write_times(cpu_start = epoch_cpu_start, 
                     cpu_end = epoch_cpu_end, 
                     real_start = epoch_real_start, 
@@ -487,8 +538,9 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
                     writer_obj = writer)
         
         del epoch_cpu_start, epoch_cpu_end, epoch_real_start, epoch_real_end
-    
-    
+        
+        
+
     ###########################################################################
     ### 4: POST-TRAINING ACTIONS   ############################################
     ###########################################################################
@@ -497,9 +549,6 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     with open(args.logfile_name,'a') as g:
         g.write('\n')
         g.write(f'4: post-training actions\n')
-    
-    post_training_real_start = wall_clock_time()
-    post_training_cpu_start = process_time()
     
     # don't accidentally use old trainstates or eval fn
     del pairhmm_trainstate, eval_fn_jitted
@@ -526,7 +575,7 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
             g.write(f'Regular stopping after {epoch_idx} full epochs:\n\n')
         
         # finish up logfile, regardless of early stopping or not
-        g.write(f'Epoch with lowest average test loss ("best epoch"): {best_epoch}\n\n')
+        g.write(f'Epoch with lowest average test loss ("best epoch"): {best_epoch}\n')
         g.write(f'RE-EVALUATING ALL DATA WITH BEST PARAMS:\n\n')
     
     del epoch_idx
@@ -543,9 +592,9 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     args.epoch_idx = best_epoch
     with open(f'{args.model_ckpts_dir}/TRAINING_ARGPARSE.pkl', 'wb') as g:
         pickle.dump(args, g)
-        
     
-    ### jit compile new eval function
+    
+    ### jit-compile new eval function
     t_array = test_dset.return_time_array()
     parted_eval_fn = partial( eval_one_batch,
                               t_array = t_array,
@@ -553,11 +602,9 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
                               pairhmm_instance = pairhmm_instance,
                               interms_for_tboard = args.interms_for_tboard,
                               return_all_loglikes = True )
-    
-    eval_fn_jitted = jax.jit(parted_eval_fn, 
-                              static_argnames = ['max_align_len'])
+    eval_fn_jitted = jax.jit(parted_eval_fn)
     del parted_eval_fn
-    
+        
     
     ###########################################
     ### loop through training dataloader and  #
@@ -570,25 +617,22 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
                                              dataset = training_dset, 
                                              eval_fn_jitted = eval_fn_jitted,
                                              save_per_sample_losses = args.save_per_sample_losses,
-                                             jitted_determine_alignlen_bin = jitted_determine_alignlen_bin,
                                              logfile_dir = args.logfile_dir,
                                              out_arrs_dir = args.out_arrs_dir,
                                              outfile_prefix = f'train-set')
-    
-    
+
+
     ###########################################
-    ### loop through test dataloader and      #
+    ### loop through training dataloader and  #
     ### score with best params                #
     ###########################################
     with open(args.logfile_name,'a') as g:
         g.write(f'SCORING ALL TEST SEQS\n\n')
         
-    # output_attn_weights also controlled by cond1 and cond2
     test_summary_stats = final_eval_wrapper(dataloader = test_dl, 
-                                            dataset = test_dset, 
+                                            dataset = test_dset,  
                                             eval_fn_jitted = eval_fn_jitted,
                                             save_per_sample_losses = args.save_per_sample_losses,
-                                            jitted_determine_alignlen_bin = jitted_determine_alignlen_bin,
                                             logfile_dir = args.logfile_dir,
                                             out_arrs_dir = args.out_arrs_dir,
                                             outfile_prefix = f'test-set')
@@ -636,4 +680,9 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     # DO remove source on linux (when I'm doing real experiments)
     elif platform.system() == 'Linux':
         os.system(f"tar -czvf {args.training_wkdir}/tboard.tar.gz  --remove-files {args.training_wkdir}/tboard")
+    
+    
+    
+    
+    
     

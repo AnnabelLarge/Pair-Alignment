@@ -50,7 +50,13 @@ def init_time_array(args):
     
     elif args.pred_config['times_from'] == 'one_time_per_sample_from_file':
         raise NotImplementedError('do you REALLY need an individual time per sample?')
-        
+    
+    ### time cutoff
+    # times_from_array = times_from_array[times_from_array > 1e-4] # error at beta approx
+    # times_from_array = times_from_array[times_from_array > 1e-3] # error after jit compilation??? but fine without
+    # final conclusion: use 0.015 as a cutoff
+    times_from_array = times_from_array[times_from_array > args.min_time]
+    
     return times_from_array, single_time_from_file 
         
    

@@ -22,6 +22,7 @@ from functools import partial
 import platform
 import argparse
 import json
+from contextlib import contextmanager
 
 # jax/flax stuff
 import jax
@@ -58,7 +59,7 @@ def save_to_pickle(out_file, obj):
 def save_trainstate(out_file, tstate_obj):
     model_state_dict = flax.serialization.to_state_dict(tstate_obj)
     save_to_pickle(out_file, model_state_dict)
-        
+
 
 def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     ###########################################################################
@@ -249,21 +250,6 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
         train_cpu_start = process_time()
         
         for batch_idx, batch in enumerate(training_dl):   
-            ### at the start of the BATCH, always save the model parameters 
-            ###   and what samples are in the batch
-            new_tstate_outfile = finalpred_save_model_filename.replace('.pkl',
-                                                                       '_BEFORE-UPDATE.pkl')
-            save_trainstate(out_file=new_tstate_outfile,
-                            tstate_obj=pairhmm_trainstate)
-            del new_tstate_outfile
-            
-            new_batch_outfile = f'{args.model_ckpts_dir}/current_training_batch.pkl'
-            save_to_pickle(out_file=new_batch_outfile,
-                           obj=batch)
-            del new_batch_outfile
-            
-            
-            ### carry on with training
             batch_epoch_idx = epoch_idx * len(training_dl) + batch_idx  
             
             rngkey_for_training_batch = jax.random.fold_in(training_rngkey, epoch_idx+batch_idx)
@@ -273,17 +259,16 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
             train_metrics, pairhmm_trainstate = out
             del out
             
-            
-            ### save the model parameters again
-            new_tstate_outfile = finalpred_save_model_filename.replace('.pkl',
-                                                                       '_AFTER-UPDATE.pkl')
-            save_trainstate(out_file=new_tstate_outfile,
-                            tstate_obj=pairhmm_trainstate)
-            del new_tstate_outfile
-            
-            if train_metrics["used_tkf_beta_approx"]:
+            # record if you used any approximations
+            if train_metrics["used_tkf_beta_approx"][0].any():
                 with open(f'{args.out_arrs_dir}/TRAIN_tkf_approx.tsv','a') as g:
-                    g.write('epoch {epoch_idx}, batch {batch_idx}: {train_metrics["used_tkf_beta_approx"]}\n')
+                    g.write(f'epoch {epoch_idx}, batch {batch_idx}:\n')
+                    
+                    g.write(f'beta was zero:\n')
+                    g.write(f'{eval_metrics["used_tkf_beta_approx"][1]}\n')
+                    
+                    g.write(f'gamma was undefined:\n')
+                    g.write(f'{eval_metrics["used_tkf_beta_approx"][2]}\n\n')
             
             
             ### record metrics to tensorboard
@@ -313,11 +298,10 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
                 with open(f'{args.model_ckpts_dir}/TRAINING_ARGPARSE.pkl', 'wb') as g:
                     pickle.dump(args, g)
                 
-                # # save all trainstate objects
-                # new_outfile = finalpred_save_model_filename.replace('.pkl','_BROKEN.pkl')
-                # with open(new_outfile, 'wb') as g:
-                #     model_state_dict = flax.serialization.to_state_dict(pairhmm_trainstate)
-                #     pickle.dump(model_state_dict, g)
+                # save all trainstate objects
+                new_outfile = finalpred_save_model_filename.replace('.pkl','_BROKEN.pkl')
+                save_trainstate(out_file=new_outfile,
+                                tstate_obj=pairhmm_trainstate)
                 
                 raise RuntimeError( ('NaN loss detected; saved intermediates '+
                                     'and quit training') )

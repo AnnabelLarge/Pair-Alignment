@@ -58,8 +58,6 @@ def train_one_batch(batch,
     grad_fn = jax.value_and_grad(apply_model, has_aux=True)
     (batch_loss_NLL, aux_dict), grad = grad_fn(pairhmm_trainstate.params)
     
-    
-    
     ### only turn this off during debug
     if update_grads:
         updates, new_opt_state = pairhmm_trainstate.tx.update(grad,
@@ -220,10 +218,16 @@ def final_eval_wrapper(dataloader,
     for batch_idx, batch in tqdm( enumerate(dataloader), total=len(dataloader) ): 
         eval_metrics = eval_fn_jitted( batch=batch )
         
-        if eval_metrics["used_tkf_beta_approx"]:
-            with open(f'{args.out_arrs_dir}/FINAL-EVAL_tkf_approx.tsv','a') as g:
-                g.write(f'batch {batch_idx} of {outfile_prefix}: {eval_metrics["used_tkf_beta_approx"]}\n')
-                    
+        if eval_metrics["used_tkf_beta_approx"][0].any():
+            with open(f'{out_arrs_dir}/FINAL-EVAL_tkf_approx.tsv','a') as g:
+                g.write(f'batch {batch_idx}:\n')
+                
+                g.write(f'beta was zero:\n')
+                g.write(f'{eval_metrics["used_tkf_beta_approx"][1]}\n')
+                
+                g.write(f'gamma was undefined:\n')
+                g.write(f'{eval_metrics["used_tkf_beta_approx"][2]}\n\n')
+        
                 
         #########################################
         ### start df; record metrics per sample #

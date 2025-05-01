@@ -9,6 +9,8 @@
     "batch_size": 2,
     "chunk_length": 512,
     "emission_alphabet_size": 20,
+    "gap_tok": 43,
+    "min_time": 0.015,
 
     "norm_loss_by": "desc_len",
 
@@ -38,7 +40,10 @@
     "pred_model_type": "pairhmm_markovian_sites",
     "pred_config": {
         "preset_name": "fit_all",
-        "times_from": "t_array_from_file",
+        "times_from": "geometric",
+        "t_grid_center": 0.03,
+        "t_grid_step": 1.1,
+        "t_grid_num_steps": 65,
         "exponential_dist_param": 1.1158886772273318,
         "indel_model_type": "tkf92",
         "num_emit_site_classes": 2,
