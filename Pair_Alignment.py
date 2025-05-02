@@ -35,8 +35,7 @@ def main():
                     'batched_train',
                     'batched_eval',
                     'label_class_post',
-                    'continue_train']
-    
+                    'continue_train'
     parser.add_argument('-task',
                         type=str,
                         required=True,
