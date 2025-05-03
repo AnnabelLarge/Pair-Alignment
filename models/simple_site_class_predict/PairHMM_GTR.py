@@ -107,7 +107,6 @@ class GTRPairHMM(ModuleBase):
         out = self._get_scoring_matrices(t_array=t_array,
                                         sow_intermediates=sow_intermediates)
         
-        logprob_emit_at_indel = out['logprob_emit_at_indel']
         joint_logprob_emit_at_match = out['joint_logprob_emit_at_match']
         del out
         

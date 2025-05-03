@@ -15,10 +15,10 @@ def safe_log(x):
                                x, 
                                jnp.finfo('float32').smallest_normal ) )
 
-def bounded_sigmoid(x, min_val, max_val, *args, **kwargs):
+def bound_sigmoid(x, min_val, max_val, *args, **kwargs):
     return min_val + (max_val - min_val) / (1 + jnp.exp(-x))
     
-def bounded_sigmoid_inverse(y, min_val, max_val, eps=1e-4):
+def bound_sigmoid_inverse(y, min_val, max_val, eps=1e-4):
     """
     note: this is only for logit initialization; jnp.clip has bad 
           gradients at extremes

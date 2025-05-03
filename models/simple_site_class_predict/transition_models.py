@@ -29,7 +29,7 @@ from jax.scipy.special import logsumexp
 import pickle
 
 from models.model_utils.BaseClasses import ModuleBase
-from utils.pairhmm_helpers import (bounded_sigmoid,
+from utils.pairhmm_helpers import (bound_sigmoid,
                                    safe_log,
                                    concat_along_new_last_axis,
                                    logsumexp_with_arr_lst,

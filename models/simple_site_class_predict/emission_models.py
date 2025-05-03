@@ -6,59 +6,44 @@ Created on Wed Feb  5 02:03:13 2025
 @author: annabel
 
 
-if loading from files, provide parameters in PROBABILITY SPACE 
-
-most of these rate matrix functions are similar to protein_emission_models
+ABOUT:
+======
+Functions and Flax Modules needed for scoring emissions
 
 
 modules:
-========
-'LogEqulVecFromCounts',
-'LogEqulVecFromFile',
-'LogEqulVecPerClass',
-
-'HKY85',
-'HKY85FromFile',
-'RateMatFitBoth',
-'RateMatFromFile',
-
+=========
+'EqulDistLogprobsFromCounts',
+'EqulDistLogprobsFromFile',
+'EqulDistLogprobsPerClass',
+'GTRRateMat',
+'GTRRateMatFromFile',
+'HKY85RateMat',
+'HKY85RateMatFromFile',
 'SiteClassLogprobs',
-'SiteClassLogprobsFromFile'
+'SiteClassLogprobsFromFile',
 
 
-not in use:
-============
-'RateMatFitRateMult',
-'PerClassRateMat'
-
+functions:
+===========
+'get_cond_logprob_emit_at_match_per_class',
+'get_joint_logprob_emit_at_match_per_class',
+'_rate_matrix_from_exch_equl',
+'_scale_rate_matrix',
+'_upper_tri_vector_to_sym_matrix',
 """
-# jumping jax and leaping flax
 from flax import linen as nn
 import jax
+from jax.scipy.linalg import expm
+from jax._src.typing import Array, ArrayLike
 import jax.numpy as jnp
 
 from functools import partial
 
 from models.model_utils.BaseClasses import ModuleBase
-from utils.pairhmm_helpers import (bounded_sigmoid,
+from utils.pairhmm_helpers import (bound_sigmoid,
+                                   bound_sigmoid_inverse,
                                    safe_log)
-
-
-########################################
-### helpers only for emission models   #
-########################################
-def bounded_sigmoid_inverse(y, min_val, max_val, eps=1e-4):
-    """
-    note: this is only for logit initialization; jnp.clip has bad 
-          gradients at extremes
-    """
-    y = jnp.clip(y, min_val + eps, max_val - eps)
-    return safe_log( (y - min_val) / (max_val - y) )
-
-def save_interms(param_name, mat):
-    with open(f'pred_{param_name}.npy','wb') as g:
-        jnp.save(g, mat)
-
 
 
 ###############################################################################
@@ -66,33 +51,73 @@ def save_interms(param_name, mat):
 ###############################################################################
 class SiteClassLogprobs(ModuleBase):
     """
-    required in pred_config:
-        - num_emit_site_classes: number of classes
+    Probability of being in site class, P(c)
     
-    params:
-        - class_logits: (C,)
     
-    __call__ returns:
-        - logP(site classes): (C,)
+    Initialize with
+    ----------------
+    config : dict
+        config['num_emit_site_classes'] : int
+            number of emission site classes
+    
+    name : str
+        class name, for flax
+    
+    Methods here
+    ------------
+    setup
+    __call__
+    
+    Methods inherited from models.model_utils.BaseClasses.ModuleBase
+    ----------------------------------------------------------------
+    sow_histograms_scalars
+        for tensorboard logging
+    
     """
     config: dict
     name: str
     
     def setup(self):
+        """
+        C = number of site classes
+        
+        
+        Flax Module Parameters
+        -----------------------
+        class_logits : ArrayLike (C,)
+            initialize logits from unit normal
+        
+        """
         self.n_classes = self.config['num_emit_site_classes']
         
         if self.n_classes > 1:
             self.class_logits = self.param('class_logits',
                                             nn.initializers.normal(),
                                             (self.n_classes,),
-                                            jnp.float32)
+                                            jnp.float32) #(C,)
         
     def __call__(self,
-                 sow_intermediates):
+                 sow_intermediates: bool):
+        """
+        C: number of site classes
         
+        
+        Arguments
+        ----------
+        sow_intermediates : bool
+            switch for tensorboard logging
+          
+        Returns
+        -------
+        log_class_probs : ArrayLike, (C,)
+            log-probability of being in each site class, P(c); if only one
+            site class, then logP(c) = 0
+          
+        """
         if self.n_classes > 1:
-            log_class_probs = nn.log_softmax(self.class_logits)
+            log_class_probs = nn.log_softmax(self.class_logits) #(C,)
         
+            # tensorboard logging
             if sow_intermediates:
                 for i in range(log_class_probs.shape[0]):
                     val_to_write = jnp.exp( log_class_probs[i] )
@@ -103,229 +128,279 @@ class SiteClassLogprobs(ModuleBase):
                     del lab
         
         else:
-            log_class_probs = jnp.array([0])
+            log_class_probs = jnp.array([0]) #(1,)
             
         return log_class_probs
 
 
 class SiteClassLogprobsFromFile(ModuleBase):
     """
-    required in pred_config:
-      - filenames: dictionary of files to load
-          > pred_config["filenames"]["class_probs"]: file containing the 
-            class probabilities to load
+    load probabilities of being in site class, P(c)
     
-    params: None
     
-    __call__ returns:
-        - logP(site classes): (C,)
+    Initialize with
+    ----------------
+    config : dict
+        config['filenames']['class_probs'] :  str
+            file containing the class probabilities to load
+        
+    name : str
+        class name, for flax
+    
+    Methods here
+    ------------
+    setup
+    __call__
+    
     """
     config: dict
     name: str
     
     def setup(self):
+        """
+        
+        Flax Module Parameters
+        -----------------------
+        none
+        
+        """
         in_file = self.config['filenames']['class_probs']
         with open(in_file,'rb') as f:
             class_probs = jnp.load(f)
-        self.log_class_probs = safe_log(class_probs)
+        self.log_class_probs = safe_log(class_probs) #(C,)
     
     def __call__(self,
                  **kwargs):
-        return self.log_class_probs
+        """
+        Returns
+        -------
+        log_class_probs : ArrayLike, (C,)
+            log-probability of being in each site class, P(c)
+          
+        """
+        return self.log_class_probs #(C,)
 
 
 ###############################################################################
-### GENERAL SUBSTITUTION RATE MATRIX MODELS   #################################
+### RATE MATRICES   ###########################################################
 ###############################################################################
-class RateMatFromFile(ModuleBase):
+
+########################
+### helper functions   #
+########################
+def _upper_tri_vector_to_sym_matrix( vec: ArrayLike ):
     """
-    ABOUT:
-    ======
+    Given upper triangular values, fill in a symmetric matrix
+
+
+    Arguments
+    ----------
+    vec : ArrayLike, (n,)
+        upper triangular values
+    
+    Returns
+    -------
+    mat : ArrayLike, (A, A)
+        final matrix; A = ( n * (n-1) ) / 2
+    
+    Example
+    -------
+    vec = [a, b, c, d, e, f]
+    
+    _upper_tri_vector_to_sym_matrix(vec) = [[0, a, b, c],
+                                            [a, 0, d, e],
+                                            [b, d, 0, f],
+                                            [c, e, f, 0]]
+
+    """
+    ### automatically detect emission alphabet size
+    # 6 = DNA (alphabet size = 4)
+    # 190 = proteins (alphabet size = 20)
+    # 2016 = codons (alphabet size = 64)
+    if vec.shape[-1] == 6:
+        emission_alphabet_size = 4
+    
+    elif vec.shape[-1] == 190:
+        emission_alphabet_size = 20
+    
+    elif vec.shape[-1] == 2016:
+        emission_alphabet_size = 64
+    
+    else:
+        raise ValueError(f'input dimensions are: {vec.shape}')
+    
+    
+    ### fill upper triangular part of matrix
+    out_size = (emission_alphabet_size, emission_alphabet_size)
+    upper_tri_exchang = jnp.zeros( out_size )
+    idxes = jnp.triu_indices(emission_alphabet_size, k=1)  
+    upper_tri_exchang = upper_tri_exchang.at[idxes].set(vec) # (A, A)
+    
+    
+    ### reflect across diagonal
+    mat = (upper_tri_exchang + upper_tri_exchang.T) # (A, A)
+    
+    return mat
+
+
+def _rate_matrix_from_exch_equl(exchangeabilities: ArrayLike,
+                                equilibrium_distributions: ArrayLike,
+                                norm: bool=True):
+    """
+    computes rate matrix Q = \chi * \pi_c; normalizes to substution 
+      rate of one if desired
+    
+    only one exchangeability; rho and pi are properties of the class
+    
+    C = number of latent site classes
+    A = alphabet size
+    
+    
+    Arguments
+    ----------
+    exchangeabilities : ArrayLike, (A, A)
+        symmetric exchangeability parameter matrix
+        
+    equilibrium_distributions : ArrayLike, (C, A)
+        amino acid equilibriums per site
+    
+    norm : bool, optional; default is True
+
+    Returns
+    -------
+    subst_rate_mat : ArrayLike, (C, A, A)
+        rate matrix Q, for every class
+
+    """
+    C = equilibrium_distributions.shape[0]
+    A = equilibrium_distributions.shape[1]
+
+    # just in case, zero out the diagonals of exchangeabilities
+    exchangeabilities_without_diags = exchangeabilities * ~jnp.eye(A, dtype=bool)
+
+    # Q = chi * diag(pi); q_ij = chi_ij * pi_j
+    rate_mat_without_diags = jnp.einsum('ij, cj -> cij', 
+                                        exchangeabilities_without_diags, 
+                                        equilibrium_distributions)   # (C, A, A)
+    
+    # put the row sums in the diagonals
+    row_sums = rate_mat_without_diags.sum(axis=2)  # (C, A)
+    ones_diag = jnp.eye( A, dtype=bool )[None,:,:]   # (1, A, A)
+    ones_diag = jnp.broadcast_to( ones_diag, (C,
+                                              ones_diag.shape[1],
+                                              ones_diag.shape[2]) )
+    diags_to_add = -jnp.einsum('ci,cij->cij', row_sums, ones_diag)  #(C, A, A)
+    subst_rate_mat = rate_mat_without_diags + diags_to_add  #(C, A, A)
+    
+    # normalize (true by default)
+    if norm:
+        diag = jnp.einsum("cii->ci", subst_rate_mat)  # (C, A)
+        norm_factor = -jnp.sum(diag * equilibrium_distributions, axis=1)[:,None,None]  #(C, 1, 1)
+        subst_rate_mat = subst_rate_mat / norm_factor  # (C, A, A)
+    
+    return subst_rate_mat
+
+
+def _scale_rate_matrix(subst_rate_mat: ArrayLike,
+                       rate_multiplier: ArrayLike):
+    """
+    Scale Q by rate multipliers, rho
+    
+    C = number of latent site classes
+    A = alphabet size
+    
+    
+    Arguments
+    ----------
+    subst_rate_mat : ArrayLike, (C, A, A)
+    
+    rate_multiplier : ArrayLike, (C,)
+
+    Returns
+    -------
+    scaled rate matrix : ArrayLike, (C, A, A)
+
+    """
+    return jnp.einsum( 'c,cij->cij', 
+                       rate_multiplier, 
+                       subst_rate_mat )
+ 
+
+###############################
+### General time reversible   #
+###############################
+class GTRRateMat(ModuleBase):
+    """
     return (rho * Q), to be directly used in matrix exponential
 
-    load exchangeabilities and rate multiplier from files; exchangeabilties 
-      could either be a vector of values (which will be transformed into a 
-      square matrix), or the final square matrix
     
-    return the normalized rate matrix, as well as the rate matrix after
-      multiplying by rate multipliers
-     
-    out = (rate_mat_times_rho, rate_mat)
+    Initialize with
+    ----------------
+    config : dict
+        config['num_emit_site_classes'] :  int
+            number of emission site classes
+        
+        config['rate_mult_activation'] : {'bound_sigmoid', 'softplus'}
+            what activation to use for logits of rate multiplier
+        
+        config['rate_mult_range'] : List[float, float], optional
+            only needed when using bound_sigmoid for rate multipliers
+            first value is min, second value is max
+            Default is (0.01, 10)
+        
+        config['exchange_range'] : List[float, float]
+            exchangeabilities undergo bound_sigmoid transformation, this
+            specifies the min and max
+            Default is (1e-4, 12)
+        
+        config['filenames']['exch'] : str
+            name of the exchangeabilities to intiialize with
+        
+    name : str
+        class name, for flax
     
+    Methods here
+    ------------
+    setup
+    __call__
+    _prepare_rate_matrix
+        function to prepare rate matrix (defined in helpers above)
     
-    tl;dr:
-    =======
-    required in pred_config:
-        - num_emit_site_classes: number of classes
-        - filenames: dictionary of files to load
-          > pred_config["filenames"]["rate_mult"]
-          > pred_config["filenames"]["exch"]
+    Methods inherited from models.model_utils.BaseClasses.ModuleBase
+    ----------------------------------
+    sow_histograms_scalars
+        for tensorboard logging
     
-    __call__ returns:
-        - rate matrix times rate multipliers: (C_curr, |\omega_Y|, |\omega_X|)
     """
     config: dict
     name: str
     
     def setup(self):
-        # could still have multiple site classes
-        self.num_emit_site_classes = self.config['num_emit_site_classes']
-        rate_multiplier_file = self.config['filenames']['rate_mult']
-        exchangeabilities_file = self.config['filenames']['exch']
+        """
+        C: number of site classes
         
         
-        ### EXCHANGEABILITIES ALREADY TRANSFORMED:
-        with open(exchangeabilities_file,'rb') as f:
-            exch_from_file = jnp.load(f)
+        Flax Module Parameters
+        -----------------------
+        rate_mult_logits : ArrayLike, (C,)
+            rate multiplier per class; ONLY present if C > 1
         
-        # if providing a vector, need to prepare a square exchangeabilities matrix
-        if len(exch_from_file.shape) == 2:
-            self.exchangeabilities = exch_from_file
+        exchangeabilities_logits_vec : ArrayLike, (n,)
+            upper triangular values for exchangeability matrix
+            190 for proteins, 6 for DNA
+            Usually initialize logits from LG08 exchangeabilities
         
-        # otherwise, use the matrix as-is
-        elif len(exch_from_file.shape) == 1:
-            self.exchangeabilities = self._upper_tri_vector_to_sym_matrix( exch_from_file )
-                    
-        
-        ### RATE MULTIPLIERS: (c,)
-        if self.num_emit_site_classes > 1:
-            with open(rate_multiplier_file, 'rb') as f:
-                self.rate_multiplier = jnp.load(f)
-        else:
-            self.rate_multiplier = jnp.array([1])
-    
-    
-    def __call__(self,
-                 logprob_equl,
-                 sow_intermediates: bool,
-                 *args,
-                 **kwargs):
-        # (C, alph)
-        equl = jnp.exp(logprob_equl)
-        
-        out =  self._prepare_rate_matrix(exchangeabilities = self.exchangeabilities,
-                                   equilibrium_distributions = equl,
-                                   sow_intermediates = sow_intermediates,
-                                   rate_multiplier = self.rate_multiplier)
-        return out
-    
-    
-    def _upper_tri_vector_to_sym_matrix( self, 
-                                         vec ):
-        # automatically detect emission alphabet size
-        # 6 = DNA (alphabet size = 4)
-        # 2016 = codons (alphabet size = 64)
-        # 190 = proteins (alphabet size = 20)
-        if vec.shape[-1] == 6:
-            emission_alphabet_size = 4
-        
-        elif vec.shape[-1] == 2016:
-            emission_alphabet_size = 64
-        
-        elif vec.shape[-1] == 190:
-            emission_alphabet_size = 20
-        
-        # fill upper triangular part of matrix
-        out_size = (emission_alphabet_size, emission_alphabet_size)
-        upper_tri_exchang = jnp.zeros( out_size )
-        idxes = jnp.triu_indices(emission_alphabet_size, k=1)  
-        upper_tri_exchang = upper_tri_exchang.at[idxes].set(vec)
-        
-        # reflect across diagonal
-        mat = (upper_tri_exchang + upper_tri_exchang.T)
-        
-        return mat
-    
-    
-    def _prepare_rate_matrix(self,
-                            exchangeabilities,
-                            equilibrium_distributions,
-                            rate_multiplier,
-                            sow_intermediates: bool):
-        C = equilibrium_distributions.shape[0]
-        alphabet_size = equilibrium_distributions.shape[1]
-
-        # just in case, zero out the diagonals of exchangeabilities
-        exchangeabilities_without_diags = exchangeabilities * ~jnp.eye(alphabet_size, dtype=bool)
-
-        # Q = chi * pi
-        rate_mat_without_diags = jnp.einsum('ij, cj -> cij', 
-                                            exchangeabilities_without_diags, 
-                                            equilibrium_distributions)
-    
-        row_sums = rate_mat_without_diags.sum(axis=2) 
-        ones_diag = jnp.eye( alphabet_size, dtype=bool )[None,:,:]
-        ones_diag = jnp.broadcast_to( ones_diag, (C,
-                                                  ones_diag.shape[1],
-                                                  ones_diag.shape[2]) )
-        diags_to_add = -jnp.einsum('ci,cij->cij', row_sums, ones_diag)
-        subst_rate_mat = rate_mat_without_diags + diags_to_add
-        
-        # normalize by default
-        diag = jnp.einsum("cii->ci", subst_rate_mat) 
-        norm_factor = -jnp.sum(diag * equilibrium_distributions, axis=1)[:,None,None]
-        subst_rate_mat = subst_rate_mat / norm_factor
-        
-        # after normalizing, multiply by a rate scalar
-        rate_mat_times_rho = jnp.einsum( 'c,cij->cij', 
-                                         rate_multiplier, 
-                                         subst_rate_mat ) 
-        
-        return rate_mat_times_rho
-
-
-class RateMatFitBoth(RateMatFromFile):
-    """
-    return (rho * Q), to be directly used in matrix exponential
-
-    load initial values for exchangeabilities from file
-
-    rate matrix is normalized to one substitution, THEN multiplied by a scalar 
-      multiple; first hidden site class has rate of 1, then subsequent ones 
-      are fit with gradient descent (rho = [1, rate2, rate3, ...])
-    
-    params: 
-        - exch_raw; length of vector is ( alph * (alph - 1) ) / 2
-        - rate_mult_logits( C, )
-    
-    valid ranges:
-        - exchangeabilities: (0, inf); bound values with exchange_range
-        - rate_mult: (0, inf); bound values with rate_mult_range
-    
-    inherit the following from RateMatFromFile:
-        - _upper_tri_vector_to_sym_matrix
-        - _prepare_rate_matrix
-    
-    
-    tl;dr:
-    =======
-    required in pred_config:
-        - num_emit_site_classes: number of classes
-        - rate_mult_activation: what kind of activation to use for rate multipliers
-          > if this is "bound_sigmoid", also need:
-            - rate_mult_range: range for bounded sigmoid transformation of 
-              rate multiplier logits 
-        - exchange_range: range for bounded sigmoid transformation of 
-          exchangeability logits 
-        - filenames: dictionary of files to load
-          > pred_config["filenames"]["exch"]
-    
-    __call__ returns:
-        - rate matrix times rate multipliers: (C_curr, |\omega_Y|, |\omega_X|)
-    """
-    config: dict
-    name: str
-    
-    def setup(self):
-        ########################
-        ### standard options   #
-        ########################
+        """
+        ###################
+        ### read config   #
+        ###################
         self.num_emit_site_classes = self.config['num_emit_site_classes']
         exchangeabilities_file = self.config['filenames']['exch']
         self.rate_mult_activation = self.config['rate_mult_activation']
         
         if self.rate_mult_activation not in ['bound_sigmoid', 'softplus']:
             raise ValueError('Pick either: bound_sigmoid, softplus')
+            
             
         ########################
         ### RATE MULTIPLIERS   #
@@ -337,7 +412,7 @@ class RateMatFitBoth(RateMatFromFile):
             self.rate_mult_min_val, self.rate_mult_max_val = out
             del out
             
-            self.rate_multiplier_activation = partial(bounded_sigmoid,
+            self.rate_multiplier_activation = partial(bound_sigmoid,
                                                       min_val = self.rate_mult_min_val,
                                                       max_val = self.rate_mult_max_val)
         
@@ -350,12 +425,13 @@ class RateMatFitBoth(RateMatFromFile):
             self.rate_mult_logits = self.param('rate_multipliers',
                                                nn.initializers.normal(),
                                                (self.num_emit_site_classes,),
-                                               jnp.float32)
+                                               jnp.float32) #(C,)
     
             
         #####################################
         ### EXCHANGEABILITIES AS A VECTOR   #
         #####################################
+        # get initial values from file
         with open(exchangeabilities_file,'rb') as f:
             vec = jnp.load(f)
             
@@ -364,26 +440,44 @@ class RateMatFitBoth(RateMatFromFile):
         self.exchange_min_val, self.exchange_max_val = out
         del out
         
-        transformed_vec = bounded_sigmoid_inverse(vec, 
+        transformed_vec = bound_sigmoid_inverse(vec, 
                                                   min_val = self.exchange_min_val,
                                                   max_val = self.exchange_max_val)
         
-        self.exchange_activation = partial(bounded_sigmoid,
+        self.exchange_activation = partial(bound_sigmoid,
                                            min_val = self.exchange_min_val,
                                            max_val = self.exchange_max_val)
         
         self.exchangeabilities_logits_vec = self.param("exchangeabilities", 
                                                        lambda rng, shape: transformed_vec,
-                                                       transformed_vec.shape )
-        
+                                                       transformed_vec.shape ) #(n,)
         
     def __call__(self,
                  logprob_equl,
                  sow_intermediates: bool,
                  *args,
                  **kwargs):
-        # pi; one per class
-        equl = jnp.exp(logprob_equl)
+        """
+        C = number of latent site classes
+        A = alphabet size
+        
+        
+        Arguments
+        ----------
+        logprob_equl : ArrayLike, (C, A)
+            log-transformed equilibrium distribution
+        
+        sow_intermediates : bool
+            switch for tensorboard logging
+          
+        Returns
+        -------
+        rate_mat_times_rho : ArrayLike, (C, A, A)
+            scaled rate matrix
+        """
+        # undo log transform on equilibrium
+        equl = jnp.exp(logprob_equl) #(C, A)
+        
         
         #######################
         ### rate multiplier   #
@@ -395,95 +489,268 @@ class RateMatFitBoth(RateMatFromFile):
                 for i in range(self.rate_mult_logits.shape[0]):
                     val_to_write = self.rate_mult_logits[i]
                     act = self.rate_mult_activation
-                    lab = f'{self.name}/logit BEFORE {act} activation- rate multiplier for class {i}'
+                    lab = (f'{self.name}/logit BEFORE {act} activation- '+
+                           'rate multiplier for class {i}')
                     self.sow_histograms_scalars(mat= val_to_write, 
                                                 label=lab, 
                                                 which='scalars')
                     del lab
                     
-            rate_multiplier = self.rate_multiplier_activation( self.rate_mult_logits )
+            rate_multiplier = self.rate_multiplier_activation( self.rate_mult_logits ) #(C,)
             
             if sow_intermediates:
                 for i in range(rate_multiplier.shape[0]):
                     val_to_write = rate_multiplier[i]
                     act = self.rate_mult_activation
-                    lab = f'{self.name}/value AFTER {act} activation- rate multiplier for class {i}'
+                    lab = (f'{self.name}/logit AFTER {act} activation- '+
+                           'rate multiplier for class {i}')
                     self.sow_histograms_scalars(mat= val_to_write, 
                                                 label=lab, 
                                                 which='scalars')
                     del lab
                     
         else:
-            rate_multiplier = jnp.array([1])
+            rate_multiplier = jnp.array([1]) #(1,)
         
         
-        ###################################
-        ### chi; one shared all classes   #
-        ###################################
-        ### apply activation of choice
+        #################################################
+        ### exchangeabilities; one shared all classes   #
+        #################################################
+        # apply activation of choice
         if sow_intermediates:
             self.sow_histograms_scalars(mat= self.exchangeabilities_logits_vec, 
                                         label= 'logit BEFORE bound_sigmoid activation- exchangeabilities', 
                                         which='scalars')
         
-        upper_triag_values = self.exchange_activation( self.exchangeabilities_logits_vec )
+        upper_triag_values = self.exchange_activation( self.exchangeabilities_logits_vec ) #(A, A)
     
         if sow_intermediates:
             self.sow_histograms_scalars(mat = upper_triag_values, 
                                         label = 'value AFTER bound_sigmoid activation- exchangeabilities', 
                                         which='scalars')
         
-        ### update values
-        exchangeabilities_mat = self._upper_tri_vector_to_sym_matrix( upper_triag_values )
+        # create square matrix
+        exchangeabilities_mat = _upper_tri_vector_to_sym_matrix( upper_triag_values ) #(A, A)
         
-        # output is (c, i, j)
-        out = self._prepare_rate_matrix(exchangeabilities = exchangeabilities_mat,
-                                   equilibrium_distributions = equl,
-                                   sow_intermediates = sow_intermediates,
-                                   rate_multiplier = rate_multiplier)
-        return out
-            
-            
+        # scale rate matrix
+        rate_mat_times_rho = self._prepare_rate_matrix(exchangeabilities = exchangeabilities_mat,
+                                                       equilibrium_distributions = equl,
+                                                       rate_multiplier = rate_multiplier) #(C, A, A)
+        return rate_mat_times_rho
+    
+    def _prepare_rate_matrix(self,
+                             exchangeabilities,
+                             equilibrium_distributions,
+                             rate_multiplier):
+        """
+        Returns scaled rate matrix, Q = rho * chi * diag(pi)
+            q_{ijc} = rho_c * chi_{ij} * pi{j}
+        
 
-###############################################################################
-### DNA SUBSTITUTION RATE MATRIX MODELS   #####################################
-###############################################################################
-class HKY85(RateMatFitBoth):
+        Arguments
+        ----------
+        exchangeabilities : ArrayLike, (C, A, A)
+            square exchangeability matrix per clas
+            
+        equilibrium_distributions : ArrayLike, (C, A)
+            equilibrium distribution
+            
+        rate_multiplier : ArrayLike, (C,)
+            scaling factor
+
+        Returns
+        -------
+        rate_mat_times_rho : ArrayLike, (C, A, A)
+            Q = rho * chi * diag(pi)
+
+        """
+        # get normalized rate matrix per class
+        subst_rate_mat = _rate_matrix_from_exch_equl( exchangeabilities = exchangeabilities,
+                                                      equilibrium_distributions = equilibrium_distributions,
+                                                      norm=True ) #(C, A, A)
+        
+        # scale it
+        rate_mat_times_rho = _scale_rate_matrix(subst_rate_mat = subst_rate_mat,
+                                                rate_multiplier = rate_multiplier) #(C, A, A)
+        
+        return rate_mat_times_rho 
+
+
+class GTRRateMatFromFile(GTRRateMat):
     """
-    return (rho * Q), to be directly used in matrix exponential
+    Like GTRRateMat, but load rate multipliers and exchangeabilities from 
+        files as-is
+        
+        
+    Initialize with
+    ----------------
+    config : dict
+        config['num_emit_site_classes'] :  int
+            number of emission site classes
+            
+        config['filenames']['rate_mult'] :  str
+            name of the rate multipliers to load
+        
+        config['filenames']['exch'] : str
+            name of the exchangeabilities to load
+            
+    name : str
+        class name, for flax
     
-    inherit the following from RateMatFromFile:
-        - _upper_tri_vector_to_sym_matrix
-        - _prepare_rate_matrix
+    Methods here
+    ------------
+    setup
+    __call__
     
-    inherit __call__ from RateMatFitBoth
-
-    params: 
-        - ti, tv: each are floats; store in (2,) matrix
-          > ti is first value, tv is second
-        - rate_mult_logits( C, )
-    
-    valid ranges:
-        - exchangeabilities: (0, inf); bound values with exchange_range
-        - rate_mult: (0, inf); bound values with rate_mult_range
-    
-    
-    tl;dr:
-    =======
-    required in pred_config:
-        - num_emit_site_classes: number of classes
-        - rate_mult_range: range for bounded sigmoid transformation of 
-          rate multiplier logits 
-        - exchange_range: range for bounded sigmoid transformation of 
-          exchangeability logits 
-    
-    __call__ returns:
-        - rate matrix times rate multipliers: (C_curr, |\omega_Y|, |\omega_X|)
+    Methods inheried from GTRRateMat
+    ----------------------------------
+    _prepare_rate_matrix
+        function to prepare rate matrix 
     """
     config: dict
     name: str
     
     def setup(self):
+        """
+        Flax Module Parameters
+        -----------------------
+        None
+        
+        """
+        ###################
+        ### read config   #
+        ###################
+        self.num_emit_site_classes = self.config['num_emit_site_classes']
+        rate_multiplier_file = self.config['filenames']['rate_mult']
+        exchangeabilities_file = self.config['filenames']['exch']
+        
+        
+        ########################
+        ### RATE MULTIPLIERS   #
+        ########################
+        if self.num_emit_site_classes > 1:
+            with open(rate_multiplier_file, 'rb') as f:
+                self.rate_multiplier = jnp.load(f)
+        else:
+            self.rate_multiplier = jnp.array([1])
+            
+            
+        #########################
+        ### EXCHANGEABILITIES   #
+        #########################
+        with open(exchangeabilities_file,'rb') as f:
+            exch_from_file = jnp.load(f)
+        
+        # if providing a vector, need to prepare a square exchangeabilities matrix
+        if len(exch_from_file.shape) == 1:
+            self.exchangeabilities = _upper_tri_vector_to_sym_matrix( exch_from_file ) #(A, A)
+            
+        # otherwise, use the matrix as-is
+        else:
+            self.exchangeabilities = exch_from_file #(A, A)
+        
+    def __call__(self,
+                 logprob_equl,
+                 *args,
+                 **kwargs):
+        """
+        C = number of latent site classes
+        A = alphabet size
+        
+        
+        Arguments
+        ----------
+        logprob_equl : ArrayLike, (C, A)
+            log-transformed equilibrium distribution
+        
+        Returns
+        -------
+        rate_mat_times_rho : ArrayLike, (C, A, A)
+            scaled rate matrix
+        """
+        # undo log transform on equilibrium
+        equl = jnp.exp(logprob_equl) #(C, A)
+        
+        rate_mat_times_rho =  self._prepare_rate_matrix(exchangeabilities = self.exchangeabilities,
+                                                        equilibrium_distributions = equl,
+                                                        rate_multiplier = self.rate_multiplier) #(C, A, A)
+        return rate_mat_times_rho
+    
+    
+#############
+### HKY85   #
+#############
+class HKY85RateMat(GTRRateMat):
+    """
+    use the HKY85 rate matrix
+    
+    
+    with ti = transition rate and tv = transversion rate, 
+        exchangeabilities are:
+            
+        [[ 0, tv, ti, tv],
+         [tv,  0, tv, ti],
+         [ti, tv,  0, tv],
+         [tv, ti, tv,  0]]
+    
+    
+    Initialize with
+    ----------------
+    config : dict
+        config['num_emit_site_classes'] :  int
+            number of emission site classes
+        
+        config['rate_mult_activation'] : {'bound_sigmoid', 'softplus'}
+            what activation to use for logits of rate multiplier
+        
+        config['rate_mult_range'] : List[float, float], optional
+            only needed when using bound_sigmoid for rate multipliers
+            first value is min, second value is max
+            Default is (0.01, 10)
+        
+        config['exchange_range'] : List[float, float]
+            exchangeabilities undergo bound_sigmoid transformation, this
+            specifies the min and max
+            Default is (1e-4, 12)
+        
+    name : str
+        class name, for flax
+    
+    Methods here
+    ------------
+    setup
+    
+    Methods inheried from GTRRateMat
+    ----------------------------------
+    __call__
+    _prepare_rate_matrix
+        function to prepare rate matrix
+    
+    Methods inherited from models.model_utils.BaseClasses.ModuleBase
+    -----------------------------------------------------------------
+    sow_histograms_scalars
+        for tensorboard logging
+    
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        """
+        C: number of site classes
+        
+        
+        Flax Module Parameters
+        -----------------------
+        rate_mult_logits : ArrayLike, (C,)
+            rate multiplier per class; ONLY present if C > 1
+            initialized from unit normal
+        
+        ti_tv_vec : ArrayLike, (2,)
+            first value is transition rate, second value is transversion rate
+            initialized from unit normal
+        
+        """
         self.num_emit_site_classes = self.config['num_emit_site_classes']
         self.rate_mult_activation = self.config['rate_mult_activation']
         
@@ -501,7 +768,7 @@ class HKY85(RateMatFitBoth):
             self.rate_mult_min_val, self.rate_mult_max_val = out
             del out
             
-            self.rate_multiplier_activation = partial(bounded_sigmoid,
+            self.rate_multiplier_activation = partial(bound_sigmoid,
                                                       min_val = self.rate_mult_min_val,
                                                       max_val = self.rate_mult_max_val)
         
@@ -539,39 +806,43 @@ class HKY85(RateMatFitBoth):
         self.exchange_min_val, self.exchange_max_val = out
         del out
         
-        self.exchange_activation = partial(bounded_sigmoid,
+        self.exchange_activation = partial(bound_sigmoid,
                                            min_val = self.exchange_min_val,
                                            max_val = self.exchange_max_val)
         
 
-class HKY85FromFile(RateMatFromFile):
+class HKY85RateMatFromFile(GTRRateMatFromFile):
     """
-    return (rho * Q), to be directly used in matrix exponential
-
-    load ti, tv, and rate multipliers from files
+    Like v, but load parameters from file
+        
+        
+    Initialize with
+    ----------------
+    config : dict
+        config['num_emit_site_classes'] :  int
+            number of emission site classes
+            
+        config['filenames']['rate_mult'] :  str
+            name of the rate multipliers to load
+        
+        config['filenames']['exch'] : str
+            name of the exchangeabilities to load
+            
+    name : str
+        class name, for flax
     
-    return the normalized rate matrix, as well as the rate matrix after
-      multiplying by rate multipliers
-     
-    out = (rate_mat_times_rho, rate_mat)
+    Methods here
+    ------------
+    setup
     
-    inherit the following from RateMatFromFile:
-        - _upper_tri_vector_to_sym_matrix
-        - _prepare_rate_matrix
+    Methods inherited from GTRRateMatFromFile
+    ------------------------------------------
+    __call__
     
-    inherit __call__ from RateMatFromFile
-    
-    
-    tl;dr:
-    =======
-    required in pred_config:
-        - num_emit_site_classes: number of classes
-        - filenames: dictionary of files to load
-          > pred_config["filenames"]["rate_mult"]
-          > pred_config["filenames"]["exch"]
-    
-    __call__ returns:
-        - rate matrix times rate multipliers: (C_curr, |\omega_Y|, |\omega_X|)
+    Methods inheried from GTRRateMat
+    ----------------------------------
+    _prepare_rate_matrix
+        function to prepare rate matrix 
     """
     config: dict
     name: str
@@ -594,7 +865,7 @@ class HKY85FromFile(RateMatFromFile):
                                      ti_tv_vec_from_file[0], 
                                      ti_tv_vec_from_file[1] ] )
         
-        self.exchangeabilities = self._upper_tri_vector_to_sym_matrix( hky85_raw_vec )
+        self.exchangeabilities = _upper_tri_vector_to_sym_matrix( hky85_raw_vec )
         
         ### RATE MULTIPLIERS: (c,)
         if self.num_emit_site_classes > 1:
@@ -603,116 +874,254 @@ class HKY85FromFile(RateMatFromFile):
         else:
             self.rate_multiplier = jnp.array([1])
         
-            
 
 ###############################################################################
-### LOGPROB (emit at indel sites)   ###########################################
+### GET SUBSTITUTION LOGPROBS   ###############################################
 ###############################################################################
-class LogEqulVecPerClass(ModuleBase):
+def get_cond_logprob_emit_at_match_per_class( t_array: ArrayLike,
+                                              scaled_rate_mat_per_class: ArrayLike):
     """
-    required in pred_config:
-        - emission_alphabet_size: alphabet size
-        - num_emit_site_classes: number of classes
+    P(y|x,c,t) = expm( rho_c * Q_c * t )
+
+    C = number of latent site classes
+    A = alphabet size
+    T = number of branch lengths
     
-    params:
-        - logits: (C, \omega)
+
+    Arguments
+    ----------
+    t_array : ArrayLike, (T,)
+        branch lengths
+        
+    scaled_rate_mat_per_class : ArrayLike, (C, A, A)
+        rho_c * Q_c
+
+    Returns
+    -------
+    to_expm : ArrayLike, (T, C, A, A)
+        scaled rate matrix * t, for all classes, this is the input for the 
+        matrix exponential function
+        
+    cond_logprob_emit_at_match_per_class :  ArrayLike, (T, C, A, A)
+        final log-probability
+
+    """
+    to_expm = jnp.multiply( scaled_rate_mat_per_class[None,...],
+                            t_array[:, None,None,None,] ) #(T, C, A, A)
+    cond_prob_emit_at_match_per_class = expm(to_expm) #(T, C, A, A)
+    cond_logprob_emit_at_match_per_class = safe_log( cond_prob_emit_at_match_per_class )  #(T, C, A, A)
+    return cond_logprob_emit_at_match_per_class, to_expm
+
+
+def get_joint_logprob_emit_at_match_per_class( cond_logprob_emit_at_match_per_class: ArrayLike,
+                                              log_equl_dist_per_class: ArrayLike ):
+    """
+    P(x,y|c,t) = pi_c * expm( rho_c * Q_c * t )
+
+    C = number of latent site classes
+    A = alphabet size
+    T = number of branch lengths
     
-    __call__ returns:
-        - logP(emission from alphabet): (C, \omega)
+
+    Arguments
+    ----------
+    cond_logprob_emit_at_match_per_class : ArrayLike, (T, C, A, A)
+        P(y|x,c,t), calculated before
+    
+    log_equl_dist_per_class : ArrayLike, (C, A, A)
+        rho_c * Q_c
+
+    Returns
+    -------
+    ArrayLike, (T, C, A, A)
+
+    """
+    return ( cond_logprob_emit_at_match_per_class +
+             log_equl_dist_per_class[None,:,:,None] ) #(T, C, A, A)
+
+
+###############################################################################
+### EQUILIBRIUM DISTRIBUTION MODELS   #########################################
+###############################################################################
+class EqulDistLogprobsPerClass(ModuleBase):
+    """
+    Equilibrium distribution of emissions
+    
+    
+    Initialize with
+    ----------------
+    config : dict
+        config['emission_alphabet_size'] : int
+            size of emission alphabet; 20 for proteins, 4 for DNA
+            
+        config['num_emit_site_classes'] : int
+            number of emission site classes
+    
+    name : str
+        class name, for flax
+    
+    Methods here
+    ------------
+    setup
+    __call__
+    
+    Methods inherited from models.model_utils.BaseClasses.ModuleBase
+    ----------------------------------------------------------------
+    sow_histograms_scalars
+        for tensorboard logging
+    
     """
     config: dict
     name: str
     
     def setup(self):
+        """
+        C = number of site classes
+        A = alphabet size
+        
+        
+        Flax Module Parameters
+        -----------------------
+        logits : ArrayLike (C,)
+            initialize logits from unit normal
+        
+        """
         emission_alphabet_size = self.config['emission_alphabet_size']
         num_emit_site_classes = self.config['num_emit_site_classes']
         
         self.logits = self.param('Equilibrium distr.',
                                   nn.initializers.normal(),
                                   (num_emit_site_classes, emission_alphabet_size),
-                                  jnp.float32)
+                                  jnp.float32) #(C, A)
         
     def __call__(self,
                  sow_intermediates: bool,
                  *args,
                  **kwargs):
+        """
+        C: number of site classes
         
-        out = nn.log_softmax( self.logits, axis = 1 )
+        
+        Arguments
+        ----------
+        sow_intermediates : bool
+            switch for tensorboard logging
+          
+        Returns
+        -------
+        log_equl_dist : ArrayLike, (C, A)
+            log-transformed equilibrium distribution
+        """
+        log_equl_dist = nn.log_softmax( self.logits, axis = 1 ) #(C, A)
 
         if sow_intermediates:
             for c in range(out.shape[0]):
                 lab = f'{self.name}/equilibrium dist for class {c}'
-                self.sow_histograms_scalars(mat= jnp.exp(out[c,...]), 
+                self.sow_histograms_scalars(mat= jnp.exp(log_equl_dist[c,...]), 
                                             label=lab, 
                                             which='scalars')
                 del lab
         
-        return out
+        return log_equl_dist
 
 
-class LogEqulVecFromFile(ModuleBase):
+class EqulDistLogprobsFromFile(ModuleBase):
     """
-    required in pred_config:
-      - filenames: dictionary of files to load
-          > pred_config["filenames"]["equl_dist"]: file containing the 
-            equilibrium distribution to load
+    Load equilibrium distribution from file
     
-    params: None
     
-    __call__ returns:
-        - logP(emission from alphabet): (C, \omega)
+    Initialize with
+    ----------------
+    config : dict
+        config["filenames"]["equl_dist"]: str
+              file of equilibrium distributions to load
+            
+    name : str
+        class name, for flax
+    
+    Methods here
+    ------------
+    setup
+    __call__
+    
     """
     config: dict
     name: str
     
     def setup(self):
-        # (C, alph)
+        """
+        
+        Flax Module Parameters
+        -----------------------
+        none
+        
+        """
         equl_file = self.config['filenames']['equl_dist']
         
         with open(equl_file,'rb') as f:
             prob_equilibr = jnp.load(f, allow_pickle=True)
-
+        
+        # if there's no dim for class, add it
+        if len(prob_equilibr.shape) == 1:
+            prob_equilibr = prob_equilibr[None,:] #(C, A)
+        
         self.logprob_equilibr = safe_log(prob_equilibr)
         
         
     def __call__(self,
                  *args,
                  **kwargs):
-        # (C, alpha)
-        return self.logprob_equilibr
+        """
+        Returns log-transformed equilibrium distribution
+        """
+        return self.logprob_equilibr #(C, A)
     
 
-class LogEqulVecFromCounts(ModuleBase):
+class EqulDistLogprobsFromCounts(ModuleBase):
     """
-    Generate equilibrium distribution based on observed counts (used when 
-      only one class)
+    If there's only one class, construct an equilibrium distribution 
+        from observed frequencies
     
-    required in pred_config:
-      - training_dset_emit_counts: emission counts from training set
+    A = alphabet size
     
-    params: None
     
-    __call__ returns:
-        - logP(emission from alphabet): (1, \omega)
+    Initialize with
+    ----------------
+    config : dict
+        config["training_dset_emit_counts"] : ArrayLike, (A,)
+            observed counts to turn into frequencies
+            
+    name : str
+        class name, for flax
+    
+    Methods here
+    ------------
+    setup
+    __call__
     """
     config: dict
     name: str
     
     def setup(self):
-        # (alph,)
-        training_dset_emit_counts = self.config['training_dset_emit_counts']
+        """
         
-        prob_equilibr = training_dset_emit_counts/training_dset_emit_counts.sum()
-        logprob_equilibr = safe_log( prob_equilibr )
+        Flax Module Parameters
+        -----------------------
+        none
         
-        # expand to to (C=1, alpha)
-        self.logprob_equilibr = logprob_equilibr[None,...]
+        """
+        training_dset_emit_counts = self.config['training_dset_emit_counts'] #(A,)
+        prob_equilibr = training_dset_emit_counts/training_dset_emit_counts.sum() #(A,)
+        logprob_equilibr = safe_log( prob_equilibr ) #(A,)
+        
+        # C=1
+        self.logprob_equilibr = logprob_equilibr[None,...] #(C, A)
         
         
     def __call__(self,
                  *args,
                  **kwargs):
-        # (C, alpha)
-        return self.logprob_equilibr
-
-
+        """
+        Returns log-transformed equilibrium distribution
+        """
+        return self.logprob_equilibr #(C, A)

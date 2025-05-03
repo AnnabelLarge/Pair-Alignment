@@ -5,25 +5,20 @@ Created on Wed Feb  5 04:33:00 2025
 
 @author: annabel
 
-models here:
-============
-'IndpPairHMMFitBoth', 
-'IndpPairHMMLoadAll',
-'IndpHKY85PairHMMFitBoth', 
-'IndpHKY85PairHMMLoadAll',
+
+functions:
+===========
+'_lse_over_equl_logprobs_per_class',
+'_lse_over_match_logprobs_per_class',
+'_score_alignment',
 
 
-main methods for all models:
-============================
-- setup (self-explanatory)
-
-- __call__: calculate loss based on joint prob P(anc, desc, align);
-           use this during training; is jit compatible
-
-- calculate_all_loglikes: calculate joint prob P(anc, desc, align),
-           conditional prob P(desc, align | anc), and both marginals
-           P(desc) and P(anc); use this during final eval; is also
-           jit compatible
+flax modules:
+==============
+'IndpSites',
+'IndpSitesLoadAll',
+'IndpSitesHKY85',
+'IndpSitesHKY85LoadAll',
 """
 import numpy as np
 import pickle
@@ -31,54 +26,233 @@ import pickle
 # jumping jax and leaping flax
 from flax import linen as nn
 import jax
+from jax._src.typing import Array, ArrayLike
 import jax.numpy as jnp
 from jax.scipy.linalg import expm
 from jax.scipy.special import logsumexp
 
 from models.model_utils.BaseClasses import ModuleBase
-from models.simple_site_class_predict.emission_models import (LogEqulVecFromCounts,
-                                                              LogEqulVecPerClass,
-                                                              LogEqulVecFromFile,
-                                                              RateMatFromFile,
-                                                              RateMatFitBoth,
+from models.simple_site_class_predict.emission_models import (EqulDistLogprobsFromCounts,
+                                                              EqulDistLogprobsPerClass,
+                                                              EqulDistLogprobsFromFile,
+                                                              GTRRateMat,
+                                                              GTRRateMatFromFile,
                                                               SiteClassLogprobs,
                                                               SiteClassLogprobsFromFile,
-                                                              HKY85,
-                                                              HKY85FromFile)
+                                                              HKY85RateMat,
+                                                              HKY85RateMatFromFile,
+                                                              get_cond_logprob_emit_at_match_per_class,
+                                                              get_joint_logprob_emit_at_match_per_class)
 from models.simple_site_class_predict.transition_models import (TKF91TransitionLogprobs,
                                                                 TKF92TransitionLogprobs,
                                                                 TKF91TransitionLogprobsFromFile,
                                                                 TKF92TransitionLogprobsFromFile)
-from utils.pairhmm_helpers import (bounded_sigmoid,
+from utils.pairhmm_helpers import (bound_sigmoid,
                                    safe_log)
 
-class IndpPairHMMFitBoth(ModuleBase):
-    """
-    uses RateMatFitBoth for susbtitution model; i.e. load LG08 
-       exchangeabilities as initial values
-     
-    main methods:
-    =============
-        - setup    
-        
-        - __call__: calculate loss based on joint prob P(anc, desc, align);
-                   use this during training; is jit compatible
-        
-        - calculate_all_loglikes: calculate joint prob P(anc, desc, align),
-                   conditional prob P(desc, align | anc), and both marginals
-                   P(desc) and P(anc); use this during final eval; is also
-                   jit compatible
 
-    other helpers:
-    ==============
-        - write_params: write the parameters to files
+
+###############################################################################
+### Helper functions   ########################################################
+###############################################################################
+def _lse_over_match_logprobs_per_class(log_class_probs: ArrayLike,
+                                       joint_logprob_emit_at_match_per_class: ArrayLike):
+    """
+    P(x,y|t) = \sum_c P(c) * P(x,y|c,t)
+    
+    C = number of latent site classes
+    A = alphabet size
+    T = number of branch lengths
     
 
-    internal methods:
-    ==================
-        - _get_scoring_matrices
-        - _joint_logprob_align
-        - _marginalize_over_times
+    Arguments
+    ----------
+    log_class_probs : ArrayLike, (C,)
+        log-transformed class probabilities (i.e. mixture weights)
+    
+    joint_logprob_emit_at_match_per_class : ArrayLike, (T, C, A, A)
+        log-probability of emissions at match sites
+        
+    Returns
+    -------
+    ArrayLike, (T, A, A)
+
+    """
+    weighted_logprobs = ( log_class_probs[None,:,None,None] + 
+                          joint_logprob_emit_at_match_per_class ) #(T, C, A, A)
+    return logsumexp( weighted_logprobs, axis=1 ) #(T, A, A)
+
+def _lse_over_equl_logprobs_per_class(log_class_probs: ArrayLike,
+                                      log_equl_dist_per_class: ArrayLike):
+    """
+    P(x) = \sum_c P(c) * P(x|c)
+    
+    C = number of latent site classes
+    A = alphabet size
+    T = number of branch lengths
+    
+    
+    Arguments
+    ----------
+    log_class_probs : ArrayLike, (C,)
+        log-transformed class probabilities (i.e. mixture weights)
+    
+    log_equl_dist_per_class : ArrayLike, (A,)
+        log-transformed equilibrium distributions
+        
+    Returns
+    -------
+    ArrayLike, (T, A)
+    
+    """
+    weighted_logprobs = log_equl_dist_per_class + log_class_probs[:, None] #(C, A)
+    return logsumexp( to_logsumexp, axis=0 )
+
+
+def _score_alignment( subCounts: ArrayLike,
+                      insCounts: ArrayLike,
+                      delCounts: ArrayLike,
+                      transCounts: ArrayLike,
+                      logprob_emit_at_match: ArrayLike,
+                      logprob_emit_at_indel: ArrayLike,
+                      transit_mat: ArrayLike):
+    """
+    score an alignment from summary counts
+    
+    B = batch; number of alignments
+    A = alphabet size
+    S = number of transition states; here, it's 4: M, I, D, [S or E]
+    T = branch length; time
+    
+    
+    Arguments
+    ----------
+    subCounts : ArrayLike, (B,A,A)
+    insCounts : ArrayLike, (B,A)
+    delCounts : ArrayLike, (B,A)
+    transCounts : ArrayLike, (B,S,S)
+    logprob_emit_at_match : ArrayLike, (T,A,A)
+    logprob_emit_at_indel : ArrayLike, (A,)
+    transit_mat : ArrayLike (T,S,S)
+        
+    Returns
+    -------
+    logprob_perSamp_perTime : ArrayLike, (T,B)
+    
+    """
+    ### emissions at match sites
+    # subCounts is (B,A,A)
+    # logprob_emit_at_match is (T,A,A)
+    # match_emit_score is (T,B)
+    match_emit_score = jnp.einsum('tij,bij->tb',
+                                  logprob_emit_at_match, 
+                                  subCounts)
+    
+    
+    ### emissions at insert sites
+    # insCounts is (B,A)
+    # logprob_emit_at_indel is (A,)
+    # ins_emit_score is (B)
+    ins_emit_score = jnp.einsum('i,bi->b',
+                                logprob_emit_at_indel, 
+                                insCounts)
+    
+    
+    ### emissions at delete sites
+    # delCounts is (B,A)
+    # del_emit_score is (B)
+    del_emit_score = jnp.einsum('i,bi->b',
+                                logprob_emit_at_indel, 
+                                delCounts)
+    
+    
+    ### transitions
+    # transCounts is (B,S,S)
+    # transit_mat is (T,S,S)
+    # transit_score is (T,B)
+    transit_score = jnp.einsum('tmn,bmn->tb', 
+                               transit_mat, 
+                               transCounts)
+    
+    
+    ### final score
+    logprob_perSamp_perTime = (match_emit_score + 
+                               ins_emit_score[None,:] +
+                               del_emit_score[None,:] +
+                               transit_score) #(T,B)
+    
+    return logprob_perSamp_perTime
+    
+    
+    
+    
+###############################################################################
+### PairHMM with GTR substitution model, some TKF indel model   ###############
+###############################################################################
+class IndpSites(ModuleBase):
+    """
+    pairHMM that finds joint loglikelihood of alignments, P(Anc, Desc, Align)
+    
+    Initialize with
+    ----------------
+    config : dict
+        config['num_emit_site_classes'] :  int
+            number of emission site classes
+        
+        config['indel_model_type'] : {TKF91, TKF92}
+            which indel model
+            
+        config['gap_tok'] :  int
+            token that represents gaps; usually 43
+        
+        config['norm_loss_by'] :  {desc_len, align_len}, optional
+            what length to normalize loglikelihood by
+            Default is 'desc_len'
+        
+        config['exponential_dist_param'] : int, optional
+            There is an exponential prior over time; this provides the
+            parameter for this during marginalization over times
+        
+    name : str
+        class name, for flax
+    
+    Main methods here
+    -----------------
+    setup
+    
+    __call__
+        unpack batch and calculate logP(anc, desc, align)
+    
+    calculate_all_loglikes
+        calculate logP(anc, desc, align), logP(anc), logP(desc), and
+        logP(desc, align | anc)
+    
+    write_params
+        write parameters to files
+    
+    return_bound_sigmoid_limits
+        after initializing model, get the limits for bound_sigmoid activations
+    
+    
+    Other methods
+    --------------
+    _init_rate_matrix_module
+        decide what function to use for rate matrix
+    
+    _get_scoring_matrices
+        get all matrices needed to score sequences
+    
+    _marginalize_over_times
+        handles time marginalization
+    
+    _joint_logprob_align
+        calculate logP(anc, desc, align)
+    
+    
+    Methods inherited from models.model_utils.BaseClasses.ModuleBase
+    -----------------------------------------------------------------
+    sow_histograms_scalars
+        for tensorboard logging
     """
     config: dict
     name: str
@@ -86,16 +260,16 @@ class IndpPairHMMFitBoth(ModuleBase):
     def setup(self):
         num_emit_site_classes = self.config['num_emit_site_classes']
         self.indel_model_type = self.config['indel_model_type']
-        self.norm_loss_by = self.config['norm_loss_by']
         self.gap_tok = self.config['gap_tok']
+        self.norm_loss_by = self.config.get('norm_loss_by', 'desc_len')
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
         
         ### how to score emissions from indel sites
         if num_emit_site_classes == 1:
-            self.indel_prob_module = LogEqulVecFromCounts(config = self.config,
+            self.indel_prob_module = EqulDistLogprobsFromCounts(config = self.config,
                                                        name = f'get equilibrium')
         elif num_emit_site_classes > 1:
-            self.indel_prob_module = LogEqulVecPerClass(config = self.config,
+            self.indel_prob_module = EqulDistLogprobsPerClass(config = self.config,
                                                      name = f'get equilibrium')
         
         
@@ -146,7 +320,7 @@ class IndpPairHMMFitBoth(ModuleBase):
         used_tkf_beta_approx = out['used_tkf_beta_approx']
         del out
         
-        # calculate scores
+        # calculate loglikelihoods
         aux_dict = self._joint_logprob_align( batch=batch,
                                              t_array=t_array,
                                              logprob_emit_at_indel=logprob_emit_at_indel,
@@ -323,9 +497,9 @@ class IndpPairHMMFitBoth(ModuleBase):
                                         sow_intermediates=False)
         
         
-        rate_mat_times_rho_per_class = out['rate_mat_times_rho_per_class']
-        for c in range(rate_mat_times_rho_per_class.shape[0]):
-            mat_to_save = rate_mat_times_rho_per_class[c,...]
+        scaled_rate_mat_per_class = out['scaled_rate_mat_per_class']
+        for c in range(scaled_rate_mat_per_class.shape[0]):
+            mat_to_save = scaled_rate_mat_per_class[c,...]
             
             with open(f'{out_folder}/class-{c}_rate_matrix_times_rho.npy', 'wb') as g:
                 np.save(g, mat_to_save)
@@ -413,7 +587,7 @@ class IndpPairHMMFitBoth(ModuleBase):
                     jnp.save(g, exchangeabilities)
             
             elif self.subst_model_type == 'HKY85':
-                with open(f'{out_folder}/PARAMS_HKY85_model.txt','w') as g:
+                with open(f'{out_folder}/PARAMS_HKY85RateMat_model.txt','w') as g:
                     g.write(f'transition rate, ti: {exchangeabilities[1]}')
                     g.write(f'transition rate, tv: {exchangeabilities[0]}')
                 
@@ -483,145 +657,123 @@ class IndpPairHMMFitBoth(ModuleBase):
                 [g.write(f'{elem}\t') for elem in mean_indel_lengths]
                 g.write('\n')
     
+    def return_bound_sigmoid_limits(self):
+        ### rate_matrix_module
+        # exchangeabilities
+        exchange_min_val = self.rate_matrix_module.exchange_min_val
+        exchange_max_val = self.rate_matrix_module.exchange_max_val
+        
+        #rate multiplier
+        if self.rate_mult_activation == 'bound_sigmoid':
+            rate_mult_min_val = self.rate_matrix_module.rate_mult_min_val
+            rate_mult_max_val = self.rate_matrix_module.rate_mult_max_val
+        
+        
+        ### transitions_module
+        # insert rate lambda
+        lam_min_val = self.transitions_module.lam_min_val
+        lam_max_val = self.transitions_module.lam_max_val
+        
+        # offset (for deletion rate mu)
+        offs_min_val = self.transitions_module.offs_min_val
+        offs_max_val = self.transitions_module.offs_max_val
+        
+        # r extension probability
+        r_extend_min_val = self.transitions_module.r_extend_min_val
+        r_extend_max_val = self.transitions_module.r_extend_max_val
+        
+        params_range = { "exchange_min_val": exchange_min_val,
+                         "exchange_max_val": exchange_max_val,
+                         "rate_mult_min_val": rate_mult_min_val,
+                         "rate_mult_max_val": rate_mult_max_val,
+                         "lam_min_val": lam_min_val,
+                         "lam_max_val": lam_max_val,
+                         "offs_min_val": offs_min_val,
+                         "offs_max_val": offs_max_val,
+                         "r_extend_min_val": r_extend_min_val,
+                         "r_extend_max_val": r_extend_max_val,
+                         }
+        
+        return params_range
     
     def _init_rate_matrix_module(self, config):
-        mod = RateMatFitBoth( config = self.config,
-                               name = f'get rate matrix' )
+        mod = GTRRateMat( config = self.config,
+                          name = f'get rate matrix' )
         return mod, 'GTR'
         
     def _get_scoring_matrices(self,
                              t_array,
                              sow_intermediates: bool):
-        """
-        TODO: if using one time per sample (i.e. the time from FastTree), then
-        you'll need to unpack time from batch; will have to initialize a new
-        time array with shape (T, B) instead of (T,)
-        """
-        ### build logprob emissions at match
-        # first, get log(equilibrium distribution): (C, alph)
-        log_equl_dist_per_class = self.indel_prob_module(sow_intermediates = sow_intermediates)
-        
-        # get normalized rate matrix times rate multiplier, per each class
-        # (C, alph, alph)
-        rate_mat_times_rho_per_class = self.rate_matrix_module(logprob_equl = log_equl_dist_per_class,
-                                                                sow_intermediates = sow_intermediates)
-        
-        # build logprob matrix at every class
-        # time: (T,)
-        # output: (T, C, from_alph, to_alph)
-        to_expm = jnp.multiply( rate_mat_times_rho_per_class[None,...],
-                                t_array[:, None,None,None,] )
-        cond_prob_emit_at_match_per_class = expm(to_expm)
-        cond_logprob_emit_at_match_per_class = safe_log( cond_prob_emit_at_match_per_class )
-        joint_logprob_emit_at_match_per_class = ( cond_logprob_emit_at_match_per_class + 
-                                                  log_equl_dist_per_class[None,:,:,None] )
-        del cond_logprob_emit_at_match_per_class
-        
-        # apply weighting; LSE across classes: (T, alph, alph)
+        # Probability of each site class; is one, if no site clases
         log_class_probs = self.site_class_probability_module(sow_intermediates = sow_intermediates) #(C,)
-        weighted_joint_logprob_emit_at_match = ( log_class_probs[None,:,None,None] + 
-                                                 joint_logprob_emit_at_match_per_class )
-        joint_logprob_emit_at_match = logsumexp( weighted_joint_logprob_emit_at_match, axis=1 )
         
         
-        ### build logprob emissions at indels
-        to_logsumexp = log_equl_dist_per_class + log_class_probs[:, None] #(C, alph)
-        logprob_emit_at_indel = logsumexp( to_logsumexp, axis=0 )
+        ######################################################
+        ### build log-transformed equilibrium distribution   #
+        ### use this to score emissions from indels sites    #
+        ######################################################
+        log_equl_dist_per_class = self.indel_prob_module(sow_intermediates = sow_intermediates) # (C, A)
+        logprob_emit_at_indel = _lse_over_equl_logprobs_per_class(log_class_probs = log_class_probs,
+                                                                  log_equl_dist_per_class = log_equl_dist_per_class) #(A,)
         
         
-        ### logprob transitions is more straightforward (only one)
-        # (T,4,4)
+        ####################################################
+        ### build substitution log-probability matrix      #
+        ### use this to score emissions from match sites   #
+        ####################################################
+        # rho * Q
+        scaled_rate_mat_per_class = self.rate_matrix_module(logprob_equl = log_equl_dist_per_class,
+                                                            sow_intermediates = sow_intermediates) #(C, A, A)
+        
+        # conditional probability
+        # cond_logprob_emit_at_match_per_class is (T, C, A, A)
+        # to_expm is (T, C, A, A)
+        out = get_cond_logprob_emit_at_match_per_class(t_array = t_array,
+                                                        scaled_rate_mat_per_class = scaled_rate_mat_per_class)
+        cond_logprob_emit_at_match_per_class, to_expm = out 
+        del out
+        
+        # joint probability
+        joint_logprob_emit_at_match_per_class = get_joint_logprob_emit_at_match_per_class( cond_logprob_emit_at_match_per_class = cond_logprob_emit_at_match_per_class,
+                                                                        log_equl_dist_per_class = log_equl_dist_per_class) #(T, C, A, A)
+        joint_logprob_emit_at_match = _lse_over_match_logprobs_per_class(log_class_probs = log_class_probs,
+                                               joint_logprob_emit_at_match_per_class = joint_logprob_emit_at_match_per_class) #(T, A, A)
+        
+        
+        ####################################################
+        ### build transition log-probability matrix        #
+        ####################################################
         if self.indel_model_type == 'tkf91':
+            # all_transit_matrices['joint']: (T, A, A)
+            # all_transit_matrices['conditional']: (T, A, A)
+            # all_transit_matrices['marginal']: (T, A, A)
+            # used_tkf_beta_approx is a tuple of booleans arrays: ( (T,), (T,) )
             all_transit_matrices, used_tkf_beta_approx = self.transitions_module(t_array = t_array,
-                                                           sow_intermediates = sow_intermediates)
+                                                           sow_intermediates = sow_intermediates) 
         
         elif self.indel_model_type == 'tkf92':
+            # all_transit_matrices['joint']: (T, C, C, A, A)
+            # all_transit_matrices['conditional']: (T, C, C, A, A)
+            # all_transit_matrices['marginal']: (T, C, C, A, A)
+            # used_tkf_beta_approx is a tuple of booleans arrays: ( (T,), (T,) )
             all_transit_matrices, used_tkf_beta_approx = self.transitions_module(t_array = t_array,
                                                            class_probs = jnp.array([1.]),
                                                            sow_intermediates = sow_intermediates)
-            all_transit_matrices['joint'] = all_transit_matrices['joint'][:,0,0,...]
-            all_transit_matrices['conditional'] = all_transit_matrices['conditional'][:,0,0,...]
-            all_transit_matrices['marginal'] = all_transit_matrices['marginal'][0,0,...]
             
-        out_dict = {'logprob_emit_at_indel': logprob_emit_at_indel,
-                    'joint_logprob_emit_at_match': joint_logprob_emit_at_match,
-                    'cond_logprob_emit_at_match': cond_prob_emit_at_match_per_class,
-                    'rate_mat_times_rho_per_class': rate_mat_times_rho_per_class,
-                    'to_expm': to_expm,
-                    'all_transit_matrices': all_transit_matrices,
-                    'used_tkf_beta_approx': used_tkf_beta_approx}
+            # C=1, so remove intermediate dims
+            all_transit_matrices['joint'] = all_transit_matrices['joint'][:,0,0,...] # (T, A, A)
+            all_transit_matrices['conditional'] = all_transit_matrices['conditional'][:,0,0,...] # (T, A, A)
+            all_transit_matrices['marginal'] = all_transit_matrices['marginal'][0,0,...] # (T, A, A)
+            
+        out_dict = {'logprob_emit_at_indel': logprob_emit_at_indel, #(A,)
+                    'joint_logprob_emit_at_match': joint_logprob_emit_at_match, #(T,A,A)
+                    'all_transit_matrices': all_transit_matrices, #(T,S,S)
+                    'rate_mat_times_rho': scaled_rate_mat_per_class, #(C,A,A)
+                    'to_expm': to_expm, #(T,C,A,A)
+                    'cond_logprob_emit_at_match': cond_logprob_emit_at_match_per_class, #(T,C,A,A)
+                    'used_tkf_beta_approx': used_tkf_beta_approx} #( (T,), (T,) )
         
         return out_dict
-    
-    
-    def _joint_logprob_align( self,
-                             batch,
-                             t_array,
-                             logprob_emit_at_indel,
-                             joint_logprob_emit_at_match,
-                             joint_transit_mat,
-                             sow_intermediates: bool ):
-        # unpack batch: (B, ...)
-        subCounts = batch[0] #(B, 20, 20)
-        insCounts = batch[1] #(B, 20)
-        delCounts = batch[2]
-        transCounts = batch[3] #(B, 4)
-        
-        
-        #######################################
-        ### score emissions and transitions   #
-        #######################################
-        # matches; (T, B)
-        match_emit_score = jnp.einsum('tij,bij->tb',
-                                      joint_logprob_emit_at_match, 
-                                      subCounts)
-        # inserts; (B,)
-        ins_emit_score = jnp.einsum('i,bi->b',
-                                    logprob_emit_at_indel, 
-                                    insCounts)
-        # deletions; (B,)
-        del_emit_score = jnp.einsum('i,bi->b',
-                                    logprob_emit_at_indel, 
-                                    delCounts)
-        
-        # transitions; (T,B)
-        joint_transit_score = jnp.einsum('tmn,bmn->tb', 
-                                         joint_transit_mat, 
-                                         transCounts)
-        
-        # final score is logprob transitions + logprob emissions
-        # (T,B)
-        joint_logprob_perSamp_perTime = (match_emit_score + 
-                                          ins_emit_score[None,:] +
-                                          del_emit_score[None,:] +
-                                          joint_transit_score)
-        
-        # marginalize over times; (B,)
-        if t_array.shape[0] > 1:
-            joint_neg_logP = -self._marginalize_over_times(logprob_perSamp_perTime = joint_logprob_perSamp_perTime,
-                                        exponential_dist_param = self.exponential_dist_param,
-                                        t_array = t_array,
-                                        sow_intermediates = sow_intermediates)
-        else:
-            joint_neg_logP = -joint_logprob_perSamp_perTime[0,:]
-        
-        # normalize (don't include <bos> or <eos>)
-        if self.norm_loss_by == 'desc_len':
-            length_for_normalization = ( subCounts.sum(axis=(-2, -1)) + 
-                                         insCounts.sum(axis=(-1))
-                                         )
-        
-        elif self.norm_loss_by == 'align_len':
-            length_for_normalization = ( subCounts.sum(axis=(-2, -1)) + 
-                                         insCounts.sum(axis=(-1)) + 
-                                         delCounts.sum(axis=(-1))
-                                         ) 
-        
-        joint_neg_logP_length_normed = joint_neg_logP / length_for_normalization
-        
-        return {'joint_neg_logP': joint_neg_logP,
-                'joint_neg_logP_length_normed': joint_neg_logP_length_normed}
-    
     
     def _marginalize_over_times(self,
                                logprob_perSamp_perTime,
@@ -661,62 +813,120 @@ class IndpPairHMMFitBoth(ModuleBase):
             del lab
         
         return logP_perSamp_raw
-        
     
-    def _return_bound_sigmoid_limits(self):
-        ### rate_matrix_module
-        # exchangeabilities
-        exchange_min_val = self.rate_matrix_module.exchange_min_val
-        exchange_max_val = self.rate_matrix_module.exchange_max_val
+    def _joint_logprob_align( self,
+                             batch,
+                             t_array,
+                             logprob_emit_at_indel,
+                             joint_logprob_emit_at_match,
+                             joint_transit_mat,
+                             sow_intermediates: bool ):
+        # unpack batch: (B, ...)
+        subCounts = batch[0] #(B, 20, 20)
+        insCounts = batch[1] #(B, 20)
+        delCounts = batch[2] #(B, 20)
+        transCounts = batch[3] #(B, 4)
         
-        #rate multiplier
-        if self.rate_mult_activation == 'bound_sigmoid':
-            rate_mult_min_val = self.rate_matrix_module.rate_mult_min_val
-            rate_mult_max_val = self.rate_matrix_module.rate_mult_max_val
         
+        # score alignments
+        joint_logprob_perSamp_perTime = _score_alignment( subCounts = subCounts,
+                              insCounts = insCounts,
+                              delCounts = delCounts,
+                              transCounts = transCounts,
+                              logprob_emit_at_match = joint_logprob_emit_at_match,
+                              logprob_emit_at_indel = logprob_emit_at_indel,
+                              transit_mat = joint_transit_mat) #(T, B)
         
-        ### transitions_module
-        # insert rate lambda
-        lam_min_val = self.transitions_module.lam_min_val
-        lam_max_val = self.transitions_module.lam_max_val
+        # marginalize over times, if required
+        if t_array.shape[0] > 1:
+            joint_neg_logP = -self._marginalize_over_times(logprob_perSamp_perTime = joint_logprob_perSamp_perTime,
+                                        exponential_dist_param = self.exponential_dist_param,
+                                        t_array = t_array,
+                                        sow_intermediates = sow_intermediates) #(B,)
+        else:
+            joint_neg_logP = -joint_logprob_perSamp_perTime[0,:] #(B,)
         
-        # offset (for deletion rate mu)
-        offs_min_val = self.transitions_module.offs_min_val
-        offs_max_val = self.transitions_module.offs_max_val
+        # normalize by length
+        if self.norm_loss_by == 'desc_len':
+            length_for_normalization = ( subCounts.sum(axis=(-2, -1)) + 
+                                         insCounts.sum(axis=(-1))
+                                         )
         
-        # r extension probability
-        r_extend_min_val = self.transitions_module.r_extend_min_val
-        r_extend_max_val = self.transitions_module.r_extend_max_val
+        elif self.norm_loss_by == 'align_len':
+            length_for_normalization = ( subCounts.sum(axis=(-2, -1)) + 
+                                         insCounts.sum(axis=(-1)) + 
+                                         delCounts.sum(axis=(-1))
+                                         ) 
         
-        params_range = { "exchange_min_val": exchange_min_val,
-                         "exchange_max_val": exchange_max_val,
-                         "rate_mult_min_val": rate_mult_min_val,
-                         "rate_mult_max_val": rate_mult_max_val,
-                         "lam_min_val": lam_min_val,
-                         "lam_max_val": lam_max_val,
-                         "offs_min_val": offs_min_val,
-                         "offs_max_val": offs_max_val,
-                         "r_extend_min_val": r_extend_min_val,
-                         "r_extend_max_val": r_extend_max_val,
-                         }
+        joint_neg_logP_length_normed = joint_neg_logP / length_for_normalization
         
-        return params_range
-
-
-
-
-###############################################################################
-### Variants   ################################################################
-###############################################################################
-class IndpPairHMMLoadAll(IndpPairHMMFitBoth):
+        return {'joint_neg_logP': joint_neg_logP,
+                'joint_neg_logP_length_normed': joint_neg_logP_length_normed}
+    
+    
+class IndpSitesLoadAll(IndpSites):
     """
-    same as IndpPairHMMFitBoth, but load values (i.e. no free parameters)
+    same as IndpSites, but load values (i.e. no free parameters)
     
-    inherits everything except setup and write_params 
     
-    files must exist:
-        equl_file
-        tkf_params_file
+    Initialize with
+    ----------------
+    config : dict
+        config['num_emit_site_classes'] :  int
+            number of emission site classes
+        
+        config['indel_model_type'] : {TKF91, TKF92}
+            which indel model
+            
+        config['gap_tok'] :  int
+            token that represents gaps; usually 43
+        
+        config['norm_loss_by'] :  {desc_len, align_len}, optional
+            what length to normalize loglikelihood by
+            Default is 'desc_len'
+        
+        config['exponential_dist_param'] : int, optional
+            There is an exponential prior over time; this provides the
+            parameter for this during marginalization over times
+        
+    name : str
+        class name, for flax
+    
+    Methods
+    --------
+    setup
+    
+    write_params
+        write parameters to files
+    
+    _init_rate_matrix_module
+        decide what function to use for rate matrix
+    
+    inherited from IndpSites
+    ----------------------------
+    __call__
+        unpack batch and calculate logP(anc, desc, align)
+    
+    calculate_all_loglikes
+        calculate logP(anc, desc, align), logP(anc), logP(desc), and
+        logP(desc, align | anc)
+    
+    return_bound_sigmoid_limits
+        after initializing model, get the limits for bound_sigmoid activations
+    
+    _get_scoring_matrices
+        get all matrices needed to score sequences
+    
+    _marginalize_over_times
+        handles time marginalization
+    
+    _joint_logprob_align
+        calculate logP(anc, desc, align)
+    
+    Methods inherited from models.model_utils.BaseClasses.ModuleBase
+    -----------------------------------------------------------------
+    sow_histograms_scalars
+        for tensorboard logging
     """
     config: dict
     name: str
@@ -729,7 +939,7 @@ class IndpPairHMMLoadAll(IndpPairHMMFitBoth):
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
         
         ### how to score emissions from indel sites
-        self.indel_prob_module = LogEqulVecFromFile(config = self.config,
+        self.indel_prob_module = EqulDistLogprobsFromFile(config = self.config,
                                                    name = f'get equilibrium')
         
         
@@ -757,16 +967,13 @@ class IndpPairHMMLoadAll(IndpPairHMMFitBoth):
     def write_params(self,
                      t_array,
                      out_folder: str):
-        ##########################
-        ### the final matrices   #
-        ##########################  
         out = self._get_scoring_matrices(t_array=t_array,
                                         sow_intermediates=False)
         
         
-        rate_mat_times_rho_per_class = out['rate_mat_times_rho_per_class']
-        for c in range(rate_mat_times_rho_per_class.shape[0]):
-            mat_to_save = rate_mat_times_rho_per_class[c,...]
+        scaled_rate_mat_per_class = out['scaled_rate_mat_per_class']
+        for c in range(scaled_rate_mat_per_class.shape[0]):
+            mat_to_save = scaled_rate_mat_per_class[c,...]
             
             with open(f'{out_folder}/class-{c}_rate_matrix_times_rho.npy', 'wb') as g:
                 np.save(g, mat_to_save)
@@ -829,33 +1036,158 @@ class IndpPairHMMLoadAll(IndpPairHMMFitBoth):
     
     
     def _init_rate_matrix_module(self, config):
-        mod = RateMatFromFile( config = self.config,
-                               name = f'get rate matrix' )
+        mod = GTRRateMatFromFile( config = self.config,
+                                  name = f'get rate matrix' )
         return mod, 'GTR'
 
 
-class IndpHKY85FitAll(IndpPairHMMFitBoth):
+###############################################################################
+### PairHMM with HKY85 substitution model, some TKF indel model   #############
+###############################################################################
+class IndpSitesHKY85(IndpSites):
     """
-    Identical to IndpPairHMMFitBoth, but uses the HKY85 substitution model.
+    Same as IndpSites, but uses HKY85
+
+    
+    Initialize with
+    ----------------
+    config : dict
+        config['num_emit_site_classes'] :  int
+            number of emission site classes
+        
+        config['indel_model_type'] : {TKF91, TKF92}
+            which indel model
+            
+        config['gap_tok'] :  int
+            token that represents gaps; usually 43
+        
+        config['norm_loss_by'] :  {desc_len, align_len}, optional
+            what length to normalize loglikelihood by
+            Default is 'desc_len'
+        
+        config['exponential_dist_param'] : int, optional
+            There is an exponential prior over time; this provides the
+            parameter for this during marginalization over times
+        
+    name : str
+        class name, for flax
+    
+    Methods
+    -------
+    _joint_logprob_align
+        calculate logP(anc, desc, align)
+        
+    Inherited from IndpSites
+    ---------------------------
+    setup
+    
+    __call__
+        unpack batch and calculate logP(anc, desc, align)
+    
+    calculate_all_loglikes
+        calculate logP(anc, desc, align), logP(anc), logP(desc), and
+        logP(desc, align | anc)
+    
+    write_params
+        write parameters to files
+    
+    return_bound_sigmoid_limits
+        after initializing model, get the limits for bound_sigmoid activations
+        
+    _init_rate_matrix_module
+        decide what function to use for rate matrix
+    
+    _get_scoring_matrices
+        get all matrices needed to score sequences
+    
+    _marginalize_over_times
+        handles time marginalization
+    
+    Methods inherited from models.model_utils.BaseClasses.ModuleBase
+    -----------------------------------------------------------------
+    sow_histograms_scalars
+        for tensorboard logging
     """
     config: dict
     name: str
 
     def _init_rate_matrix_module(self, config):
-        mod = HKY85( config = self.config,
-                     name = f'get rate matrix' )
+        mod = HKY85RateMat( config = self.config,
+                            name = f'get rate matrix' )
         return mod, 'HKY85'
 
 
-class IndpHKY85LoadAll(IndpPairHMMLoadAll):
+class IndpSitesHKY85LoadAll(IndpSitesLoadAll):
     """
-    Identical to IndpPairHMMLoadAll, but uses the HKY85 substitution model.
+    same as IndpSitesLoadAll, but use HKY85
+    
+    
+    Initialize with
+    ----------------
+    config : dict
+        config['num_emit_site_classes'] :  int
+            number of emission site classes
+        
+        config['indel_model_type'] : {TKF91, TKF92}
+            which indel model
+            
+        config['gap_tok'] :  int
+            token that represents gaps; usually 43
+        
+        config['norm_loss_by'] :  {desc_len, align_len}, optional
+            what length to normalize loglikelihood by
+            Default is 'desc_len'
+        
+        config['exponential_dist_param'] : int, optional
+            There is an exponential prior over time; this provides the
+            parameter for this during marginalization over times
+        
+    name : str
+        class name, for flax
+    
+    Methods
+    --------
+    _init_rate_matrix_module
+        decide what function to use for rate matrix
+    
+    inherited from IndpSitesLoadAll
+    ----------------------------------
+    setup
+    
+    write_params
+        write parameters to files
+    
+    inherited from IndpSites
+    ----------------------------
+    __call__
+        unpack batch and calculate logP(anc, desc, align)
+    
+    calculate_all_loglikes
+        calculate logP(anc, desc, align), logP(anc), logP(desc), and
+        logP(desc, align | anc)
+    
+    return_bound_sigmoid_limits
+        after initializing model, get the limits for bound_sigmoid activations
+    
+    _get_scoring_matrices
+        get all matrices needed to score sequences
+    
+    _marginalize_over_times
+        handles time marginalization
+    
+    _joint_logprob_align
+        calculate logP(anc, desc, align)
+    
+    Methods inherited from models.model_utils.BaseClasses.ModuleBase
+    -----------------------------------------------------------------
+    sow_histograms_scalars
+        for tensorboard logging
     """
     config: dict
     name: str
 
     def _init_rate_matrix_module(self, config):
-        mod = HKY85FromFile( config = self.config,
-                               name = f'get rate matrix' )
+        mod = HKY85RateMatFromFile( config = self.config,
+                                    name = f'get rate matrix' )
         return mod, 'HKY85'
     

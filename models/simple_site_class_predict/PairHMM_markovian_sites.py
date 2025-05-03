@@ -7,16 +7,15 @@ Created on Wed Feb  5 04:33:00 2025
 
 models:
 =======
-MarkovPairHMM
-MarkovPairHMMLoadAll
-MarkovHKY85PairHMM
-MarkovHKY85PairHMMLoadAll
+MarkovFrags
+MarkovFragsLoadAll
+MarkovFragsHKY85
+MarkovFragsHKY85LoadAll
 
 """
 import pickle
 import numpy as np
 
-# jumping jax and leaping flax
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
@@ -24,38 +23,34 @@ from jax.scipy.linalg import expm
 from jax.scipy.special import logsumexp
 
 from models.model_utils.BaseClasses import ModuleBase
-from models.simple_site_class_predict.emission_models import (LogEqulVecFromCounts,
-                                                              LogEqulVecPerClass,
-                                                              LogEqulVecFromFile,
-                                                              RateMatFromFile,
-                                                              RateMatFitBoth,
+from models.simple_site_class_predict.emission_models import (EqulDistLogprobsFromCounts,
+                                                              EqulDistLogprobsPerClass,
+                                                              EqulDistLogprobsFromFile,
+                                                              GTRRateMat,
+                                                              GTRRateMatFromFile,
                                                               SiteClassLogprobs,
                                                               SiteClassLogprobsFromFile,
-                                                              HKY85,
-                                                              HKY85FromFile)
+                                                              HKY85RateMat,
+                                                              HKY85RateMatFromFile,
+                                                              get_cond_logprob_emit_at_match_per_class,
+                                                              get_joint_logprob_emit_at_match_per_class)
 from models.simple_site_class_predict.transition_models import (TKF92TransitionLogprobs,
                                                         TKF92TransitionLogprobsFromFile)
-from utils.pairhmm_helpers import (bounded_sigmoid,
+from utils.pairhmm_helpers import (bound_sigmoid,
                                    safe_log)
 
 
-################################################
-### helpers only for pairhmm_markovian_sites   #
-################################################
-def log_dot_bigger(log_vec, log_mat):
+###############################################################################
+### Other helper functions   ##################################################
+###############################################################################
+def _log_dot_bigger(log_vec, log_mat):
     broadcasted_sum = log_vec[:, :, None, :] + log_mat
-    
-    ### SOMETHING WEIRD HERE
-    # out = jnp.where( broadcasted_sum.sum() < 0,
-    #                  logsumexp(broadcasted_sum, axis=1),
-    #                  jnp.zeros(log_vec.shape)
-    #                  )
     return logsumexp(broadcasted_sum, axis=1)
 
 def _expand_dims_like(x, target):
     return x.reshape(list(x.shape) + [1] * (target.ndim - x.ndim))
 
-def flip_sequences( inputs, 
+def _flip_sequences( inputs, 
                     seq_lengths, 
                     flip_along_axis,
                     num_features_dims = None
@@ -95,7 +90,7 @@ def flip_sequences( inputs,
 
 
     
-class MarkovPairHMM(ModuleBase):
+class MarkovFrags(ModuleBase):
     """
     main methods:
     =============
@@ -133,10 +128,10 @@ class MarkovPairHMM(ModuleBase):
         
         ### how to score emissions from indel sites
         if self.num_site_classes == 1:
-            self.indel_prob_module = LogEqulVecFromCounts(config = self.config,
+            self.indel_prob_module = EqulDistLogprobsFromCounts(config = self.config,
                                                        name = f'get equilibrium')
         elif self.num_site_classes > 1:
-            self.indel_prob_module = LogEqulVecPerClass(config = self.config,
+            self.indel_prob_module = EqulDistLogprobsPerClassomCounts(config = self.config,
                                                      name = f'get equilibrium')
         
         
@@ -389,7 +384,7 @@ class MarkovPairHMM(ModuleBase):
         anc_first_tr = marginal_transit[0,:,1,0][...,None]
         
         continued_anc_emission_flag = md_seen & anc_mask
-        anc_cont_tr = log_dot_bigger( log_vec = anc_alpha[None,...],
+        anc_cont_tr = _log_dot_bigger( log_vec = anc_alpha[None,...],
                                       log_mat = marginal_transit[...,0,0][None,...,None])[0,...]
         init_anc_tr = ( anc_cont_tr * continued_anc_emission_flag +
                         anc_first_tr * first_anc_emission_flag )
@@ -414,7 +409,7 @@ class MarkovPairHMM(ModuleBase):
         desc_first_tr = marginal_transit[0,:,1,0][...,None]
         
         continued_desc_emission_flag = mi_seen & desc_mask
-        desc_cont_tr = log_dot_bigger( log_vec = desc_alpha[None,...],
+        desc_cont_tr = _log_dot_bigger( log_vec = desc_alpha[None,...],
                                        log_mat = marginal_transit[...,0,0][None,...,None])[0,...]
         init_desc_tr = ( desc_cont_tr * continued_desc_emission_flag +
                          desc_first_tr * first_desc_emission_flag )
@@ -484,7 +479,7 @@ class MarkovPairHMM(ModuleBase):
                 
                 # P(anc)
                 anc_first_tr = marginal_transit[0,:,1,0][...,None]
-                anc_cont_tr = log_dot_bigger( log_vec = anc_carry[None,...],
+                anc_cont_tr = _log_dot_bigger( log_vec = anc_carry[None,...],
                                               log_mat = marginal_transit[...,0,0][None,...,None])[0,...]
                 anc_tr = ( anc_cont_tr * continued_anc_emission_flag +
                            anc_first_tr * first_anc_emission_flag )
@@ -492,7 +487,7 @@ class MarkovPairHMM(ModuleBase):
                 
                 # P(desc)
                 desc_first_tr = marginal_transit[0,:,1,0][...,None]
-                desc_cont_tr = log_dot_bigger( log_vec = desc_carry[None,...],
+                desc_cont_tr = _log_dot_bigger( log_vec = desc_carry[None,...],
                                                log_mat = marginal_transit[...,0,0][None,...,None])[0,...]
                 desc_tr = ( desc_cont_tr * continued_desc_emission_flag +
                             desc_first_tr * first_desc_emission_flag )
@@ -715,8 +710,8 @@ class MarkovPairHMM(ModuleBase):
                 with open(f'{out_folder}/PARAMS_exchangeabilities.npy','wb') as g:
                     jnp.save(g, exchangeabilities)
             
-            elif self.subst_model_type == 'HKY85':
-                with open(f'{out_folder}/PARAMS_HKY85_model.txt','w') as g:
+            elif self.subst_model_type == 'HKY85RateMat':
+                with open(f'{out_folder}/PARAMS_HKY85RateMat_model.txt','w') as g:
                     g.write(f'transition rate, ti: {exchangeabilities[1]}')
                     g.write(f'transition rate, tv: {exchangeabilities[0]}')
                 
@@ -886,7 +881,7 @@ class MarkovPairHMM(ModuleBase):
         ### flip inputs, transition matrix   #
         ######################################
         align_len = (aligned_inputs[...,-1] != 0).sum(axis=1)
-        flipped_seqs = flip_sequences( inputs = aligned_inputs, 
+        flipped_seqs = _flip_sequences( inputs = aligned_inputs, 
                                        seq_lengths = align_len, 
                                        flip_along_axis = 1
                                        )
@@ -933,7 +928,7 @@ class MarkovPairHMM(ModuleBase):
                 for_log_dot = e[:,:, None, :] + tr
                 
                 # return dot product with previous carry
-                return log_dot_bigger(log_vec = in_carry, log_mat = for_log_dot)
+                return _log_dot_bigger(log_vec = in_carry, log_mat = for_log_dot)
             
             def begin(in_carry):
                 # e is always associated with prev_state, so still add here
@@ -970,7 +965,7 @@ class MarkovPairHMM(ModuleBase):
         # reshape: (L-1, T, C, B) -> (B, L-1, T, C)
         reshaped_stacked_outputs = jnp.transpose( stacked_outputs,
                                                   (3, 0, 1, 2) )
-        flipped_stacked_outputs = flip_sequences( inputs = reshaped_stacked_outputs, 
+        flipped_stacked_outputs = _flip_sequences( inputs = reshaped_stacked_outputs, 
                                                   seq_lengths = align_len-1, 
                                                   flip_along_axis = 1
                                                   )
@@ -1069,39 +1064,53 @@ class MarkovPairHMM(ModuleBase):
         
     
     def _init_rate_matrix_module(self, config):
-        mod = RateMatFitBoth( config = self.config,
+        mod = GTRRateMat( config = self.config,
                                name = f'get rate matrix' )
         return mod, 'GTR'
     
     def _get_scoring_matrices( self,
                                t_array,
                                sow_intermediates: bool):
-        ### emissions from indels
+        
+        # Probability of each site class; is one, if no site clases
+        log_class_probs = self.site_class_probability_module( sow_intermediates = sow_intermediates )
+        
+        
+        ######################################################
+        ### build log-transformed equilibrium distribution   #
+        ### use this to score emissions from indels sites    #
+        ######################################################
         logprob_emit_at_indel = self.indel_prob_module( sow_intermediates = sow_intermediates )
         
         
-        ### emissions from match sites
-        # get normalized rate matrix times rate multiplier, per each class
-        # (C, alph, alph)
-        rate_mat_times_rho = self.rate_matrix_module( logprob_equl = logprob_emit_at_indel,
-                                                      sow_intermediates = sow_intermediates )
+        ####################################################
+        ### build substitution log-probability matrix      #
+        ### use this to score emissions from match sites   #
+        ####################################################
+        # rho * Q
+        scaled_rate_mat_per_class = self.rate_matrix_module( logprob_equl = logprob_emit_at_indel,
+                                                             sow_intermediates = sow_intermediates ) #(C, A, A)
         
-        # rate_mat_times_rho: (C, alph, alph)
-        # time: (T,)
-        # output: (T, C, alph, alph)
-        to_expm = jnp.multiply( rate_mat_times_rho[None, ...],
-                                t_array[..., None,None,None] )
-        cond_prob_emit_at_match = expm( to_expm )
-        cond_logprob_emit_at_match = safe_log( cond_prob_emit_at_match )
-        joint_logprob_emit_at_match = cond_logprob_emit_at_match + logprob_emit_at_indel[None,:,:,None]
+        # conditional probability
+        # cond_logprob_emit_at_match is (T, C, A, A)
+        # to_expm is (T, C, A, A)
+        out = get_cond_logprob_emit_at_match_per_class(t_array = t_array,
+                                                        scaled_rate_mat_per_class = scaled_rate_mat_per_class)
+        cond_logprob_emit_at_match, to_expm = out 
+        del out
         
+        # joint probability
+        joint_logprob_emit_at_match = get_joint_logprob_emit_at_match_per_class( cond_logprob_emit_at_match_per_class = cond_logprob_emit_at_match,
+                                                            log_equl_dist_per_class = logprob_emit_at_indel) #(T, C, A, A)
         
-        ### probability of being in any particular class
-        log_class_probs = self.site_class_probability_module( sow_intermediates = sow_intermediates )
 
-
-        ### transition logprobs
-        # (T,C,C,4,4)
+        ####################################################
+        ### build transition log-probability matrix        #
+        ####################################################
+        # all_transit_matrices['joint']: (T, A, A)
+        # all_transit_matrices['conditional']: (T, A, A)
+        # all_transit_matrices['marginal']: (T, A, A)
+        # used_tkf_beta_approx is a tuple of booleans arrays: ( (T,), (T,) )
         all_transit_matrices, used_tkf_beta_approx = self.transitions_module( t_array = t_array,
                                                         class_probs = jnp.exp( log_class_probs ),
                                                         sow_intermediates = sow_intermediates )
@@ -1109,7 +1118,7 @@ class MarkovPairHMM(ModuleBase):
         out_dict = {'logprob_emit_at_indel': logprob_emit_at_indel,
                     'joint_logprob_emit_at_match': joint_logprob_emit_at_match,
                     'cond_logprob_emit_at_match': cond_logprob_emit_at_match,
-                    'rate_mat_times_rho': rate_mat_times_rho,
+                    'rate_mat_times_rho': scaled_rate_mat_per_class,
                     'to_expm': to_expm,
                     'all_transit_matrices': all_transit_matrices,
                     'used_tkf_beta_approx': used_tkf_beta_approx}
@@ -1238,9 +1247,9 @@ class MarkovPairHMM(ModuleBase):
 ###############################################################################
 ### Variants   ################################################################
 ###############################################################################
-class MarkovPairHMMLoadAll(MarkovPairHMM):
+class MarkovFragsLoadAll(MarkovFrags):
     """
-    same as MarkovPairHMM, but load values (i.e. no free parameters)
+    same as MarkovFrags, but load values (i.e. no free parameters)
     
     only replace setup and write_params (replace with placeholder function)
     
@@ -1260,7 +1269,7 @@ class MarkovPairHMMLoadAll(MarkovPairHMM):
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
         
         ### how to score emissions from indel sites
-        self.indel_prob_module = LogEqulVecFromFile(config = self.config,
+        self.indel_prob_module = EqulDistLogprobsFromFile(config = self.config,
                                                    name = f'get equilibrium')
         
         
@@ -1349,32 +1358,32 @@ class MarkovPairHMMLoadAll(MarkovPairHMM):
             del key, mat, g
     
     def _init_rate_matrix_module(self, config):
-        mod = RateMatFromFile( config = self.config,
+        mod = GTRRateMatFromFile( config = self.config,
                                name = f'get rate matrix' )
         return mod, 'GTR'
 
 
 
-class MarkovHKY85PairHMM(MarkovPairHMM):
+class MarkovHKY85RateMatPairHMM(MarkovFrags):
     """
-    Identical to MarkovPairHMM, but uses the HKY85 substitution model.
-    """
-    config: dict
-    name: str
-
-    def _init_rate_matrix_module(self, config):
-        mod = HKY85( config = self.config,
-                               name = f'get rate matrix' )
-        return mod, 'HKY85'
-
-class MarkovHKY85PairHMMLoadAll(MarkovPairHMMLoadAll):
-    """
-    Identical to MarkovPairHMMLoadAll, but uses the HKY85 substitution model.
+    Identical to MarkovFrags, but uses the HKY85RateMat substitution model.
     """
     config: dict
     name: str
 
     def _init_rate_matrix_module(self, config):
-        mod = HKY85FromFile( config = self.config,
+        mod = HKY85RateMat( config = self.config,
                                name = f'get rate matrix' )
-        return mod, 'HKY85'
+        return mod, 'HKY85RateMat'
+
+class MarkovHKY85RateMatPairHMMLoadAll(MarkovFragsLoadAll):
+    """
+    Identical to MarkovFragsLoadAll, but uses the HKY85RateMat substitution model.
+    """
+    config: dict
+    name: str
+
+    def _init_rate_matrix_module(self, config):
+        mod = HKY85RateMatFromFile( config = self.config,
+                               name = f'get rate matrix' )
+        return mod, 'HKY85RateMat'
