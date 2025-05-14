@@ -52,13 +52,13 @@ from train_eval_fns.indp_site_classes_training_fns import ( train_one_batch,
                                                             eval_one_batch,
                                                             final_eval_wrapper )
 
-def save_to_pickle(out_file, obj):
+def _save_to_pickle(out_file, obj):
     with open(out_file, 'wb') as g:
         pickle.dump(obj, g)
 
-def save_trainstate(out_file, tstate_obj):
+def _save_trainstate(out_file, tstate_obj):
     model_state_dict = flax.serialization.to_state_dict(tstate_obj)
-    save_to_pickle(out_file, model_state_dict)
+    _save_to_pickle(out_file, model_state_dict)
 
 
 def train_pairhmm_indp_sites(args, dataloader_dict: dict):
@@ -99,18 +99,22 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
         
         g.write( f'PairHMM with independent site classes over emissions\n' )
         g.write( f'Preset: args.pred_config["preset_name"]\n')
+        g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )
         g.write( f'Indel model: {args.pred_config.get("indel_model_type","None")}\n' )
         g.write( (f'  - Number of site classes for emissions: '+
-                  f'{args.pred_config["num_emit_site_classes"]}\n' )
+                  f'{args.pred_config["num_mixtures"]}\n' )
                 )
         
-        if 'gtr' not in args.pred_config["preset_name"]:
+        if args.pred_config["indel_model_type"] is not None:
             g.write( f'  - Normalizing losses by: {args.norm_loss_by}\n' )
         
-        elif 'gtr' in args.pred_config["preset_name"]:
+        elif args.pred_config["indel_model_type"] is None:
             g.write( f'  - Normalizing losses by: align length '+
                      f'(same as desc length, because we remove gap '+
                      f'positions) \n' )
+        
+        g.write( f'Times from: args.pred_config["times_from"]\n' )
+    
     
     # extra files to record if you use tkf approximations
     with open(f'{args.out_arrs_dir}/TRAIN_tkf_approx.tsv','w') as g:
@@ -130,6 +134,9 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     training_dl = dataloader_dict['training_dl']
     test_dset = dataloader_dict['test_dset']
     test_dl = dataloader_dict['test_dl']
+    t_array_for_all_samples = dataloader_dict['t_array_for_all_samples']
+    
+    # add equilibrium counts under two different labels
     args.pred_config['training_dset_emit_counts'] = training_dset.emit_counts
     args.pred_config['training_dset_aa_counts'] = training_dset.emit_counts
     
@@ -150,28 +157,35 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     
     
     ### determine shapes for init
-    # time
-    num_timepoints = test_dset.retrieve_num_timepoints(times_from = args.pred_config['times_from'])
-    dummy_t_array = jnp.empty( (num_timepoints, ) )
-    
-    # counts array
     B = args.batch_size
-    alph = args.emission_alphabet_size
-    num_states = training_dset.num_transitions
-    dummy_subCounts = jnp.empty( (B, alph, alph) )
-    dummy_insCounts = jnp.empty( (B, alph) )
-    dummy_delCounts = jnp.empty( (B, alph) )
-    dummy_transCounts = jnp.empty( (B, num_states, num_states) )
+    A = args.emission_alphabet_size
+    S = training_dset.num_transitions
     
-    seq_shapes = [dummy_subCounts,
+    # time
+    if t_array_for_all_samples is not None:
+        dummy_t_array_for_all_samples = jnp.empty( (t_array_for_all_samples.shape[0], ) )
+        dummy_t_for_each_sample = None
+    
+    else:
+        dummy_t_array_for_all_samples = None
+        dummy_t_for_each_sample = jnp.empty( (B,) )
+        
+    # counts array
+    dummy_subCounts = jnp.empty( (B, A, A) )
+    dummy_insCounts = jnp.empty( (B, A) )
+    dummy_delCounts = jnp.empty( (B, A) )
+    dummy_transCounts = jnp.empty( (B, S, S) )
+    
+    fake_batch = [dummy_subCounts,
                   dummy_insCounts,
                   dummy_delCounts,
-                  dummy_transCounts]
+                  dummy_transCounts,
+                  dummy_t_for_each_sample]
     
     
     ### initialize functions
-    out = init_pairhmm( seq_shapes = seq_shapes, 
-                        dummy_t_array = dummy_t_array,
+    out = init_pairhmm( seq_shapes = fake_batch, 
+                        dummy_t_array = dummy_t_array_for_all_samples,
                         tx = tx, 
                         model_init_rngkey = model_init_rngkey,
                         pred_config = args.pred_config,
@@ -181,16 +195,18 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     del out
     
     ### part+jit training function
-    # note: if you want to use a different time per sample, will
-    #  have to change this jit compilation
-    t_array = test_dset.return_time_array()
-    print('Using times:')
-    print(t_array)
-    print()
+    if t_array_for_all_samples is not None:
+        print('Using times:')
+        print(t_array_for_all_samples)
+        print()
+    
+    elif t_array_for_all_samples is None:
+        print('Using one branch length per sample')
+        print()
     
     parted_train_fn = partial( train_one_batch,
                                indel_model_type = args.pred_config.get('indel_model_type', None),
-                               t_array = t_array, 
+                               t_array = t_array_for_all_samples, 
                                interms_for_tboard = args.interms_for_tboard,
                                update_grads = args.update_grads )
     train_fn_jitted = jax.jit(parted_train_fn)
@@ -198,12 +214,11 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     
     
     ### part+jit eval function
-    # note: if you want to use a different time per sample, will
-    #  have to change this jit compilation
+    no_outputs = {k: False for k in args.interms_for_tboard.keys()}
     parted_eval_fn = partial( eval_one_batch,
-                              t_array = t_array,
+                              t_array = t_array_for_all_samples,
                               pairhmm_instance = pairhmm_instance,
-                              interms_for_tboard = {'finalpred_sow_outputs': False},
+                              interms_for_tboard = no_outputs,
                               return_all_loglikes = False )
     eval_fn_jitted = jax.jit(parted_eval_fn)
     del parted_eval_fn
@@ -300,7 +315,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
                 
                 # save all trainstate objects
                 new_outfile = finalpred_save_model_filename.replace('.pkl','_BROKEN.pkl')
-                save_trainstate(out_file=new_outfile,
+                _save_trainstate(out_file=new_outfile,
                                 tstate_obj=pairhmm_trainstate)
                 
                 raise RuntimeError( ('NaN loss detected; saved intermediates '+
@@ -427,7 +442,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
             # save models to regular python pickles too (in case training is 
             #   interrupted)
             new_outfile = finalpred_save_model_filename.replace('.pkl','_BEST.pkl')
-            save_trainstate(out_file=new_outfile, 
+            _save_trainstate(out_file=new_outfile, 
                             tstate_obj=pairhmm_trainstate)
             
             
@@ -537,13 +552,6 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     del epoch_idx
     
     
-    ### un-transform parameters and write to numpy arrays
-    best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
-                                      t_array = t_array,
-                                      out_folder = args.out_arrs_dir,
-                                      method = pairhmm_instance.write_params )
-    
-    
     ### save the argparse object by itself
     args.epoch_idx = best_epoch
     with open(f'{args.model_ckpts_dir}/TRAINING_ARGPARSE.pkl', 'wb') as g:
@@ -551,9 +559,8 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     
     
     ### jit-compile new eval function
-    t_array = test_dset.return_time_array()
     parted_eval_fn = partial( eval_one_batch,
-                              t_array = t_array,
+                              t_array = t_array_for_all_samples,
                               pairhmm_trainstate = best_pairhmm_trainstate,
                               pairhmm_instance = pairhmm_instance,
                               interms_for_tboard = args.interms_for_tboard,
@@ -592,6 +599,22 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
                                             logfile_dir = args.logfile_dir,
                                             out_arrs_dir = args.out_arrs_dir,
                                             outfile_prefix = f'test-set')
+    
+    ### un-transform parameters and write to numpy arrays
+    # if using one branch length per sample, write arrays with the test set
+    if t_array_for_all_samples is not None:
+        t_for_writing_params = t_array_for_all_samples
+        prefix = ''
+    
+    elif t_array_for_all_samples is None:
+        t_for_writing_params = test_dset.times
+        prefix = 'test-set'
+        
+    best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
+                                      t_array = t_for_writing_params,
+                                      prefix = prefix,
+                                      out_folder = args.out_arrs_dir,
+                                      method = pairhmm_instance.write_params )
     
     
     ###########################################

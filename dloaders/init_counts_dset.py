@@ -21,7 +21,13 @@ from dloaders.CountsDset import jax_collator as collator
 
 
 def init_time_array(args):
-    if args.pred_config['times_from'] == 'geometric':
+    ### use one time per sample, returned in the dataloader
+    if args.pred_config['times_from'] == 't_per_sample':
+        return None
+    
+    
+    ### init from geometric grid, like in cherryML
+    elif args.pred_config['times_from'] == 'geometric':
         t_grid_center = args.pred_config['t_grid_center']
         t_grid_step = args.pred_config['t_grid_step']
         t_grid_num_steps = args.pred_config['t_grid_num_steps']
@@ -30,34 +36,34 @@ def init_time_array(args):
                                    t_grid_num_steps, 
                                    1
                                   )
-        times_from_array = np.array([ (t_grid_center * t_grid_step**q_i) 
-                                      for q_i in quantization_grid
-                                     ]
-                                    )
-        single_time_from_file = False
+        t_array = [ (t_grid_center * t_grid_step**q_i) for q_i in quantization_grid ]
         
+        # postproc
+        t_array = np.array(t_array)
+        t_array_filtered = t_array[t_array >= args.pred_config['min_time']]
+        return t_array_filtered
     
+    
+    ### read times from flat text file
     elif args.pred_config['times_from'] == 't_array_from_file':
         times_file = args.pred_config['filenames']['times']
         
         # read file
-        times_from_array = []
+        t_array = []
         with open(f'{times_file}','r') as f:
             for line in f:
-                times_from_array.append( float( line.strip() ) )
-        times_from_array = np.array(times_from_array)
-        single_time_from_file = False
+                t_array.append( float( line.strip() ) )
+        
+        # postproc
+        t_array = np.array(t_array)
+        t_array_filtered = t_array[t_array >= args.pred_config['min_time']]
+        return t_array_filtered
     
-    elif args.pred_config['times_from'] == 'one_time_per_sample_from_file':
-        raise NotImplementedError('do you REALLY need an individual time per sample?')
     
-    ### time cutoff
-    # times_from_array = times_from_array[times_from_array > 1e-4] # error at beta approx
-    # times_from_array = times_from_array[times_from_array > 1e-3] # error after jit compilation??? but fine without
-    # final conclusion: use 0.015 as a cutoff
-    times_from_array = times_from_array[times_from_array > args.min_time]
-    
-    return times_from_array, single_time_from_file 
+    ### figure out time quantization per sample... later
+    elif args.pred_config['times_from'] == 't_quantized_per_sample':
+        raise NotImplementedError
+        
         
    
 def init_counts_dset(args, 
@@ -76,53 +82,69 @@ def init_counts_dset(args,
         np.random.seed(args.rng_seednum)
         
         only_test = False
-        times_from_array, single_time_from_file = init_time_array(args)
-        emission_alphabet_size = 4 if 'hky85' in args.pred_config['preset_name'] else 20
-    
+        t_per_sample = args.pred_config['times_from'] == 't_per_sample'
+        t_array_for_all_samples = init_time_array(args)
+        subs_only = (args.pred_config['indel_model_type'] is None)
+        
+        if args.pred_config['subst_model_type'].lower() == 'hky85':
+            emission_alphabet_size = 4
+        else:
+            emission_alphabet_size = 20
+            
     
     #############################
     ### eval-specific options   #
     #############################
     elif task in ['eval']:
         only_test = True
-        times_from_array, single_time_from_file = init_time_array(training_argparse)
-        emission_alphabet_size = 4 if 'hky85' in training_argparse.pred_config['preset_name'] else 20
-    
-    
+        t_per_sample = training_argparse.pred_config['times_from'] == 't_per_sample'
+        t_array_for_all_samples = init_time_array(training_argparse)
+        subs_only = (training_argparse.pred_config['indel_model_type'] is None)
+        
+        if training_argparse.pred_config['subst_model_type'].lower() == 'hky85':
+            emission_alphabet_size = 4
+        else:
+            emission_alphabet_size = 20
+            
+            
     #################
     ### LOAD DATA   #
     #################
     # test data
+    assert type(args.test_dset_splits) == list
+
     print('Test dset:')
     for s in args.test_dset_splits:
         print(s)
     print()
-    assert type(args.test_dset_splits) == list
+
     test_dset = CountsDset( data_dir = args.data_dir, 
                             split_prefixes = args.test_dset_splits,
-                            single_time_from_file = single_time_from_file,
-                            times_from_array = times_from_array,
-                            emission_alphabet_size=emission_alphabet_size,
+                            emission_alphabet_size = emission_alphabet_size,
+                            t_per_sample = t_per_sample,
+                            subs_only = subs_only,
                             toss_alignments_longer_than = args.toss_alignments_longer_than,
                             bos_eos_as_match = args.bos_eos_as_match)
 
+
     # training data
     if not only_test:
+        assert type(args.train_dset_splits) == list
+
         print('Training dset:')
         for s in args.train_dset_splits:
             print(s)
         print()
         
-        assert type(args.train_dset_splits) == list
         training_dset = CountsDset( data_dir = args.data_dir, 
                                     split_prefixes = args.train_dset_splits,
-                                    times_from_array = times_from_array,
-                                    emission_alphabet_size=emission_alphabet_size,
-                                    single_time_from_file = single_time_from_file,
+                                    emission_alphabet_size = emission_alphabet_size,
+                                    t_per_sample = t_per_sample,
+                                    subs_only = subs_only,
                                     toss_alignments_longer_than = args.toss_alignments_longer_than,
                                     bos_eos_as_match = args.bos_eos_as_match)
-    
-    
+        
+        
     ############################################
     ### create dataloaders, output dictionary  #
     ############################################
@@ -133,7 +155,8 @@ def init_counts_dset(args,
                          )
     
     out = {'test_dset': test_dset,
-           'test_dl': test_dl}
+           'test_dl': test_dl,
+           't_array_for_all_samples': t_array_for_all_samples}
     
     if not only_test:
         training_dl = DataLoader( training_dset, 

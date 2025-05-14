@@ -7,18 +7,14 @@ Created on Sat Oct  5 14:42:28 2024
 
 modules used for training:
 ==========================
+  GeomLenTransitionLogprobs
+  GeomLenTransitionLogprobsFromFile
+
  'TKF91TransitionLogprobs',
  'TKF91TransitionLogprobsFromFile',
  
  'TKF92TransitionLogprobs',
  'TKF92TransitionLogprobsFromFile',
-
-functions:
-===========
- 'MargTKF91TransitionLogprobs'
- 'MargTKF92TransitionLogprobs'
- 'CondTKF92TransitionLogprobs'
-
 """
 # jumping jax and leaping flax
 from jax.core import Tracer
@@ -28,122 +24,251 @@ import jax.numpy as jnp
 from jax.scipy.special import logsumexp
 import pickle
 
-from models.model_utils.BaseClasses import ModuleBase
-from utils.pairhmm_helpers import (bound_sigmoid,
-                                   safe_log,
-                                   concat_along_new_last_axis,
-                                   logsumexp_with_arr_lst,
-                                   log_one_minus_x,
-                                   log_one_minus_x_with_floor)
-
-
-###############################################################################
-### single sequence and conditional FUNCTIONS   ###############################
-###############################################################################
-def MargTKF91TransitionLogprobs(lam,
-                                mu,
-                                **kwargs):
-    """
-    one (2,2) matrix
-    
-    
-    emit -> emit   |  emit -> end
-    -------------------------------
-    start -> emit  |  start -> end
-    """
-    log_lam = safe_log( lam )
-    log_mu = safe_log(mu)
-    
-    log_lam_div_mu = log_lam - log_mu
-    log_one_minus_lam_div_mu = log_one_minus_x(log_lam_div_mu)
-    
-    log_arr = jnp.array( [[log_lam_div_mu, log_one_minus_lam_div_mu],
-                          [log_lam_div_mu, log_one_minus_lam_div_mu]] )
-    return log_arr
-
-
-def MargTKF92TransitionLogprobs(lam,
-                                mu,
-                                class_probs,
-                                r_ext_prob,
-                                **kwargs):
-    C = class_probs.shape[-1]
-    
-    ### move values to log space
-    log_class_prob = safe_log(class_probs)
-    
-    log_r_ext_prob = safe_log(r_ext_prob)
-    log_one_minus_r = log_one_minus_x(log_r_ext_prob)
-    
-    log_lam = safe_log(lam)
-    log_mu = safe_log(mu)
-    log_lam_div_mu = log_lam - log_mu
-    log_one_minus_lam_div_mu = log_one_minus_x(log_lam_div_mu)
-    
-    
-    ### build cells
-    # cell 1: emit -> emit (C,C)
-    log_cell1 = (log_one_minus_r + log_lam_div_mu)[:, None] + log_class_prob[None, :]
-    
-    # cell 2: emit -> end (C,1)
-    log_cell2 = ( log_one_minus_r + log_one_minus_lam_div_mu )[:,None]
-    log_cell2 = jnp.broadcast_to( log_cell2, (C, C) )
-    
-    # cell 3: start -> emit
-    log_cell3 = ( log_lam_div_mu + log_class_prob )[None,:]
-    log_cell3 = jnp.broadcast_to( log_cell3, (C, C) ) 
-    
-    # cell 4: start -> end
-    log_cell4 = jnp.broadcast_to( log_one_minus_lam_div_mu, (C,C) )
-    
-
-    ### build matrix
-    log_single_seq_tkf92 = jnp.stack( [jnp.stack( [log_cell1, log_cell2], axis=-1 ),
-                                       jnp.stack( [log_cell3, log_cell4], axis=-1 )],
-                                     axis = -2 )
-    
-    i_idx = jnp.arange(C)
-    prev_vals = log_single_seq_tkf92[i_idx, i_idx, 0, 0]
-    new_vals = logsumexp_with_arr_lst([log_r_ext_prob, prev_vals])
-    log_single_seq_tkf92 = log_single_seq_tkf92.at[i_idx, i_idx, 0, 0].set(new_vals)
-    
-    return log_single_seq_tkf92
-
-
-def CondTransitionLogprobs(marg_matrix, joint_matrix):
-    """
-    obtain the conditional log probability by composing the joint with the marginal
-    """
-    cond_matrix = joint_matrix.at[...,[0,1,2], 0].add(-marg_matrix[..., 0,0][None,...,None])
-    cond_matrix = cond_matrix.at[...,[0,1,2], 2].add(-marg_matrix[..., 0,0][None,...,None])
-    cond_matrix = cond_matrix.at[...,3,0].add(-marg_matrix[..., 1,0][None,...])
-    cond_matrix = cond_matrix.at[...,3,2].add(-marg_matrix[..., 1,0][None,...])
-    cond_matrix = cond_matrix.at[...,[0,1,2],3].add(-marg_matrix[..., 0,1][None,...,None])
-    cond_matrix = cond_matrix.at[...,3,3].add(-marg_matrix[..., 1,1][None,...])
-    return cond_matrix
-
-
+from models.BaseClasses import ModuleBase
+from models.simple_site_class_predict.model_functions import (bound_sigmoid,
+                                                              safe_log,
+                                                              concat_along_new_last_axis,
+                                                              logsumexp_with_arr_lst,
+                                                              log_one_minus_x,
+                                                              log_one_minus_x_with_floor,
+                                                              MargTKF91TransitionLogprobs,
+                                                              MargTKF92TransitionLogprobs,
+                                                              CondTransitionLogprobs)
 
 ###############################################################################
-### TKF91   ###################################################################
+### Geometric sequence length (no indels)   ###################################
 ###############################################################################
-class TKF91TransitionLogprobs(ModuleBase):
+class GeomLenTransitionLogprobs(ModuleBase):
     """
-    Used for calculating P(anc, desc, align)
+    Simply assume sequence has geometrically-distributed sequence length
     
-    Returns three matrices in a dictionary: 
-        - "joint": (T, 4, 4)
-        - "marginal": (4, 4)
-        - "conditional": (T, 4, 4)
+    
+    Initialize with
+    ----------------
+    config : dict (but nothing used here)
+            
+    name : str
+        class name, for flax
+    
+    Methods here
+    ------------
+    setup
+    __call__
+    
+    Methods inherited from models.model_utils.BaseClasses.ModuleBase
+    ----------------------------------------------------------------
+    sow_histograms_scalars
+        for tensorboard logging
+    
     """
     config: dict
     name: str
     
     def setup(self):
+        """
+        
+        Flax Module Parameters
+        -----------------------
+        p_emit_logit: ArrayLike (1,)
+            P(emit at alignment column) = 1 - P(end alignment)
+        
+        """
+        # under standard sigmoid activation, initial value is: 0.95257413
+        init_logit = jnp.array([3.0])
+        self.p_emit_logit = self.param('geom length p',
+                                       lambda rng, shape, dtype: init_logit,
+                                       init_logit.shape,
+                                       jnp.float32)
+    
+    def __call__(self,
+                 sow_intermediates: bool,
+                 *args,
+                 **kwargs):
+        """
+        
+        Arguments
+        ----------
+        sow_intermediates : bool
+            switch for tensorboard logging
+          
+        Returns
+        -------
+        out_dict : dict
+            out_dict["joint"]: (2,)
+                score transitions in joint probability calculation
+                
+            out_dict["marginal"]: (2,)
+                score transitions in marginal probability calculation
+            
+            out_dict["conditional"]: (2,)
+                score transitions in conditional probability calculation
+        
+        (output tuple) : Tuple[False, False]
+            placeholder values
+        """
+        p_emit = nn.sigmoid(self.p_emit_logit) #(1,)
+        
+        if sow_intermediates:
+            self.sow_histograms_scalars(mat= p_emit, 
+                                        label=f'{self.name}/geom_prob_emit', 
+                                        which='scalars')
+        
+        out_vec = safe_log( jnp.array( [p_emit, 1-p_emit] ) ) #(2,)
+        
+        out_dict = {'joint': out_vec,
+                    'marginal': out_vec,
+                    'conditional': out_vec}
+        
+        return out_dict, (jnp.array([False]), jnp.array([False]))
+        
+
+class GeomLenTransitionLogprobsFromFile(GeomLenTransitionLogprobs):
+    """
+    same as GeomLenTransitionLogprobs, but load parameter from file
+    
+    
+    Initialize with
+    ----------------
+    config : dict 
+        config["filenames"]["geom_length_params_file"] : str
+            contains probability of emission; could either be a 1-element 
+            numpy array or a flat text file
+            
+    name : str
+        class name, for flax
+    
+    Methods here
+    ------------
+    __call__
+    setup
+    
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        """
+        
+        Flax Module Parameters
+        -----------------------
+        None
+        
+        """
+        file_with_transit_probs = self.config['filenames']['geom_length_params_file']
+        
+        if file_with_transit_probs.endswith('.npy'):
+            with open(file_with_transit_probs,'rb') as f:
+                vec = jnp.load(f) #(2,)
+        p_emit = vec[0]
+        one_minus_p_emit = vec[1]
+        self.out_vec = safe_log( jnp.array( [p_emit, one_minus_p_emit] ) )
+        
+    
+    def __call__(self,
+                 *args,
+                 **kwargs):
+        """
+        
+        Arguments
+        ----------
+        None
+          
+        Returns
+        -------
+        out_dict : dict
+            out_dict["joint"]: (2,)
+                score transitions in joint probability calculation
+                
+            out_dict["marginal"]: (2,)
+                score transitions in marginal probability calculation
+            
+            out_dict["conditional"]: (2,)
+                score transitions in conditional probability calculation
+        
+        (output tuple) : Tuple[False, False]
+            placeholder values
+        """
+        out_dict = {'joint': self.out_vec,
+                    'marginal': self.out_vec,
+                    'conditional': self.out_vec}
+        
+        return out_dict, (jnp.array([False]), jnp.array([False]))
+        
+        
+    
+    
+###############################################################################
+### TKF91   ###################################################################
+###############################################################################
+class TKF91TransitionLogprobs(ModuleBase):
+    """
+    TKF91 model; used for calculating transitions in model of
+        P(anc, desc, align)
+    
+    B = batch size; number of samples
+    T = number of branch lengths; this could be: 
+        > an array of times for all samples (T; marginalize over these later)
+        > an array of time per sample (T=B)
+        > a quantized array of times per sample (T = T', where T' <= T)
+        
+    Initialize with
+    ----------------
+    config : dict (but nothing used here)
+        config["tkf_err"] : float
+            error term for tkf approximation
+            DEFAULT: 1e-4
+            
+        config["init_lambda_offset_logits"] : Tuple, (2,)
+            initial values for logits that determine lambda, offset
+            DEFAULT: -2, -5
+        
+        config["lambda_range"] : Tuple, (2,)
+            range for bound sigmoid activation that determines lamdba
+            DEFAULT: -1e-4, 2
+        
+        config["offset_range"] : Tuple, (2,)
+            range for bound sigmoid activation that determines offset 
+            (which determines mu)
+            DEFAULT: -1e-4, 0.333
+            
+    name : str
+        class name, for flax
+    
+    
+    Methods here
+    ------------
+    setup
+    
+    __call__
+    
+    fill_joint_tkf91
+        fills in joint TKF91 transition matrix
+        
+    logits_to_indel_rates
+        converts lambda/offset logits to lambda/mu values
+    
+    tkf_params
+        from lambda and mu, calculate TKF alpha, beta, gamma
+    
+    return_all_matrices
+        return transition matrices used for joint, marginal, and conditional 
+        log-likelihood transitions
+    
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        """
+        
+        Flax Module Parameters
+        -----------------------
+        tkf_lam_mu_logits: ArrayLike (2,)
+            first value is logit for lambda, second is for offset
+        
+        """
         ### unpack config
         self.tkf_err = self.config.get('tkf_err', 1e-4)
-        self.approx_floor = self.config.get('approx_floor', -1e-4)
-        self.sigmoid_temp = self.config.get('sigmoid_temp', 1)
         
         # initializing lamda, offset
         init_lam_offset_logits = self.config.get( 'init_lambda_offset_logits',
@@ -153,6 +278,10 @@ class TKF91TransitionLogprobs(ModuleBase):
                                                                [1e-4, 2] )
         self.offs_min_val, self.offs_max_val = self.config.get( 'offset_range', 
                                                                 [1e-4, 0.333] )
+        
+        # were options at one point, but I'm fixing the values now
+        self.sigmoid_temp = 1
+        self.approx_floor = 1e-4
         
         
         ### initialize logits for lambda, offset
@@ -167,12 +296,36 @@ class TKF91TransitionLogprobs(ModuleBase):
     def __call__(self,
                  t_array,
                  sow_intermediates: bool):
+        """
+        Arguments
+        ----------
+        t_array : ArrayLike
+            branch lengths, times for marginalizing over
+        
+        sow_intermediates : bool
+            switch for tensorboard logging
+          
+        Returns
+        -------
+        out_dict : dict
+            out_dict["joint"]: (T,4,4)
+                score transitions in joint probability calculation
+                
+            out_dict["marginal"]: (2,2)
+                score transitions in marginal probability calculation
+            
+            out_dict["conditional"]: (T,4,4)
+                score transitions in conditional probability calculation
+        
+        use_approx : Tuple( ArrayLike, ArrayLike ), ( (T,), (T,) )
+            where tkf approximation formulas were used
+            
+        """
         out = self.logits_to_indel_rates(lam_mu_logits = self.tkf_lam_mu_logits,
                                          lam_min_val = self.lam_min_val,
                                          lam_max_val = self.lam_max_val,
                                          offs_min_val = self.offs_min_val,
                                          offs_max_val = self.offs_max_val)
-        # lam, mu, use_approx = out
         lam, mu = out
         del out
         
@@ -215,6 +368,20 @@ class TKF91TransitionLogprobs(ModuleBase):
     
     def fill_joint_tkf91(self, 
                          out_dict):
+        """
+        Arguments
+        ----------
+        out_dict : dict
+            contains values for calculating matrix terms: lambda, mu, 
+            alpha, beta, gamma, 1 - alpha, 1 - beta, 1 - gamma
+            (all in log space)
+          
+        Returns
+        -------
+        out : ArrayLike, (T,4,4)
+            joint loglike of transitions
+        
+        """
         ### entries in the matrix
         log_lam_div_mu = out_dict['log_lam'] - out_dict['log_mu']
         log_one_minus_lam_div_mu = log_one_minus_x(log_lam_div_mu)
@@ -258,14 +425,32 @@ class TKF91TransitionLogprobs(ModuleBase):
                               lam_max_val,
                               offs_min_val,
                               offs_max_val):
-                              # tkf_err):
         """
-        assumes idx=0 is lambda, idx=1 is for calculating mu
+        Arguments
+        ---------
+        lam_mu_logits : ArrayLike, (2,)
+            logits to transform with bound sigmoid activation
         
-        TODO:
-        tkf_err: \epsilon = 1 - (lam/mu), so you're directly setting the 
-          probability of no ancestor sequence... there should be a smarter
-          way to initialize this
+        lam_min_val : float
+            minimum value for bound sigmoid, to get lambda
+        
+        lam_max_val : float
+            maximum value for bound sigmoid, to get lambda
+        
+        offs_min_val : float
+            minimum value for bound sigmoid, to get offset
+        
+        offs_max_val : float
+            maximum value for bound sigmoid, to get offset
+        
+        Returns
+        -------
+        lambda : ArrayLike, ()
+            insert rate
+        
+        mu : ArrayLike, ()
+            delete rate
+        
         """
         # lambda
         lam = bounded_sigmoid(x = lam_mu_logits[0],
@@ -280,9 +465,6 @@ class TKF91TransitionLogprobs(ModuleBase):
                                  temperature = self.sigmoid_temp)
         mu = lam / ( 1 -  offset) 
 
-        # use_approx = (offset == tkf_err)
-        
-        # return (lam, mu, use_approx)
         return (lam, mu)
     
     
@@ -291,9 +473,32 @@ class TKF91TransitionLogprobs(ModuleBase):
                    mu,
                    t_array):
         """
-        lam and mu are single integers
+        Arguments
+        ---------
+        lam : ArrayLike, ()
+            insert rate
         
-        output alpha, beta, gamma, etc. all have shape (T,)
+        mu : ArrayLike, ()
+            delete rate
+        
+        t_array : ArrayLike, (T,)
+            branch lengths 
+            
+        
+        Returns
+        -------
+        out_dict
+            parameters for tkf models
+            
+            out_dict["log_lam"] : ArrayLike, ()
+            out_dict["log_mu"] : ArrayLike, ()
+            out_dict["log_alpha"] : ArrayLike, ()
+            out_dict["log_beta"] : ArrayLike, ()
+            out_dict["log_gamma"] : ArrayLike, ()
+            out_dict["log_one_minus_alpha"] : ArrayLike, ()
+            out_dict["log_one_minus_beta"] : ArrayLike, ()
+            out_dict["log_one_minus_gamma"] : ArrayLike, ()
+            out_dict["use_approx"] : Tuple( (T,), (T,) )
         """
         ######################
         ### initial values   #
@@ -519,20 +724,17 @@ class TKF91TransitionLogprobs(ModuleBase):
 
         out_dict = {**out_dict, **to_add}
         
-        """
-        intermediates in here include:
+        # intermediates in here include:
             
-        log_lam
-        log_mu
-        log_alpha
-        log_beta
-        log_gamma
-        log_one_minus_alpha
-        log_one_minus_beta
-        log_one_minus_gamma
-        use_approx (a tuple of arrays)
-        """
-        
+        # log_lam
+        # log_mu
+        # log_alpha
+        # log_beta
+        # log_gamma
+        # log_one_minus_alpha
+        # log_one_minus_beta
+        # log_one_minus_gamma
+        # use_approx (a tuple of arrays)
         return out_dict
     
     
@@ -540,6 +742,26 @@ class TKF91TransitionLogprobs(ModuleBase):
                             lam,
                             mu,
                             joint_matrix):
+        """
+        T = times
+        
+        
+        Arguments
+        ---------
+        lam : ArrayLike, ()
+        
+        mu : ArrayLike, ()
+        
+        joint_matrix : ArrayLike, (T, 4, 4)
+        
+        
+        Returns
+        -------
+        (returned_dictionary)["joint"]: (T, 4, 4)
+        (returned_dictionary)["marginal"]: (2, 2)
+        (returned_dictionary)["conditional"]: (T, 4, 4)
+        
+        """
         # output is: (4, 4)
         marginal_matrix = MargTKF91TransitionLogprobs(lam=lam,
                                                       mu=mu)
@@ -556,17 +778,65 @@ class TKF91TransitionLogprobs(ModuleBase):
 
 class TKF91TransitionLogprobsFromFile(TKF91TransitionLogprobs):
     """
-    inherit fill_joint_tkf91, tkf_params from TKF91TransitionLogprobs
+    like TKF91TransitionLogprobs, but load values from a file
     
-    Returns three matrices in a dictionary: 
-        - "joint": (T, 4, 4)
-        - "marginal": (4, 4)
-        - "conditional": (T, 4, 4)
+    NOTE: mu is provided directly, no need for offset
+    
+    B = batch size; number of samples
+    T = number of branch lengths; this could be: 
+        > an array of times for all samples (T; marginalize over these later)
+        > an array of time per sample (T=B)
+        > a quantized array of times per sample (T = T', where T' <= T)
+        
+        
+    Initialize with
+    ----------------
+    config : dict (but nothing used here)
+        config["tkf_err"]
+            error term for tkf approximation
+            DEFAULT: 1e-4
+            
+        config["filenames"]["tkf_params_file"]
+            contains values for lambda, mu
+            
+    name : str
+        class name, for flax
+    
+    
+    Methods here
+    ------------
+    setup
+    
+    __call__
+    
+    
+    Inherited from TKF91TransitionLogprobs
+    ---------------------------------------
+    fill_joint_tkf91
+        fills in joint TKF91 transition matrix
+        
+    logits_to_indel_rates
+        converts lambda/offset logits to lambda/mu values
+    
+    tkf_params
+        from lambda and mu, calculate TKF alpha, beta, gamma
+    
+    return_all_matrices
+        return transition matrices used for joint, marginal, and conditional 
+        log-likelihood transitions
+    
     """
     config: dict
     name: str
     
     def setup(self):
+        """
+        
+        Flax Module Parameters
+        -----------------------
+        None
+        
+        """
         ### unpack config
         self.tkf_err = self.config.get('tkf_err', 1e-4)
         in_file = self.config['filenames']['tkf_params_file']
@@ -577,6 +847,28 @@ class TKF91TransitionLogprobsFromFile(TKF91TransitionLogprobs):
     def __call__(self,
                  t_array,
                  sow_intermediates: bool):
+        """
+        Arguments
+        ----------
+        t_array : ArrayLike
+            branch lengths, times for marginalizing over
+        
+        sow_intermediates : bool
+            switch for tensorboard logging
+          
+        Returns
+        -------
+        out_dict : dict
+            out_dict["joint"]: (T,4,4)
+                score transitions in joint probability calculation
+                
+            out_dict["marginal"]: (2,2)
+                score transitions in marginal probability calculation
+            
+            out_dict["conditional"]: (T,4,4)
+                score transitions in conditional probability calculation
+        
+        """
         lam = self.tkf_lam_mu[...,0]
         mu = self.tkf_lam_mu[...,1]
         use_approx = False
@@ -600,24 +892,97 @@ class TKF91TransitionLogprobsFromFile(TKF91TransitionLogprobs):
 ###############################################################################
 class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
     """
-    inherit logits_to_indel_rates, tkf_params from TKF91TransitionLogprobs
+    TKF92 model; used for calculating transitions in model of
+        P(anc, desc, align)
     
-    Returns three matrices in a dictionary: 
-        - "joint": (T, C, C, 4, 4)
-        - "marginal": (C, C, 4, 4)
-        - "conditional": (T, C, C, 4, 4)
+    B = batch size; number of samples
+    C = number of site classes 
+    T = number of branch lengths; this could be: 
+        > an array of times for all samples (T; marginalize over these later)
+        > an array of time per sample (T=B)
+        > a quantized array of times per sample (T = T', where T' <= T)
+        
+    Initialize with
+    ----------------
+    config : dict (but nothing used here)
+        config["tkf_err"] : float
+            error term for tkf approximation
+            DEFAULT: 1e-4
+            
+        config["init_lambda_offset_logits"] : Tuple, (2,)
+            initial values for logits that determine lambda, offset
+            DEFAULT: -2, -5
+        
+        config["lambda_range"] : Tuple, (2,)
+            range for bound sigmoid activation that determines lamdba
+            DEFAULT: -1e-4, 2
+        
+        config["offset_range"] : Tuple, (2,)
+            range for bound sigmoid activation that determines offset 
+            (which determines mu)
+            DEFAULT: -1e-4, 0.333
+            
+        config["init_r_extend_logits"] : Tuple, (C,)
+            initial values for logits that determine lambda, offset
+            DEFAULT: -x/10 for x in range(1,C+1)
+        
+        config["r_range"]
+            range for bound sigmoid activation that determines TKF r
+            DEFAULT: -1e-4, 0.999
+            
+    name : str
+        class name, for flax
+    
+    
+    Methods here
+    ------------
+    setup
+    
+    __call__
+    
+    fill_joint_tkf92
+        fills in joint TKF92 transition matrix
+        
+    return_all_matrices
+        return transition matrices used for joint, marginal, and conditional 
+        log-likelihood transitions
+        
+        
+    Inherited from TKF91TransitionLogprobs
+    ---------------------------------------
+    fill_joint_tkf91
+        fills in joint TKF91 transition matrix
+    
+    logits_to_indel_rates
+        converts lambda/offset logits to lambda/mu values
+    
+    tkf_params
+        from lambda and mu, calculate TKF alpha, beta, gamma
+    
+    
     """
     config: dict
     name: str
     
     def setup(self):
+        """
+        C = number of site classes
+        
+        
+        Flax Module Parameters
+        -----------------------
+        tkf_lam_mu_logits: ArrayLike (2,)
+            first value is logit for lambda, second is for offset
+        
+        r_extend_logits: ArrayLike (C,)
+            logits for TKF fragment extension probability, r
+        
+        """
         ### unpack config
         self.tkf_err = self.config.get('tkf_err', 1e-4)
-        self.approx_floor = self.config.get('approx_floor', -1e-7)
-        self.sigmoid_temp = self.config.get('sigmoid_temp', 1)
         self.num_tkf_site_classes = self.config['num_tkf_site_classes']
         
-        ### initializing lamda, offset
+        # initializing lamda, offset
         init_lam_offset_logits = self.config.get( 'init_lambda_offset_logits', 
                                                   [-2, -5] )
         init_lam_offset_logits = jnp.array(init_lam_offset_logits, dtype=float)
@@ -626,14 +991,17 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         self.offs_min_val, self.offs_max_val = self.config.get( 'offset_range', 
                                                                 [1e-4, 0.333] )
         
-        
-        ### initializing r extension prob
+        # initializing r extension prob
         init_r_extend_logits = self.config.get( 'init_r_extend_logits',
                                                [-x/10 for x in 
                                                 range(1, self.num_tkf_site_classes+1)] )
         init_r_extend_logits = jnp.array(init_r_extend_logits, dtype=float)
         self.r_extend_min_val, self.r_extend_max_val = self.config.get( 'r_range', 
                                                                 [1e-4, 0.999] )
+        
+        # were options at one point, but I'm fixing the values now
+        self.approx_floor = 1e-4
+        self.sigmoid_temp = 1
         
         
         ### initialize logits for lambda, offset
@@ -658,6 +1026,34 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
                  t_array,
                  class_probs,
                  sow_intermediates: bool):
+        """
+        Arguments
+        ----------
+        t_array : ArrayLike, (T,)
+            branch lengths, times for marginalizing over
+        
+        class_probs : ArrayLike, (C,)
+            support for classes i.e. P(ending at class c)
+        
+        sow_intermediates : bool
+            switch for tensorboard logging
+          
+        Returns
+        -------
+        out_dict : dict
+            out_dict["joint"]: (T,C,C,4,4)
+                score transitions in joint probability calculation
+                
+            out_dict["marginal"]: (2,2)
+                score transitions in marginal probability calculation
+            
+            out_dict["conditional"]: (T,C,C,4,4)
+                score transitions in conditional probability calculation
+        
+        use_approx : Tuple( ArrayLike, ArrayLike ), ( (T,), (T,) )
+            where tkf approximation formulas were used
+            
+        """
         # lam, mu are of size () (i.e. just floats)
         out = self.logits_to_indel_rates(lam_mu_logits = self.tkf_lam_mu_logits,
                                          lam_min_val = self.lam_min_val,
@@ -723,7 +1119,27 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
                         r_extend,
                         class_probs):
         """
-        final output shape: (T, C_from, C_to, S_from=4, S_to=4)
+        C = number of site classes
+        S = number of regular transitions, 4 here: M, I, D, START/END
+        
+        Arguments
+        ----------
+        out_dict : dict
+            contains values for calculating matrix terms: lambda, mu, 
+            alpha, beta, gamma, 1 - alpha, 1 - beta, 1 - gamma
+            (all in log space)
+        
+        r_extend : ArrayLike, (C,)
+            fragment extension probabilities
+        
+        class_probs : ArrayLike, (C,)
+            support for the classes i.e. P(end at class c)
+          
+        Returns
+        -------
+        out : ArrayLike, (T, C_from, C_to, S_from=4, S_to=4)
+            joint loglike of transitions
+        
         """
         ### need joint TKF91 for this (which already contains lam/mu terms)
         log_U = self.fill_joint_tkf91(out_dict)
@@ -795,6 +1211,33 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
                             class_probs,
                             r_ext_prob,
                             joint_matrix):
+        """
+        T = times
+        C = number of site classes
+        
+        
+        Arguments
+        ---------
+        lam : ArrayLike, ()
+        
+        mu : ArrayLike, ()
+        
+        r_extend : ArrayLike, (C,)
+            fragment extension probabilities
+        
+        class_probs : ArrayLike, (C,)
+            support for the classes i.e. P(end at class c)
+          
+        joint_matrix : ArrayLike, (T, 4, 4)
+        
+        
+        Returns
+        -------
+        (returned_dictionary)["joint"]: (T, C, C, 4, 4)
+        (returned_dictionary)["marginal"]: ( C, C, 2, 2)
+        (returned_dictionary)["conditional"]: (T, C, C, 4, 4)
+        
+        """
         # output is: (C, C, 4, 4)
         marginal_matrix = MargTKF92TransitionLogprobs(lam=lam,
                                                       mu=mu,
@@ -812,22 +1255,82 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
 
 class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
     """
-    inherit logits_to_indel_rates, tkf_params from TKF91TransitionLogprobs
-    inherit fill_joint_tkf92 from TKF92TransitionLogprobs
+    like TKF91TransitionLogprobs, but load values from a file
     
-    Returns three matrices in a dictionary: 
-        - "joint": (T, C, C, 4, 4)
-        - "marginal": (C, C, 4, 4)
-        - "conditional": (T, C, C, 4, 4)
+    NOTE: mu is provided directly, no need for offset
+    
+    B = batch size; number of samples
+    C = number of site classes
+    T = number of branch lengths; this could be: 
+        > an array of times for all samples (T; marginalize over these later)
+        > an array of time per sample (T=B)
+        > a quantized array of times per sample (T = T', where T' <= T)
+        
+    Initialize with
+    ----------------
+    config : dict (but nothing used here)
+        config["tkf_err"] : float
+            error term for tkf approximation
+            DEFAULT: 1e-4
+            
+        config["tkf_params_file"] : str
+            loads a dictionary with two values:
+                
+                (output object)['lam_mu'] : ArrayLike, (2,)
+                    initial values for logits that determine lambda, offset
+                
+                (output object)['r_extend'] : ArrayLike, (C,)
+                    TKF fragment extension probabilities
+                    
+    name : str
+        class name, for flax
+    
+    
+    Methods here
+    ------------
+    setup
+    
+    __call__
+    
+    
+    Inherited from TKF91TransitionLogprobs
+    ---------------------------------------
+    fill_joint_tkf91
+        fills in joint TKF91 transition matrix
+        
+    logits_to_indel_rates
+        converts lambda/offset logits to lambda/mu values
+    
+    tkf_params
+        from lambda and mu, calculate TKF alpha, beta, gamma
+        
+    
+    Inherited from TKF92TransitionLogprobs
+    ---------------------------------------
+    fill_joint_tkf92
+        fills in joint TKF92 transition matrix
+        
+    return_all_matrices
+        return transition matrices used for joint, marginal, and conditional 
+        log-likelihood transitions
     """
     config: dict
     name: str
     
     def setup(self):
+        """
+        
+        Flax Module Parameters
+        -----------------------
+        None
+        
+        """
         ### unpack config
         self.tkf_err = self.config.get('tkf_err', 1e-4)
-        self.approx_floor = self.config.get('approx_floor', -1e-7)
         in_file = self.config['filenames']['tkf_params_file']
+
+        # set this manually
+        self.approx_floor = -1e-4
         
         with open(in_file,'rb') as f:
             in_dict = pickle.load(f)
@@ -838,6 +1341,34 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
                  t_array,
                  class_probs,
                  sow_intermediates: bool):
+        """
+        Arguments
+        ----------
+        t_array : ArrayLike, (T,)
+            branch lengths, times for marginalizing over
+        
+        class_probs : ArrayLike, (C,)
+            support for classes i.e. P(ending at class c)
+        
+        sow_intermediates : bool
+            switch for tensorboard logging
+          
+        Returns
+        -------
+        out_dict : dict
+            out_dict["joint"]: (T,C,C,4,4)
+                score transitions in joint probability calculation
+                
+            out_dict["marginal"]: (2,2)
+                score transitions in marginal probability calculation
+            
+            out_dict["conditional"]: (T,C,C,4,4)
+                score transitions in conditional probability calculation
+        
+        use_approx : Tuple( ArrayLike, ArrayLike ), ( (T,), (T,) )
+            where tkf approximation formulas were used
+            
+        """
         lam = self.tkf_lam_mu[0]
         mu = self.tkf_lam_mu[1]
         r_extend = self.r_extend

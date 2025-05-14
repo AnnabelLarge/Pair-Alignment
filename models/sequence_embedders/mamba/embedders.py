@@ -24,7 +24,7 @@ import jax.numpy as jnp
 import flax.linen as nn
 
 # custom imports
-from models.model_utils.BaseClasses import SeqEmbBase
+from models.BaseClasses import SeqEmbBase
 
 
 class MambaSeqEmb(SeqEmbBase):

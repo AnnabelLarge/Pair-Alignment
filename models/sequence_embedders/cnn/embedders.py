@@ -17,7 +17,7 @@ import jax
 import jax.numpy as jnp
 
 # custom imports
-from models.model_utils.BaseClasses import SeqEmbBase
+from models.BaseClasses import SeqEmbBase
 
 
 class CNNSeqEmb(SeqEmbBase):

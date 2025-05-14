@@ -5,13 +5,6 @@ Created on Fri Feb 16 21:50:56 2024
 
 @author: annabel_large
 
-
-ABOUT:
-=======
-
-in use:
---------
-1. logsumexp_new: 
 """
 import jax
 from jax import numpy as jnp

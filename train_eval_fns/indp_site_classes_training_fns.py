@@ -120,14 +120,13 @@ def eval_one_batch( batch,
         (loss_NLL, aux_dict), sow_dict = pairhmm_trainstate.apply_fn(variables = pairhmm_trainstate.params,
                                           batch = batch,
                                           t_array = t_array,
-                                          sow_intermediates = finalpred_sow_outputs,
+                                          sow_intermediates = False,
                                           mutable=['histograms','scalars'] if finalpred_sow_outputs else [])
     
     elif return_all_loglikes:
         aux_dict, sow_dict = pairhmm_trainstate.apply_fn(variables = pairhmm_trainstate.params,
                                           batch = batch,
                                           t_array = t_array,
-                                          sow_intermediates = finalpred_sow_outputs,
                                           mutable=['histograms','scalars'] if finalpred_sow_outputs else [],
                                           method=pairhmm_instance.calculate_all_loglikes)
         

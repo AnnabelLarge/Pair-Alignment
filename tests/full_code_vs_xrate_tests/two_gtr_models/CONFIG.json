@@ -1,0 +1,60 @@
+{
+    "training_wkdir": "RESULT_compare_to_xrate",
+    "rng_seednum": 0,
+
+    "data_dir": "tests/full_code_vs_xrate_tests/PF07734",
+    "train_dset_splits": ["PF07734"],
+    "test_dset_splits": ["PF07734"],
+    "toss_alignments_longer_than": null,
+    "bos_eos_as_match": false,
+    "batch_size": 100,
+    "emission_alphabet_size": 20,
+
+    "norm_loss_by": "desc_len",
+
+    "num_epochs": 1,
+    "optimizer_config": {
+        "init_value": 0.005,
+        "peak_value": 0.005,
+        "end_value": 0.005,
+        "warmup_steps": 0,
+        "weight_decay": 0,
+        "every_k_schedule": 1
+    },
+    "early_stop_cond1_atol": 1e-7,
+    "early_stop_cond2_gap": 3,
+    "patience": 20,
+
+    "use_scan_fns": false,
+
+    "interms_for_tboard": {
+        "finalpred_sow_outputs": false,
+        "forward_pass_outputs": false,
+        "gradients": false
+    },
+    "save_per_sample_losses": true,
+    "update_grads": false,
+    "histogram_output_freq": 5000,
+
+    "pred_model_type": "pairhmm_indp_sites",
+    "pred_config": {
+        "load_all": true,
+        "num_mixtures": 2,
+
+        "subst_model_type": "gtr",
+        "rate_mult_activation": "bound_sigmoid",
+        "norm_rate_matrix": false,
+
+        "indel_model_type": null,
+
+        "times_from": "t_per_sample",
+
+        "filenames": {
+            "class_probs": "tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS-PF07734_class_probs.npy",
+            "exch": "tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS-PF07734_exchangeabilities.npy",
+            "equl_dist": "tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS-PF07734_equilibrium_dists.npy",
+            "geom_length_params_file": "tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS-PF07734_length_params.npy",
+            "rate_mult": "tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS-PF07734_rate_multipliers.npy"
+        }
+    }
+}

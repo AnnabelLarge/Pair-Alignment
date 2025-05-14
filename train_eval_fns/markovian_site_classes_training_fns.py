@@ -32,12 +32,13 @@ def train_one_batch(batch,
     finalpred_sow_outputs = interms_for_tboard['finalpred_sow_outputs']
     batch_aligned_mats = batch[1]
     clipped_aligned_mats = batch_aligned_mats[:, :max_align_len, :]
+    new_batch_inputs = [clipped_aligned_mats, batch[2]]
     del batch
     
     def apply_model(pairhmm_params):
         # in training, only evaluate joint loglike i.e. use default __call__
         (loss_NLL, aux_dict), sow_dict = pairhmm_trainstate.apply_fn(variables = pairhmm_params,
-                                          aligned_inputs = clipped_aligned_mats,
+                                          batch = new_batch_inputs,
                                           t_array = t_array,
                                           sow_intermediates = finalpred_sow_outputs,
                                           mutable=['histograms','scalars'] if finalpred_sow_outputs else [])
@@ -98,20 +99,20 @@ def eval_one_batch( batch,
     finalpred_sow_outputs = interms_for_tboard['finalpred_sow_outputs']
     batch_aligned_mats = batch[1]
     clipped_aligned_mats = batch_aligned_mats[:, :max_align_len, :]
+    new_batch_inputs = [clipped_aligned_mats, batch[2]]
     del batch
     
     if not return_all_loglikes:
         (loss_NLL, aux_dict), sow_dict = pairhmm_trainstate.apply_fn(variables = pairhmm_trainstate.params,
-                                          aligned_inputs = clipped_aligned_mats,
+                                          batch = new_batch_inputs,
                                           t_array = t_array,
-                                          sow_intermediates = finalpred_sow_outputs,
+                                          sow_intermediates = False,
                                           mutable=['histograms','scalars'] if finalpred_sow_outputs else [])
     
     elif return_all_loglikes:
         aux_dict, sow_dict = pairhmm_trainstate.apply_fn(variables = pairhmm_trainstate.params,
-                                          aligned_inputs = clipped_aligned_mats,
+                                          batch = new_batch_inputs,
                                           t_array = t_array,
-                                          sow_intermediates = finalpred_sow_outputs,
                                           mutable=['histograms','scalars'] if finalpred_sow_outputs else [],
                                           method=pairhmm_instance.calculate_all_loglikes)
         

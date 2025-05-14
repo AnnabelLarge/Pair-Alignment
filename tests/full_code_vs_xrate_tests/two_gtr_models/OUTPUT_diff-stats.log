@@ -1,0 +1,14 @@
+for precision 2:
+---------------------
+maximum relative difference (rtol): 9.469517622763684e-05
+average relative difference (rtol): 7.640071632857209e-05
+maximum absolute difference (atol): 0.10000000000013642
+average absolute difference (atol): 0.0837804878048573
+
+for precision 3:
+---------------------
+maximum relative difference (rtol): 0.00010361403666685824
+average relative difference (rtol): 8.350610197718666e-05
+maximum absolute difference (atol): 0.09900000000004638
+average absolute difference (atol): 0.07856250000000387
+

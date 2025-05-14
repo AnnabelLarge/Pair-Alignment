@@ -16,7 +16,7 @@ outputs:
 2. sample_insCounts: insert counts
 3. sample_delCounts: deleted char counts
 4. sample_transCounts: transition counts
-5. sample_time: time to use
+5. sample_time: time to use per sample, or None
 6. sample_idx: pair index, to retrieve info from metadata_df
 
 
@@ -49,6 +49,12 @@ if dna:
     metadata about each sample
     lengths do NOT include any sentinel tokens!!!
 
+7. pair-times.tsv: (B,)
+    if desired, branch length per sample
+    plain .tsv file with two columns; no header and no index
+    first column is pairID
+    second column is time
+
 
 """
 import torch
@@ -60,7 +66,72 @@ from jax.tree_util import tree_map
 import pandas as pd
 
 
-def safe_convert(mat):
+
+###############################################################################
+### pytorch collator   ########################################################
+###############################################################################    
+def _default_collate_to_jax_array(mat):
+    """
+    kind of cumbersome, but conversion path is 
+        tuple -> pytorch tensor -> numpy array -> jax array
+    """
+    pytorch_tensor = default_collate(mat)
+    numpy_mat = pytorch_tensor.numpy()
+    return jnp.array( numpy_mat )
+
+def jax_collator(batch):
+    """
+    collator that can handle if time per sample is None
+    
+    B = number of samples in the batch
+    A = alphabet size
+    S = number of transitions; 4 here: M, I, D, START/END
+    
+    Returns
+    -------
+    collated_subCounts : ArrayLike, (B, A, A)
+    collated_insCounts : ArrayLike, (B, A)
+    collated_delCounts : ArrayLike, (B, A)
+    collated_transCounts : ArrayLike, (B, S, S)
+    collated_time : ArrayLike, (B,) OR None
+    collated_idx : ArrayLike, (B,)
+    """
+    # unpack batch
+    out = list( zip(*batch) )
+    sample_subCounts = out[0]
+    sample_insCounts = out[1]
+    sample_delCounts = out[2]
+    sample_transCounts = out[3]
+    sample_time = out[4]
+    sample_idx = out[5]
+    del out
+    
+    # handle most with default_collate
+    collated_sample_subCounts = _default_collate_to_jax_array( sample_subCounts )
+    collated_sample_insCounts = _default_collate_to_jax_array( sample_insCounts )
+    collated_sample_delCounts = _default_collate_to_jax_array( sample_delCounts )
+    collated_sample_transCounts = _default_collate_to_jax_array( sample_transCounts )
+    collated_idx = _default_collate_to_jax_array( sample_idx )
+    
+    # handle time, which could be none
+    if (sample_time[0] is not None):
+        collated_times = _default_collate_to_jax_array( sample_time )
+    
+    elif (sample_time[0] is None):
+        collated_times = None
+        
+    return (collated_sample_subCounts,
+            collated_sample_insCounts,
+            collated_sample_delCounts,
+            collated_sample_transCounts,
+            collated_times,
+            collated_idx)
+
+
+###############################################################################
+### some helpers   ############################################################
+###############################################################################
+def _safe_convert(mat):
     """
     pytorch doesn't support uint16 :(
     """
@@ -78,12 +149,7 @@ def safe_convert(mat):
     else:
         return mat.astype('int32')
     
-
-def jax_collator(batch):
-    return tree_map(jnp.asarray, default_collate(batch))
-
-
-def five_state_to_three_state_transCounts(five_by_five_mat):
+def _five_state_to_three_state_transCounts(five_by_five_mat):
     # turn start into M token; add to appropriate transition
     # to M: 0
     # to I: 1
@@ -98,19 +164,60 @@ def five_state_to_three_state_transCounts(five_by_five_mat):
     return three_by_three_mat
 
 
+###############################################################################
+### Main dataset object   #####################################################
+###############################################################################
 class CountsDset(Dataset):
     def __init__(self, 
                  data_dir: str, 
                  split_prefixes: list, 
-                 bos_eos_as_match: bool,
-                 single_time_from_file: bool,
                  emission_alphabet_size: int,
-                 times_from_array: np.array = None,
-                 toss_alignments_longer_than = None):
+                 t_per_sample: bool,
+                 subs_only: bool,
+                 toss_alignments_longer_than = None,
+                 bos_eos_as_match: bool = False):
+        """
+        Load training data from precomputed counts of events
         
+
+        Arguments
+        ----------
+        data_dir : str
+            Where data is located
+            
+        split_prefixes : List[str]
+            prefixes of the datasets to include
+            
+        emission_alphabet_size : int
+            4 if DNA, 20 if proteins
+            
+        t_per_sample : bool
+            True if you want to read a branch length per sample, False otherwise
+            
+        toss_alignments_longer_than : int, None
+            Max alignment length to keep, if desired
+            DEFAULT VALUE: None
+            
+        bos_eos_as_match : bool, optional
+            True if you want to recode START and END as match states
+            DEFAULT VALUE: False
+
+        Attributes created
+        -------------------
+        self.emit_counts: used to store equilibrium counts of emissions
+        self.num_transitions: 4 if using M,I,D,START/END, 3 if not using sentinel tokens
+        self.subCounts: counts of emissions at match states
+        self.insCounts: counts of emissions at insert states
+        self.delCounts: counts of emissions at delete states
+        self.transCounts: counts of transitions between states
+        self.names_df: dataframe with metadata, for recording later
+        self.times: branch length per sample
+
+        """
         #######################################################################
         ### 1: ITERATE THROUGH SPLIT PREFIXES AND READ FILES   ################
         #######################################################################
+        ### setup
         # always read
         subCounts_list = []
         insCounts_list = []
@@ -118,19 +225,24 @@ class CountsDset(Dataset):
         transCounts_list = []
         metadata_list = []
         
+        # equilibrium distribution counts file
         self.emit_counts = np.zeros(emission_alphabet_size, dtype=int)
             
-        if emission_alphabet_size == 20:
+        if (emission_alphabet_size == 20) and (~subs_only):
             counts_suffix = 'AAcounts'
+        
+        elif (emission_alphabet_size == 20) and (~subs_only):
+            counts_suffix = 'AAcounts_subsOnly'
         
         elif emission_alphabet_size == 4:
             counts_suffix = 'NuclCounts'
         
-        # optionally read
-        if single_time_from_file:
+        # optionally read times
+        if t_per_sample:
             times_lst = []
         
-        # start iter
+        
+        ### start iter
         for split in split_prefixes:
             ##############
             ### metadata #
@@ -179,27 +291,27 @@ class CountsDset(Dataset):
             ######################################
             # subEncoded
             with open(f'./{data_dir}/{split}_subCounts.npy', 'rb') as f:
-                mat = safe_convert( np.load(f)[idxes_to_keep, ...] )
+                mat = _safe_convert( np.load(f)[idxes_to_keep, ...] )
                 subCounts_list.append( mat )
                 del mat
             
             # insCounts
             with open(f'./{data_dir}/{split}_insCounts.npy', 'rb') as f:
-                mat = safe_convert( np.load(f)[idxes_to_keep, ...] )
+                mat = _safe_convert( np.load(f)[idxes_to_keep, ...] )
                 insCounts_list.append( mat )
                 del mat
             
             # delCounts
             with open(f'./{data_dir}/{split}_delCounts.npy', 'rb') as f:
-                mat = safe_convert( np.load(f)[idxes_to_keep, ...] )
+                mat = _safe_convert( np.load(f)[idxes_to_keep, ...] )
                 delCounts_list.append( mat )
                 del mat
             
             # transCounts
             with open(f'./{data_dir}/{split}_transCounts_five_by_five.npy', 'rb') as f:
-                mat = safe_convert( np.load(f)[idxes_to_keep, ...] )
+                mat = _safe_convert( np.load(f)[idxes_to_keep, ...] )
                 if bos_eos_as_match:
-                    mat = five_state_to_three_state_transCounts(mat)
+                    mat = _five_state_to_three_state_transCounts(mat)
                     self.num_transitions = 3
                 elif not bos_eos_as_match:
                     mat = mat[:, :-1, [0,1,2,4]]
@@ -210,7 +322,7 @@ class CountsDset(Dataset):
             # counts (technically uses emissions from tossed samples... 
             #   fix this later)
             with open(f'./{data_dir}/{split}_{counts_suffix}.npy', 'rb') as f:
-                mat = safe_convert( np.load(f) )
+                mat = _safe_convert( np.load(f) )
                 self.emit_counts += mat
                 del mat
                    
@@ -218,7 +330,7 @@ class CountsDset(Dataset):
             #####################
             ### (optional) time #
             #####################
-            if single_time_from_file:
+            if t_per_sample:
                 times = pd.read_csv(f'{data_dir}/{split}_pair-times.tsv', 
                                     sep='\t',
                                     header=None,
@@ -262,26 +374,30 @@ class CountsDset(Dataset):
         #####################
         ### (optional) time #
         #####################
-        if single_time_from_file:
+        if t_per_sample:
             self.times = np.array(times_lst) #(B,)
-            self.func_to_retrieve_time = self.return_single_time_per_samp
             del times_lst
         
-        elif not single_time_from_file:
-            self.times = times_from_array #(T,)
-            self.func_to_retrieve_time = self.return_time_array
+        else:
+            self.times = None
         
         
     def __len__(self):
-        return self.insCounts.shape[0]
+        return self.subCounts.shape[0]
 
     def __getitem__(self, idx):
         sample_subCounts = self.subCounts[idx, ...]
         sample_insCounts = self.insCounts[idx, ...]
         sample_delCounts = self.delCounts[idx, ...]
         sample_transCounts = self.transCounts[idx, ...]
-        sample_time = self.func_to_retrieve_time(idx)
+        
+        if self.times is not None:
+            sample_time = self.times[idx]
+        else:
+            sample_time = None
+        
         sample_idx = idx
+        
         return (sample_subCounts, 
                 sample_insCounts, 
                 sample_delCounts, 
@@ -295,23 +411,4 @@ class CountsDset(Dataset):
     
     def retrieve_equil_dist(self):
         return self.emit_counts / self.emit_counts.sum()
-    
-    
-    ################################
-    ### functions to manage time   #
-    ################################
-    def return_single_time_per_samp(self, idx):
-        # self.times is (B,)
-        return self.times[idx, None] #integer value
-    
-    def return_time_array(self, idx=None):
-        # self.times is (T,)
-        return self.times #array of size (T,)
-    
-    def retrieve_num_timepoints(self, times_from):
-        if times_from == 'geometric':
-            return self.times.shape[0]
-        
-        elif times_from == 't_array_from_file':
-            return 1
     

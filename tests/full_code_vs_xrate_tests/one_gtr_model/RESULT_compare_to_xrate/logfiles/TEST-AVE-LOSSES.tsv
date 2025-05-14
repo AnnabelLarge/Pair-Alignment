@@ -1,0 +1,17 @@
+RUN	RESULT_compare_to_xrate
+joint_ave_loss	742.8957538328458
+joint_ave_loss_seqlen_normed	4.7495586221075206
+joint_perplexity	122.24749192423836
+cond_ave_loss	283.2812692993779
+cond_ave_loss_seqlen_normed	1.8184834605693954
+cond_perplexity	6.517140024633794
+anc_ave_loss	459.6144845334677
+anc_ave_loss_seqlen_normed	2.931075161538126
+anc_perplexity	18.757874406254647
+desc_ave_loss	459.6144845334677
+desc_ave_loss_seqlen_normed	2.9310751615381263
+desc_perplexity	18.757874406254643
+joint_ece	115.5332794363671
+cond_ece	6.162505676901231
+anc_ece	18.747776552874868
+desc_ece	18.747776552874875

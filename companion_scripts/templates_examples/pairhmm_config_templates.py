@@ -33,10 +33,12 @@ def concat_dicts(dict_lst):
 ###############################################################################
 ### Main   ####################################################################
 ###############################################################################
-def make_pairhmm_train_config(load_all: bool):
+def make_pairhmm_train_config(load_all: bool,
+                              times_from: str):
     from models.simple_site_class_predict.create_config import create_config
     
-    pred_config = create_config(load_all = load_all)
+    pred_config = create_config(load_all = load_all,
+                                times_from = times_from)
     
     
     ### rest of the config file
@@ -52,6 +54,7 @@ def make_pairhmm_train_config(load_all: bool):
                        "(if markovian sites) chunk_length": "[INT]",
                        "(if independent sites) bos_eos_as_match": "[BOOL]",
                        "batch_size": "[INT]",
+                       "emission_alphabet_size": "[INT]",
                        
                        "LINEBREAK101":"",
                        
@@ -75,7 +78,6 @@ def make_pairhmm_train_config(load_all: bool):
                        "LINEBREAK103":"",
                        
                        "use_scan_fns": "[BOOL]",
-                       "chunk_length": "[INT]",
                        "toss_alignments_longer_than": "[INT, None]",
                        
                        "LINEBREAK203": "",
@@ -83,6 +85,7 @@ def make_pairhmm_train_config(load_all: bool):
                        "interms_for_tboard": OrderedDict({
                            "finalpred_sow_outputs":"[BOOL]",
                            "forward_pass_outputs":"[BOOL]",
+                           "gradients": "[BOOL]"
                            }),
                        "save_per_sample_losses": "[BOOL]",
                        "update_grads": "[BOOL]",
@@ -98,7 +101,8 @@ def make_pairhmm_train_config(load_all: bool):
 
 
 if __name__ == "__main__":
-    to_write = make_pairhmm_train_config(load_all = True)
+    to_write = make_pairhmm_train_config(load_all = False,
+                                         times_from = 't_per_sample')
     
     with open(f'pairHMM_train_template.json','w') as g:
         g.write(to_write)

@@ -18,7 +18,7 @@ import jax
 import jax.numpy as jnp
 import flax.linen as nn
 
-from models.model_utils.BaseClasses import ModuleBase
+from models.BaseClasses import ModuleBase
 from models.sequence_embedders.mamba.model_parts import (UnidirecMambaModule, 
                                                          BidirecMambaModule)
 

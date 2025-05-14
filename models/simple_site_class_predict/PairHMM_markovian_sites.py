@@ -22,7 +22,7 @@ import jax.numpy as jnp
 from jax.scipy.linalg import expm
 from jax.scipy.special import logsumexp
 
-from models.model_utils.BaseClasses import ModuleBase
+from models.BaseClasses import ModuleBase
 from models.simple_site_class_predict.emission_models import (EqulDistLogprobsFromCounts,
                                                               EqulDistLogprobsPerClass,
                                                               EqulDistLogprobsFromFile,
@@ -152,7 +152,7 @@ class MarkovFrags(ModuleBase):
                                                           name = f'tkf92 indel model')
     
     def __call__(self,
-                 aligned_inputs,
+                 batch,
                  t_array,
                  sow_intermediates: bool):
         """
@@ -167,9 +167,17 @@ class MarkovFrags(ModuleBase):
               2.) 'joint_neg_logP_length_normed': sum down the length,  
                   normalized by desired length (set by self.norm_by)
         """
+        aligned_inputs = batch[0]
+        
+        if t_per_sample is None:
+            t_for_scoring_matrices = t_array
+        elif t_per_sample is not None:
+            raise NotImplementedError("take another look at dimension")
+            t_for_scoring_matrices = batch[1]
+        
         L_align = aligned_inputs.shape[1]
         
-        out = self._get_scoring_matrices( t_array=t_array,
+        out = self._get_scoring_matrices( t_array=t_for_scoring_matrices,
                                           sow_intermediates=sow_intermediates )
         
         logprob_emit_at_indel = out['logprob_emit_at_indel']
@@ -289,8 +297,7 @@ class MarkovFrags(ModuleBase):
     
     def calculate_all_loglikes(self,
                                aligned_inputs,
-                               t_array,
-                               sow_intermediates: bool):
+                               t_array):
         """
         Use this during final eval
         
@@ -324,7 +331,7 @@ class MarkovFrags(ModuleBase):
         
         # get score matrices
         out = self._get_scoring_matrices( t_array=t_array,
-                                          sow_intermediates=sow_intermediates )
+                                          sow_intermediates=False )
         
         logprob_emit_at_indel = out['logprob_emit_at_indel']
         joint_logprob_emit_at_match = out['joint_logprob_emit_at_match']
@@ -572,7 +579,7 @@ class MarkovFrags(ModuleBase):
             joint_neg_logP = -self._marginalize_over_times(logprob_perSamp_perTime = joint_logprob_perSamp_perTime,
                                         exponential_dist_param = self.exponential_dist_param,
                                         t_array = t_array,
-                                        sow_intermediates = sow_intermediates)
+                                        sow_intermediates = False)
         else:
             joint_neg_logP = -joint_logprob_perSamp_perTime[0,:]
         

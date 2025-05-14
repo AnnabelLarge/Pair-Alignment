@@ -15,40 +15,52 @@ def concat_dicts(dict_lst):
     return out
 
 
-def create_config(load_all: bool):
+def create_config(load_all: bool,
+                  times_from: str):
+    ### 
     if load_all:
         filenames_dict = OrderedDict({"times_file": "[STR, None]",
                                       "exch": "[STR, None]",
                                       "class_probs": "[STR, None]",
                                       "rate_mult": "[STR, None]",
                                       "equl_dist": "[STR, None]",
-                                      "tkf_params_file": "[STR, None]"})
+                                      "(if tkf indel model) tkf_params_file": "[STR, None]",
+                                      "(if no indel model) geom_length_params_file": "[STR, None]"})
         to_add = OrderedDict({"filenames": filenames_dict})
     
     elif not load_all:
         to_add = OrderedDict({"exchange_range": "[min=FLOAT, max=FLOAT]",
                               "(if rate_mult_activation==bound_sigmoid) rate_mult_range": "[min=FLOAT, max=FLOAT]",
                               "lambda_range": "[min=FLOAT, max=FLOAT]",
-                              "(if TKF92) offset_range": "[min=FLOAT, max=FLOAT]",
-                              })
+                              "offset_range": "[min=FLOAT, max=FLOAT]",
+                              "(if TKF92) r_range": "[min=FLOAT, max=FLOAT]",
+                              
+                              "init_lambda_offset_logits": "[FLOAT, FLOAT]",
+                              "init_r_extend_logits": "[FLOAT]*num_mixtures",
+                              
+                              "filenames": {"exch": "[STR]",
+                                            "times_file": "[STR, None]"} })
     
-    else:
-        to_add = {}
-    
-    out = OrderedDict( {"preset_name": "[ STR: ('load_all', 'fit_all', 'hky85_load_all', 'hky85_fit_all') ]",
-                         "times_from": "[ STR: ('geometric', 't_array_from_file') ]",
-                         "exponential_dist_param": "[FLOAT]",
-                         'indel_model_type': '[STR="tkf91", "tkf92"]',
-                         "num_emit_site_classes": "[INT]",
-                         "num_tkf_site_classes": "[INT, 1 if indp site classes]",
-                         "tkf_err": "[FLOAT = 1e4]",
-                         "rate_mult_activation": '[STR="bound_sigmoid", "softplus"]',
-                         
+    out = OrderedDict( {"load_all": "[BOOL]",
+                        "num_mixtures": "[INT]",
+                        
                          "LINEBREAK401": "",
+                         'subst_model_type': '[STR="hky85","gtr"]',
+                         "norm_rate_matrix": '[BOOL]',
                          
+                         "LINEBREAK402": "",
+                         'indel_model_type': '[ None, STR=["tkf91", "tkf92"] ]',
+                         "tkf_err": "[FLOAT = 1e4]",
+                         
+                         "LINEBREAK403": "",
+                         "times_from": "[ STR: ('geometric', 't_array_from_file', 't_per_sample') ]",
+                         "(if marginalizing over times) exponential_dist_param": "[FLOAT]",
+                         "(if marginalizing over times) min_time": "[FLOAT]",
                          "(if times_from == 'geometric') t_grid_center": "[FLOAT]",
                          "(if times_from == 'geometric') t_grid_step": "[FLOAT]",
-                         "(if times_from == 'geometric') t_grid_num_steps": "[INT]"
+                         "(if times_from == 'geometric') t_grid_num_steps": "[INT]",
+                         
+                         "LINEBREAK404": ""
                          
                          })
     out = concat_dicts( [out, to_add] )

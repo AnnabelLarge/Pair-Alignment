@@ -14,7 +14,7 @@ from flax import linen as nn
 import jax
 from jax import numpy as jnp
 
-from models.model_utils.BaseClasses import SeqEmbBase
+from models.BaseClasses import SeqEmbBase
 
 
 class Placeholder(SeqEmbBase):

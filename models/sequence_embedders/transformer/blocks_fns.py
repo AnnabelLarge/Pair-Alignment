@@ -41,7 +41,7 @@ from flax.linen import combine_masks, make_causal_mask
 from flax.linen.attention import dot_product_attention_weights
 
 # custom
-from models.model_utils.BaseClasses import ModuleBase
+from models.BaseClasses import ModuleBase
 from models.sequence_embedders.transformer.model_parts import (expand_padding_mask,
                                                       PositionalEncoding,
                                                       RotaryEmbeddingSelfAttention)

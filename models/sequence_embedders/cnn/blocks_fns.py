@@ -32,7 +32,7 @@ import jax
 import jax.numpy as jnp
 
 # custom
-from models.model_utils.BaseClasses import ModuleBase
+from models.BaseClasses import ModuleBase
 
 
 class ConvnetBlock(ModuleBase):

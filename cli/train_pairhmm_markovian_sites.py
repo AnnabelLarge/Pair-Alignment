@@ -90,11 +90,15 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
         if not args.update_grads:
             g.write('DEBUG MODE: DISABLING GRAD UPDATES\n\n')
             
-        g.write(f'PairHMM TKF92 with markovian site classes over emissions\n')
+        g.write( (f'PairHMM TKF92 with markovian site classes over '+
+                  f'emissions, fragment types\n')
+                
         g.write( (f'  - Number of site classes: '+
-                  f'{args.pred_config["num_emit_site_classes"]}\n' )
+                  f'{args.pred_config["num_mixtures"]}\n' )
                 )
         g.write(f'  - Normalizing losses by: {args.norm_loss_by}\n')
+        
+        g.write( f'Times from: args.pred_config["times_from"]\n' )
     
     # extra files to record if you use tkf approximations
     with open(f'{args.out_arrs_dir}/TRAIN_tkf_approx.tsv','w') as g:
@@ -114,6 +118,7 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     training_dl = dataloader_dict['training_dl']
     test_dset = dataloader_dict['test_dset']
     test_dl = dataloader_dict['test_dl']
+    t_array_for_all_samples = dataloader_dict['t_array_for_all_samples']
 
     args.pred_config['training_dset_emit_counts'] = training_dset.emit_counts
     args.pred_config['training_dset_aa_counts'] = training_dset.emit_counts
@@ -135,9 +140,14 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     
     ### determine shapes for init
     # time
-    num_timepoints = test_dset.retrieve_num_timepoints(times_from = args.pred_config['times_from'])
-    dummy_t_array = jnp.empty( (num_timepoints, ) )
+    if t_array_for_all_samples is not None:
+        dummy_t_array_for_all_samples = jnp.empty( (t_array_for_all_samples.shape[0], ) )
+        dummy_t_for_each_sample = None
     
+    else:
+        dummy_t_array_for_all_samples = None
+        dummy_t_for_each_sample = jnp.empty( (B,) )
+        
     
     ### init sizes
     # (B, L, 3)
@@ -154,7 +164,10 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     
     
     ### initialize functions
-    out = init_pairhmm( seq_shapes = largest_aligns, 
+    seq_shapes = [largest_aligns,
+                  dummy_t_for_each_sample]
+    
+    out = init_pairhmm( seq_shapes = seq_shapes, 
                         dummy_t_array = dummy_t_array,
                         tx = tx, 
                         model_init_rngkey = model_init_rngkey,
@@ -171,7 +184,7 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     
     parted_train_fn = partial( train_one_batch,
                                interms_for_tboard = args.interms_for_tboard,
-                               t_array = t_array,
+                               t_array = t_array_for_all_samples,
                                update_grads = args.update_grads
                               )
     
@@ -181,10 +194,11 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     
     
     ### part+jit eval function
+    no_outputs = {k: False for k in args.interms_for_tboard.keys()}
     parted_eval_fn = partial( eval_one_batch,
-                              t_array = t_array,
+                              t_array = t_array_for_all_samples,
                               pairhmm_instance = pairhmm_instance,
-                              interms_for_tboard = {'finalpred_sow_outputs': False},
+                              interms_for_tboard = no_outputs,
                               return_all_loglikes = False )
     
     eval_fn_jitted = jax.jit(parted_eval_fn, 
@@ -532,13 +546,6 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     del epoch_idx
     
     
-    ### un-transform parameters and write to numpy arrays
-    best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
-                                      t_array = t_array,
-                                      out_folder = args.out_arrs_dir,
-                                      method = pairhmm_instance.write_params )
-    
-    
     ### save the argparse object by itself
     args.epoch_idx = best_epoch
     with open(f'{args.model_ckpts_dir}/TRAINING_ARGPARSE.pkl', 'wb') as g:
@@ -548,7 +555,7 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
     ### jit compile new eval function
     t_array = test_dset.return_time_array()
     parted_eval_fn = partial( eval_one_batch,
-                              t_array = t_array,
+                              t_array = t_array_for_all_samples,
                               pairhmm_trainstate = best_pairhmm_trainstate,
                               pairhmm_instance = pairhmm_instance,
                               interms_for_tboard = args.interms_for_tboard,
@@ -574,6 +581,23 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
                                              logfile_dir = args.logfile_dir,
                                              out_arrs_dir = args.out_arrs_dir,
                                              outfile_prefix = f'train-set')
+    
+    
+    ### un-transform parameters and write to numpy arrays
+    # if using one branch length per sample, write arrays with the test set
+    if t_array_for_all_samples is not None:
+        t_for_writing_params = t_array_for_all_samples
+        prefix = ''
+    
+    elif t_array_for_all_samples is None:
+        t_for_writing_params = test_dset.times
+        prefix = 'test-set'
+        
+    best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
+                                      t_array = t_for_writing_params,
+                                      prefix = prefix,
+                                      out_folder = args.out_arrs_dir,
+                                      method = pairhmm_instance.write_params )
     
     
     ###########################################

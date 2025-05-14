@@ -35,7 +35,8 @@ def main():
                     'batched_train',
                     'batched_eval',
                     'label_class_post',
-                    'continue_train'
+                    'continue_train']
+    
     parser.add_argument('-task',
                         type=str,
                         required=True,
@@ -66,7 +67,7 @@ def main():
     
     # ## UNCOMMENT TO RUN IN SPYDER IDE
     # args.task = 'train'
-    # args.configs = 'CONFIG_DRY-RUN_gtr_60-indp-site.json'
+    # args.configs = 'CONFIG_t_arr.json'
     
     
     
@@ -95,14 +96,17 @@ def main():
             from dloaders.init_counts_dset import init_counts_dset as init_dataloaders
 
         elif args.pred_model_type == 'pairhmm_markovian_sites':
+            raise NotImplementedError('not ready')
             from cli.train_pairhmm_markovian_sites import train_pairhmm_markovian_sites as train_fn
             from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
 
         elif args.pred_model_type == 'neural_hmm':
+            raise NotImplementedError('not ready')
             from cli.train_neural_hmm import train_neural_hmm as train_fn
             from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
 
         elif args.pred_model_type == 'feedforward':
+            raise NotImplementedError('not ready')
             from cli.train_feedforward import train_feedforward as train_fn
             from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
 
@@ -135,14 +139,17 @@ def main():
             from dloaders.init_counts_dset import init_counts_dset as init_dataloaders
 
         elif first_args.pred_model_type == 'pairhmm_markovian_sites':
+            raise NotImplementedError('not ready')
             from cli.train_pairhmm_markovian_sites import train_pairhmm_markovian_sites as train_fn
             from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
 
         elif first_args.pred_model_type == 'neural_hmm':
+            raise NotImplementedError('not ready')
             from cli.train_neural_hmm import train_neural_hmm as train_fn
             from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
 
         elif first_args.pred_model_type == 'feedforward':
+            raise NotImplementedError('not ready')
             from cli.train_feedforward import train_feedforward as train_fn
             from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
 
@@ -220,6 +227,7 @@ def main():
             from dloaders.init_counts_dset import init_counts_dset as init_dataloaders
 
         elif pred_model_type == 'pairhmm_markovian_sites':
+            raise NotImplementedError('not ready')
             from cli.eval_pairhmm_markovian_sites import eval_pairhmm_markovian_sites as eval_fn
             from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
 
@@ -265,6 +273,7 @@ def main():
             from dloaders.init_counts_dset import init_counts_dset as init_dataloaders
 
         elif pred_model_type == 'pairhmm_markovian_sites':
+            raise NotImplementedError('not ready')
             from cli.eval_pairhmm_markovian_sites import eval_pairhmm_markovian_sites as eval_fn
             from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
 
