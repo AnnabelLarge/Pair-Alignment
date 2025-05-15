@@ -464,14 +464,14 @@ class IndpSites(ModuleBase):
             mat = np.exp(out['logprob_emit_at_indel'])
             new_key = 'logprob_emit_at_indel'.replace('logprob','prob')
             
-                with open(f'{out_folder}/{prefix}_{new_key}.npy', 'wb') as g:
-                    np.save(g, mat)
-                
-                mat = np.squeeze(mat)
-                np.savetxt( f'{out_folder}/{prefix}_ASCII_{new_key}.tsv', 
-                            mat, 
-                            fmt = '%.4f',
-                            delimiter= '\t' )
+            with open(f'{out_folder}/{prefix}_{new_key}.npy', 'wb') as g:
+                np.save(g, mat)
+            
+            mat = np.squeeze(mat)
+            np.savetxt( f'{out_folder}/{prefix}_ASCII_{new_key}.tsv', 
+                        mat, 
+                        fmt = '%.4f',
+                        delimiter= '\t' )
                 
             del new_key, mat, g
         
@@ -858,14 +858,14 @@ class IndpSitesLoadAll(IndpSites):
             mat = np.exp(out['logprob_emit_at_indel'])
             new_key = 'logprob_emit_at_indel'.replace('logprob','prob')
             
-                with open(f'{out_folder}/{prefix}_{new_key}.npy', 'wb') as g:
-                    np.save(g, mat)
-                
-                mat = np.squeeze(mat)
-                np.savetxt( f'{out_folder}/{prefix}_ASCII_{new_key}.tsv', 
-                            mat, 
-                            fmt = '%.4f',
-                            delimiter= '\t' )
+            with open(f'{out_folder}/{prefix}_{new_key}.npy', 'wb') as g:
+                np.save(g, mat)
+            
+            mat = np.squeeze(mat)
+            np.savetxt( f'{out_folder}/{prefix}_ASCII_{new_key}.tsv', 
+                        mat, 
+                        fmt = '%.4f',
+                        delimiter= '\t' )
                 
             del new_key, mat, g
         
