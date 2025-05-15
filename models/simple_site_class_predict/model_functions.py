@@ -24,6 +24,7 @@ functions:
  'lse_over_match_logprobs_per_class',
  'marginalize_over_times',
  'rate_matrix_from_exch_equl',
+ scale_rate_multipliers,
  'scale_rate_matrix',
  'upper_tri_vector_to_sym_matrix'
 
@@ -218,6 +219,34 @@ def rate_matrix_from_exch_equl(exchangeabilities: ArrayLike,
     
     return subst_rate_mat
 
+def scale_rate_multipliers( unnormed_rate_multipliers: ArrayLike,
+                            log_class_probs: ArrayLike ):
+    """
+    scale rate multipliers such rate sum_c rho_c * P(c) = 1
+    
+    C = number of latent site classes
+    A = alphabet size
+    
+    
+    Arguments
+    ----------
+    log_class_probs : ArrayLike, (C,)
+        log-probability per class
+    
+    unnormed_rate_multipliers : ArrayLike, (C,)
+
+
+    Returns
+    -------
+    ArrayLike, (C, )
+        scaled rate multipliers
+
+    """
+    class_probs = jnp.exp(log_class_probs) #(C,)
+    norm_factor = jnp.multiply(unnormed_rate_multipliers, class_probs) #one float
+    norm_factor = norm_factor.sum()  #one float
+    return unnormed_rate_multipliers / norm_factor #(C,)
+    
 
 def scale_rate_matrix(subst_rate_mat: ArrayLike,
                        rate_multiplier: ArrayLike):

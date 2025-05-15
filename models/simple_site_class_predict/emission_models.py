@@ -38,6 +38,7 @@ from models.simple_site_class_predict.model_functions import (bound_sigmoid,
                                                               bound_sigmoid_inverse,
                                                               safe_log,
                                                               rate_matrix_from_exch_equl,
+                                                              scale_rate_multipliers,
                                                               scale_rate_matrix,
                                                               upper_tri_vector_to_sym_matrix,
                                                               get_cond_logprob_emit_at_match_per_class,
@@ -263,8 +264,9 @@ class GTRRateMat(ModuleBase):
         ###################
         self.num_mixtures = self.config['num_mixtures']
         self.rate_mult_activation = self.config['rate_mult_activation']
-        self.norm_rate_matrix = self.config['norm_rate_matrix']
         exchangeabilities_file = self.config['filenames']['exch']
+        self.norm_rate_mults = self.config['norm_rate_mults']
+        self.norm_rate_matrix = self.config.get('norm_rate_matrix', True)
         
         if self.rate_mult_activation not in ['bound_sigmoid', 'softplus']:
             raise ValueError('Pick either: bound_sigmoid, softplus')
@@ -273,23 +275,25 @@ class GTRRateMat(ModuleBase):
         ########################
         ### RATE MULTIPLIERS   #
         ########################
-        # activation
-        if self.rate_mult_activation == 'bound_sigmoid':
-            out  = self.config.get( 'rate_mult_range',
-                                   (0.01, 10) )
-            self.rate_mult_min_val, self.rate_mult_max_val = out
-            del out
-            
-            self.rate_multiplier_activation = partial(bound_sigmoid,
-                                                      min_val = self.rate_mult_min_val,
-                                                      max_val = self.rate_mult_max_val)
-        
-        elif self.rate_mult_activation == 'softplus':
-            self.rate_multiplier_activation = jax.nn.softplus
-        
-        
-        # initializers
+        ### only really matters if there's more than one mixture; otherwise,
+        ###   rate multiplier is set to one
         if self.num_mixtures > 1:
+            # activation
+            if self.rate_mult_activation == 'bound_sigmoid':
+                out  = self.config.get( 'rate_mult_range',
+                                       (0.01, 10) )
+                self.rate_mult_min_val, self.rate_mult_max_val = out
+                del out
+                
+                self.rate_multiplier_activation = partial(bound_sigmoid,
+                                                          min_val = self.rate_mult_min_val,
+                                                          max_val = self.rate_mult_max_val)
+            
+            elif self.rate_mult_activation == 'softplus':
+                self.rate_multiplier_activation = jax.nn.softplus
+        
+        
+            # initializers
             self.rate_mult_logits = self.param('rate_multipliers',
                                                nn.initializers.normal(),
                                                (self.num_mixtures,),
@@ -322,6 +326,7 @@ class GTRRateMat(ModuleBase):
         
     def __call__(self,
                  logprob_equl,
+                 log_class_probs,
                  sow_intermediates: bool,
                  *args,
                  **kwargs):
@@ -370,12 +375,27 @@ class GTRRateMat(ModuleBase):
                 for i in range(rate_multiplier.shape[0]):
                     val_to_write = rate_multiplier[i]
                     act = self.rate_mult_activation
-                    lab = (f'{self.name}/logit AFTER {act} activation- '+
+                    lab = (f'{self.name}/rate AFTER {act} activation- '+
                            f'rate multiplier for class {i}')
                     self.sow_histograms_scalars(mat= val_to_write, 
                                                 label=lab, 
                                                 which='scalars')
                     del lab
+            
+            ### normalize
+            if self.norm_rate_mults:
+                rate_multiplier = scale_rate_multipliers( unnormed_rate_multipliers = rate_multiplier,
+                                        log_class_probs = log_class_probs )
+            
+                if sow_intermediates:
+                    for i in range(rate_multiplier.shape[0]):
+                        val_to_write = rate_multiplier[i]
+                        lab = (f'{self.name}/rate AFTER normalization- '+
+                               f'rate multiplier for class {i}')
+                        self.sow_histograms_scalars(mat= val_to_write, 
+                                                    label=lab, 
+                                                    which='scalars')
+                        del lab
                     
         else:
             rate_multiplier = jnp.array([1]) #(1,)
@@ -497,7 +517,9 @@ class GTRRateMatFromFile(GTRRateMat):
         ### read config   #
         ###################
         self.num_mixtures = self.config['num_mixtures']
-        self.norm_rate_matrix = self.config['norm_rate_matrix']
+        self.norm_rate_mults = self.config['norm_rate_mults']
+        self.norm_rate_matrix = self.config.get('norm_rate_matrix', True)
+
         exchangeabilities_file = self.config['filenames']['exch']
         rate_multiplier_file = self.config['filenames'].get('rate_mult', None)
         
@@ -528,6 +550,7 @@ class GTRRateMatFromFile(GTRRateMat):
         
     def __call__(self,
                  logprob_equl,
+                 log_class_probs,
                  *args,
                  **kwargs):
         """
@@ -548,9 +571,17 @@ class GTRRateMatFromFile(GTRRateMat):
         # undo log transform on equilibrium
         equl = jnp.exp(logprob_equl) #(C, A)
         
+        # possibly rescale rate multiplier
+        if self.norm_rate_mults:
+            rate_multiplier = scale_rate_multipliers( unnormed_rate_multipliers = self.rate_multiplier,
+                                    log_class_probs = log_class_probs )
+        else:
+            rate_multiplier = self.rate_multiplier
+        
+        # return scaled rate matrix
         rate_mat_times_rho =  self._prepare_rate_matrix(exchangeabilities = self.exchangeabilities,
                                                         equilibrium_distributions = equl,
-                                                        rate_multiplier = self.rate_multiplier,
+                                                        rate_multiplier = rate_multiplier,
                                                         norm = self.norm_rate_matrix) #(C, A, A)
         return rate_mat_times_rho
     
@@ -631,8 +662,9 @@ class HKY85RateMat(GTRRateMat):
         
         """
         self.num_mixtures = self.config['num_mixtures']
-        self.norm_rate_matrix = self.config['norm_rate_matrix']
+        self.norm_rate_mults = self.config['norm_rate_mults']
         self.rate_mult_activation = self.config['rate_mult_activation']
+        self.norm_rate_matrix = self.config.get('norm_rate_matrix',True)
         
         if self.rate_mult_activation not in ['bound_sigmoid', 'softplus']:
             raise ValueError('Pick either: bound_sigmoid, softplus')
@@ -641,23 +673,22 @@ class HKY85RateMat(GTRRateMat):
         ########################
         ### RATE MULTIPLIERS   #
         ########################
-        # activation
-        if self.rate_mult_activation == 'bound_sigmoid':
-            out  = self.config.get( 'rate_mult_range',
-                                   (0.01, 10) )
-            self.rate_mult_min_val, self.rate_mult_max_val = out
-            del out
-            
-            self.rate_multiplier_activation = partial(bound_sigmoid,
-                                                      min_val = self.rate_mult_min_val,
-                                                      max_val = self.rate_mult_max_val)
-        
-        elif self.rate_mult_activation == 'softplus':
-            self.rate_multiplier_activation = jax.nn.softplus
-        
-        
-        # initializers
         if self.num_mixtures > 1:
+            # activation
+            if self.rate_mult_activation == 'bound_sigmoid':
+                out  = self.config.get( 'rate_mult_range',
+                                       (0.01, 10) )
+                self.rate_mult_min_val, self.rate_mult_max_val = out
+                del out
+                
+                self.rate_multiplier_activation = partial(bound_sigmoid,
+                                                          min_val = self.rate_mult_min_val,
+                                                          max_val = self.rate_mult_max_val)
+            
+            elif self.rate_mult_activation == 'softplus':
+                self.rate_multiplier_activation = jax.nn.softplus
+        
+            # initializers
             self.rate_mult_logits = self.param('rate_multipliers',
                                                nn.initializers.normal(),
                                                (self.num_mixtures,),
@@ -732,7 +763,8 @@ class HKY85RateMatFromFile(GTRRateMatFromFile):
     
     def setup(self):
         self.num_mixtures = self.config['num_mixtures']
-        self.norm_rate_matrix = self.config['norm_rate_matrix']
+        self.norm_rate_mults = self.config['norm_rate_mults']
+        self.norm_rate_matrix = self.config.get('norm_rate_matrix',True)
         rate_multiplier_file = self.config['filenames']['rate_mult']
         exchangeabilities_file = self.config['filenames']['exch']
         

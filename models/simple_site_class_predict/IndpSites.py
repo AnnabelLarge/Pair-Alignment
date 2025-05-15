@@ -35,6 +35,7 @@ from models.simple_site_class_predict.transition_models import (TKF91TransitionL
                                                                 GeomLenTransitionLogprobsFromFile)
 from models.simple_site_class_predict.model_functions import (bound_sigmoid,
                                                               safe_log,
+                                                              scale_rate_multipliers,
                                                               get_cond_logprob_emit_at_match_per_class,
                                                               get_joint_logprob_emit_at_match_per_class,
                                                               lse_over_match_logprobs_per_class,
@@ -320,6 +321,7 @@ class IndpSites(ModuleBase):
         ####################################################
         # rho * Q
         scaled_rate_mat_per_class = self.rate_matrix_module(logprob_equl = log_equl_dist_per_class,
+                                                            log_class_probs = log_class_probs,
                                                             sow_intermediates = sow_intermediates) #(C, A, A)
         
         # conditional probability
@@ -525,8 +527,13 @@ class IndpSites(ModuleBase):
                     
             ### rate multipliers
             if 'rate_mult_logits' in dir(self.rate_matrix_module):
+                norm_rate_mults = self.rate_matrix_module.norm_rate_mults
                 rate_mult_logits = self.rate_matrix_module.rate_mult_logits
                 rate_mult = self.rate_matrix_module.rate_multiplier_activation( rate_mult_logits )
+                
+                if norm_rate_mults:
+                    rate_mult = scale_rate_multipliers( unnormed_rate_multipliers = rate_mult,
+                                            log_class_probs = jnp.log(class_probs) )
     
                 with open(f'{out_folder}/PARAMS_rate_multipliers.txt','w') as g:
                     [g.write(f'{elem.item()}\n') for elem in rate_mult]

@@ -67,7 +67,7 @@ def main():
     
     # ## UNCOMMENT TO RUN IN SPYDER IDE
     # args.task = 'train'
-    # args.configs = 'CONFIG_t_arr.json'
+    # args.configs = 'CONFIG_GTRMix.json'
     
     
     

@@ -98,7 +98,6 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
             g.write('DEBUG MODE: DISABLING GRAD UPDATES\n\n')
         
         g.write( f'PairHMM with independent site classes over emissions\n' )
-        g.write( f'Preset: args.pred_config["preset_name"]\n')
         g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )
         g.write( f'Indel model: {args.pred_config.get("indel_model_type","None")}\n' )
         g.write( (f'  - Number of site classes for emissions: '+
@@ -113,7 +112,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
                      f'(same as desc length, because we remove gap '+
                      f'positions) \n' )
         
-        g.write( f'Times from: args.pred_config["times_from"]\n' )
+        g.write( f'Times from: {args.pred_config["times_from"]}\n' )
     
     
     # extra files to record if you use tkf approximations
@@ -613,7 +612,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
         t_arr = test_dset.times
         
         pt_id = 0
-        for i in range(0, t_arr.shape[0], args.batch_size):
+        for i in tqdm( range(0, t_arr.shape[0], args.batch_size) ):
             batch_t = t_arr[i : (i + args.batch_size)]
             batch_prefix = f'test-set_pt{pt_id}'
             best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,

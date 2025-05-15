@@ -98,7 +98,7 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
                 )
         g.write(f'  - Normalizing losses by: {args.norm_loss_by}\n')
         
-        g.write( f'Times from: args.pred_config["times_from"]\n' )
+        g.write( f'Times from: {args.pred_config["times_from"]}\n' )
     
     # extra files to record if you use tkf approximations
     with open(f'{args.out_arrs_dir}/TRAIN_tkf_approx.tsv','w') as g:
@@ -614,7 +614,7 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
         t_arr = test_dset.times
         
         pt_id = 0
-        for i in range(0, t_arr.shape[0], args.batch_size):
+        for i in tqdm( range(0, t_arr.shape[0], args.batch_size) ):
             batch_t = t_arr[i : (i + args.batch_size)]
             batch_prefix = f'test-set_pt{pt_id}'
             best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
