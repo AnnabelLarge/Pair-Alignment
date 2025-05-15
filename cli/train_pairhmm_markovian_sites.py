@@ -583,23 +583,6 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
                                              outfile_prefix = f'train-set')
     
     
-    ### un-transform parameters and write to numpy arrays
-    # if using one branch length per sample, write arrays with the test set
-    if t_array_for_all_samples is not None:
-        t_for_writing_params = t_array_for_all_samples
-        prefix = ''
-    
-    elif t_array_for_all_samples is None:
-        t_for_writing_params = test_dset.times
-        prefix = 'test-set'
-        
-    best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
-                                      t_array = t_for_writing_params,
-                                      prefix = prefix,
-                                      out_folder = args.out_arrs_dir,
-                                      method = pairhmm_instance.write_params )
-    
-    
     ###########################################
     ### loop through test dataloader and      #
     ### score with best params                #
@@ -617,6 +600,32 @@ def train_pairhmm_markovian_sites(args, dataloader_dict: dict):
                                             out_arrs_dir = args.out_arrs_dir,
                                             outfile_prefix = f'test-set')
     
+    
+    ### un-transform parameters and write to numpy arrays
+    # if using one branch length per sample, write arrays with the test set
+    if t_array_for_all_samples is not None:
+        best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
+                                          t_array = t_array_for_all_samples,
+                                          prefix = '',
+                                          out_folder = args.out_arrs_dir,
+                                          method = pairhmm_instance.write_params )
+        
+    elif t_array_for_all_samples is None:
+        t_arr = test_dset.times
+        
+        pt_id = 0
+        for i in range(0, t_arr.shape[0], args.batch_size):
+            batch_t = t_arr[i : (i + args.batch_size)]
+            batch_prefix = f'test-set_pt{pt_id}'
+            best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
+                                              t_array = batch_t,
+                                              prefix = batch_prefix,
+                                              out_folder = args.out_arrs_dir,
+                                              write_time_static_objs = (pt_id==0),
+                                              method = pairhmm_instance.write_params )
+            
+            pt_id += 1
+            
     
     ###########################################
     ### update the logfile with final losses  #

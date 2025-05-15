@@ -383,62 +383,32 @@ class IndpSites(ModuleBase):
     def write_params(self,
                      t_array,
                      out_folder: str,
-                     prefix: str):
-        with open(f'{out_folder}/activations_and_times_used.tsv','w') as g:
-            act = self.rate_matrix_module.rate_mult_activation
-            g.write(f'activation for rate multipliers: {act}\n')
-            g.write(f'activation for exchangeabiliites: bound_sigmoid\n')
-            
-            if self.times_from in ['geometric','t_array_from_file']:
-                g.write(f't_array for all samples; possible marginalized over them\n')
-                g.write(f'{t_array}')
-                g.write('\n')
-            
-            elif self.times_from == 't_per_sample':
-                g.write(f'one branch length for each sample; times used for {prefix}:\n')
-                g.write(f'{t_array}')
-                g.write('\n')
+                     prefix: str,
+                     write_time_static_objs: bool):
         
+        if write_time_static_objs:
+            with open(f'{out_folder}/activations_and_times_used.tsv','w') as g:
+                act = self.rate_matrix_module.rate_mult_activation
+                g.write(f'activation for rate multipliers: {act}\n')
+                g.write(f'activation for exchangeabiliites: bound_sigmoid\n')
+                
+                if self.times_from in ['geometric','t_array_from_file']:
+                    g.write(f't_array for all samples; possible marginalized over them\n')
+                    g.write(f'{t_array}')
+                    g.write('\n')
+                
+                elif self.times_from == 't_per_sample':
+                    g.write(f'one branch length for each sample; times used for {prefix}:\n')
+                    g.write(f'{t_array}')
+                    g.write('\n')
         
         #####################
-        ### full matrices   #
+        ### Full matrices   #
         #####################
         out = self._get_scoring_matrices(t_array=t_array,
                                         sow_intermediates=False)
         
-        ### equilibrium distribution does not depend on time
-        mat = np.exp(out['logprob_emit_at_indel'])
-        new_key = 'logprob_emit_at_indel'.replace('logprob','prob')
-        
-        with open(f'{out_folder}/{prefix}_{new_key}.npy', 'wb') as g:
-            np.save(g, mat)
-        
-        mat = np.squeeze(mat)
-        np.savetxt( f'{out_folder}/{prefix}_ASCII_{new_key}.tsv', 
-                    mat, 
-                    fmt = '%.4f',
-                    delimiter= '\t' )
-        
-        del new_key, mat, g
-        
-        
-        ### these depend on times
-        # emission from match sites
-        # rho * Q
-        scaled_rate_mat_per_class = out['rate_mat_times_rho']
-        for c in range(scaled_rate_mat_per_class.shape[0]):
-            mat_to_save = scaled_rate_mat_per_class[c,...]
-            
-            with open(f'{out_folder}/{prefix}_class-{c}_rate_matrix_times_rho.npy', 'wb') as g:
-                np.save(g, mat_to_save)
-            
-            np.savetxt( f'{out_folder}/{prefix}_ASCII_class-{c}_rate_matrix_times_rho.tsv', 
-                        np.array(mat_to_save), 
-                        fmt = '%.4f',
-                        delimiter= '\t' )
-            
-            del mat_to_save, g
-        
+        ### these depend on time
         # rho * Q * t
         to_expm = np.squeeze( out['to_expm'] )
         
@@ -469,8 +439,8 @@ class IndpSites(ModuleBase):
         
         del new_key, mat, g
     
-        ### transition matrices, or P(emit) for geometrically distributed model
-        if self.indel_model_type in ['TKF91', 'TKF92']:
+        # transition matrices, or P(emit) for geometrically distributed model
+        if self.indel_model_type is not None:
             for key, mat in out['all_transit_matrices'].items():
                 mat = np.exp(mat)
                 new_key = key.replace('logprob','prob')
@@ -488,116 +458,151 @@ class IndpSites(ModuleBase):
                 del key, mat, g
         
         
-        ###################################################
-        ### extract emissions paramaters, intermediates   # 
-        ### needed for final scoring matrices             #
-        ###################################################
-        ### site class probs
-        if 'class_logits' in dir(self.site_class_probability_module):
-            class_probs = nn.softmax(self.site_class_probability_module.class_logits)
-            with open(f'{out_folder}/PARAMS_class_probs.txt','w') as g:
-                [g.write(f'{elem.item()}\n') for elem in class_probs]
-        
-        
-        ### exchangeabilities
-        if 'exchangeabilities_logits_vec' in dir(self.rate_matrix_module):
-            exch_logits = self.rate_matrix_module.exchangeabilities_logits_vec
-            exchangeabilities = self.rate_matrix_module.exchange_activation( exch_logits )
+        ### these do not; only write once 
+        if write_time_static_objs:
+            # equilibrium distribution 
+            mat = np.exp(out['logprob_emit_at_indel'])
+            new_key = 'logprob_emit_at_indel'.replace('logprob','prob')
             
-            if self.subst_model_type.lower() == 'gtr':
-                np.savetxt( f'{out_folder}/PARAMS_exchangeabilities.tsv', 
-                            np.array(exchangeabilities), 
+                with open(f'{out_folder}/{prefix}_{new_key}.npy', 'wb') as g:
+                    np.save(g, mat)
+                
+                mat = np.squeeze(mat)
+                np.savetxt( f'{out_folder}/{prefix}_ASCII_{new_key}.tsv', 
+                            mat, 
                             fmt = '%.4f',
                             delimiter= '\t' )
                 
-                with open(f'{out_folder}/PARAMS_exchangeabilities.npy','wb') as g:
-                    jnp.save(g, exchangeabilities)
-            
-            elif self.subst_model_type.lower() == 'hky85':
-                with open(f'{out_folder}/PARAMS_HKY85RateMat_model.txt','w') as g:
-                    g.write(f'transition rate, ti: {exchangeabilities[1]}')
-                    g.write(f'transition rate, tv: {exchangeabilities[0]}')
+            del new_key, mat, g
+        
+            # emission from match sites
+            # rho * Q
+            scaled_rate_mat_per_class = out['rate_mat_times_rho']
+            for c in range(scaled_rate_mat_per_class.shape[0]):
+                mat_to_save = scaled_rate_mat_per_class[c,...]
                 
+                with open(f'{out_folder}/{prefix}_class-{c}_rate_matrix_times_rho.npy', 'wb') as g:
+                    np.save(g, mat_to_save)
                 
-        ### rate multipliers
-        if 'rate_mult_logits' in dir(self.rate_matrix_module):
-            rate_mult_logits = self.rate_matrix_module.rate_mult_logits
-            rate_mult = self.rate_matrix_module.rate_multiplier_activation( rate_mult_logits )
-
-            with open(f'{out_folder}/PARAMS_rate_multipliers.txt','w') as g:
-                [g.write(f'{elem.item()}\n') for elem in rate_mult]
+                np.savetxt( f'{out_folder}/{prefix}_ASCII_class-{c}_rate_matrix_times_rho.tsv', 
+                            np.array(mat_to_save), 
+                            fmt = '%.4f',
+                            delimiter= '\t' )
+                
+                del mat_to_save, g
         
         
-        ### equilibrium distribution
-        if 'logits' in dir(self.indel_prob_module):
-            equl_logits = self.indel_prob_module.logits
-            equl_dist = nn.softmax( equl_logits, axis=1 )
+            ###################################################
+            ### extract emissions paramaters, intermediates   # 
+            ### needed for final scoring matrices             #
+            ###################################################
+            ### site class probs
+            if 'class_logits' in dir(self.site_class_probability_module):
+                class_probs = nn.softmax(self.site_class_probability_module.class_logits)
+                with open(f'{out_folder}/PARAMS_class_probs.txt','w') as g:
+                    [g.write(f'{elem.item()}\n') for elem in class_probs]
             
-            np.savetxt( f'{out_folder}/PARAMS_equilibriums.tsv', 
-                        np.array(equl_dist), 
-                        fmt = '%.4f',
-                        delimiter= '\t' )
             
-            with open(f'{out_folder}/PARAMS-ARR_equilibriums.npy','wb') as g:
-                jnp.save(g, equl_dist)
+            ### exchangeabilities
+            if 'exchangeabilities_logits_vec' in dir(self.rate_matrix_module):
+                exch_logits = self.rate_matrix_module.exchangeabilities_logits_vec
+                exchangeabilities = self.rate_matrix_module.exchange_activation( exch_logits )
                 
+                if self.subst_model_type.lower() == 'gtr':
+                    np.savetxt( f'{out_folder}/PARAMS_exchangeabilities.tsv', 
+                                np.array(exchangeabilities), 
+                                fmt = '%.4f',
+                                delimiter= '\t' )
+                    
+                    with open(f'{out_folder}/PARAMS_exchangeabilities.npy','wb') as g:
+                        jnp.save(g, exchangeabilities)
                 
-                
-        ####################################################
-        ### extract transition paramaters, intermediates   # 
-        ### needed for final scoring matrices              #
-        ####################################################
-        ### under geometric length (only scoring subs)
-        if self.indel_model_type is None:
-            geom_p_emit = nn.sigmoid(self.transitions_module.p_emit_logit) #(1,)
-            with open(f'{out_folder}/PARAMS_geom_seq_len.txt','w') as g:
-                g.write(f'P(emit): {geom_p_emit}\n')
-                g.write(f'1-P(emit): {1 - geom_p_emit}\n')
-                
-        ### for TKF models
-        elif self.indel_model_type.lower() in ['tkf91', 'tkf92']:
-            # always write lambda and mu
-            # also record if you used beta approximation or not
-            if 'tkf_lam_mu_logits' in dir(self.transitions_module):
-                lam_min_val = self.transitions_module.lam_min_val
-                lam_max_val = self.transitions_module.lam_max_val
-                offs_min_val = self.transitions_module.offs_min_val
-                offs_max_val = self.transitions_module.offs_max_val
-                lam_mu_logits = self.transitions_module.tkf_lam_mu_logits
+                elif self.subst_model_type.lower() == 'hky85':
+                    with open(f'{out_folder}/PARAMS_HKY85RateMat_model.txt','w') as g:
+                        g.write(f'transition rate, ti: {exchangeabilities[1]}')
+                        g.write(f'transition rate, tv: {exchangeabilities[0]}')
+                    
+                    
+            ### rate multipliers
+            if 'rate_mult_logits' in dir(self.rate_matrix_module):
+                rate_mult_logits = self.rate_matrix_module.rate_mult_logits
+                rate_mult = self.rate_matrix_module.rate_multiplier_activation( rate_mult_logits )
+    
+                with open(f'{out_folder}/PARAMS_rate_multipliers.txt','w') as g:
+                    [g.write(f'{elem.item()}\n') for elem in rate_mult]
             
-                lam = bounded_sigmoid(x = lam_mu_logits[0],
-                                      min_val = lam_min_val,
-                                      max_val = lam_max_val)
-                
-                offset = bounded_sigmoid(x = lam_mu_logits[1],
-                                         min_val = offs_min_val,
-                                         max_val = offs_max_val)
-                mu = lam / ( 1 -  offset) 
-                
-                with open(f'{out_folder}/PARAMS_{self.indel_model_type}_indel_params.txt','w') as g:
-                    g.write(f'insert rate, lambda: {lam}\n')
-                    g.write(f'deletion rate, mu: {mu}\n')
-                    g.write(f'used tkf beta approximation? {out["used_tkf_beta_approx"]}\n\n')
             
-            # if tkf92, have extra r_ext param
-            if self.indel_model_type == 'tkf92':
-                r_extend_min_val = self.transitions_module.r_extend_min_val
-                r_extend_max_val = self.transitions_module.r_extend_max_val
-                r_extend_logits = self.transitions_module.r_extend_logits
+            ### equilibrium distribution
+            if 'logits' in dir(self.indel_prob_module):
+                equl_logits = self.indel_prob_module.logits
+                equl_dist = nn.softmax( equl_logits, axis=1 )
                 
-                r_extend = bounded_sigmoid(x = r_extend_logits,
-                                           min_val = r_extend_min_val,
-                                           max_val = r_extend_max_val)
+                np.savetxt( f'{out_folder}/PARAMS_equilibriums.tsv', 
+                            np.array(equl_dist), 
+                            fmt = '%.4f',
+                            delimiter= '\t' )
                 
-                mean_indel_lengths = 1 / (1 - r_extend)
+                with open(f'{out_folder}/PARAMS-ARR_equilibriums.npy','wb') as g:
+                    jnp.save(g, equl_dist)
+                    
+                    
+                    
+            ####################################################
+            ### extract transition paramaters, intermediates   # 
+            ### needed for final scoring matrices              #
+            ### (also does not depend on time)                 #
+            ####################################################
+            ### under geometric length (only scoring subs)
+            if self.indel_model_type is None:
+                geom_p_emit = nn.sigmoid(self.transitions_module.p_emit_logit) #(1,)
+                with open(f'{out_folder}/PARAMS_geom_seq_len.txt','w') as g:
+                    g.write(f'P(emit): {geom_p_emit}\n')
+                    g.write(f'1-P(emit): {1 - geom_p_emit}\n')
+                    
+            ### for TKF models
+            elif self.indel_model_type.lower() in ['tkf91', 'tkf92']:
+                # always write lambda and mu
+                # also record if you used beta approximation or not
+                if 'tkf_lam_mu_logits' in dir(self.transitions_module):
+                    lam_min_val = self.transitions_module.lam_min_val
+                    lam_max_val = self.transitions_module.lam_max_val
+                    offs_min_val = self.transitions_module.offs_min_val
+                    offs_max_val = self.transitions_module.offs_max_val
+                    lam_mu_logits = self.transitions_module.tkf_lam_mu_logits
                 
-                with open(f'{out_folder}/PARAMS_{self.indel_model_type}_indel_params.txt','a') as g:
-                    g.write(f'extension prob, r: ')
-                    [g.write(f'{elem}\t') for elem in r_extend]
-                    g.write('\n')
-                    g.write(f'mean indel length: ')
-                    [g.write(f'{elem}\t') for elem in mean_indel_lengths]
-                    g.write('\n')
+                    lam = bounded_sigmoid(x = lam_mu_logits[0],
+                                          min_val = lam_min_val,
+                                          max_val = lam_max_val)
+                    
+                    offset = bounded_sigmoid(x = lam_mu_logits[1],
+                                             min_val = offs_min_val,
+                                             max_val = offs_max_val)
+                    mu = lam / ( 1 -  offset) 
+                    
+                    with open(f'{out_folder}/PARAMS_{self.indel_model_type}_indel_params.txt','w') as g:
+                        g.write(f'insert rate, lambda: {lam}\n')
+                        g.write(f'deletion rate, mu: {mu}\n')
+                        g.write(f'used tkf beta approximation? {out["used_tkf_beta_approx"]}\n\n')
+                
+                # if tkf92, have extra r_ext param
+                if self.indel_model_type == 'tkf92':
+                    r_extend_min_val = self.transitions_module.r_extend_min_val
+                    r_extend_max_val = self.transitions_module.r_extend_max_val
+                    r_extend_logits = self.transitions_module.r_extend_logits
+                    
+                    r_extend = bounded_sigmoid(x = r_extend_logits,
+                                               min_val = r_extend_min_val,
+                                               max_val = r_extend_max_val)
+                    
+                    mean_indel_lengths = 1 / (1 - r_extend)
+                    
+                    with open(f'{out_folder}/PARAMS_{self.indel_model_type}_indel_params.txt','a') as g:
+                        g.write(f'extension prob, r: ')
+                        [g.write(f'{elem}\t') for elem in r_extend]
+                        g.write('\n')
+                        g.write(f'mean indel length: ')
+                        [g.write(f'{elem}\t') for elem in mean_indel_lengths]
+                        g.write('\n')
         
     def return_bound_sigmoid_limits(self):
         ### rate_matrix_module
@@ -617,7 +622,7 @@ class IndpSites(ModuleBase):
                          }
         
         ### transitions_module
-        if self.indel_model_type in ['TKF91', 'TKF92']:
+        if self.indel_model_type is not None:
             # insert rate lambda
             lam_min_val = self.transitions_module.lam_min_val
             lam_max_val = self.transitions_module.lam_max_val
@@ -631,7 +636,7 @@ class IndpSites(ModuleBase):
                       "offs_min_val": offs_min_val,
                       "offs_max_val": offs_max_val}
             
-            if self.indel_model_type == 'TKF92':
+            if self.indel_model_type.lower() == 'tkf92':
                 # r extension probability
                 r_extend_min_val = self.transitions_module.r_extend_min_val
                 r_extend_max_val = self.transitions_module.r_extend_max_val
@@ -770,59 +775,34 @@ class IndpSitesLoadAll(IndpSites):
                                                      name = f'tkf92 indel model')
     
     def write_params(self,
-                     t_array: ArrayLike,
+                     t_array,
                      out_folder: str,
-                     prefix: str):
-        with open(f'{out_folder}/activations_and_times_used.tsv','w') as g:
-            if self.times_from in ['geometric','t_array_from_file']:
-                g.write(f't_array for all samples; possible marginalized over them\n')
-                g.write(f'{t_array}')
-                g.write('\n')
-            
-            elif self.times_from == 't_per_sample':
-                g.write(f'one branch length for each sample; times used for {prefix}:\n')
-                g.write(f'{t_array}')
-                g.write('\n')
+                     prefix: str,
+                     write_time_static_objs: bool):
         
+        if write_time_static_objs:
+            with open(f'{out_folder}/activations_and_times_used.tsv','w') as g:
+                act = self.rate_matrix_module.rate_mult_activation
+                g.write(f'activation for rate multipliers: {act}\n')
+                g.write(f'activation for exchangeabiliites: bound_sigmoid\n')
+                
+                if self.times_from in ['geometric','t_array_from_file']:
+                    g.write(f't_array for all samples; possible marginalized over them\n')
+                    g.write(f'{t_array}')
+                    g.write('\n')
+                
+                elif self.times_from == 't_per_sample':
+                    g.write(f'one branch length for each sample; times used for {prefix}:\n')
+                    g.write(f'{t_array}')
+                    g.write('\n')
         
         #####################
-        ### full matrices   #
+        ### Full matrices   #
         #####################
         out = self._get_scoring_matrices(t_array=t_array,
                                         sow_intermediates=False)
         
-        
-        ### equilibrium distribution does not depend on time, so always write this
-        mat = np.exp(out['logprob_emit_at_indel'])
-        new_key = 'logprob_emit_at_indel'.replace('logprob','prob')
-        
-        with open(f'{out_folder}/{prefix}_{new_key}.npy', 'wb') as g:
-            np.save(g, mat)
-        
-        mat = np.squeeze(mat)
-        np.savetxt( f'{out_folder}/{prefix}_ASCII_{new_key}.tsv', 
-                    mat, 
-                    fmt = '%.4f',
-                    delimiter= '\t' )
-        
-        del new_key, mat, g
-        
-        ### emission from match sites
-        # rho * Q
-        scaled_rate_mat_per_class = out['rate_mat_times_rho']
-        for c in range(scaled_rate_mat_per_class.shape[0]):
-            mat_to_save = scaled_rate_mat_per_class[c,...]
-            
-            with open(f'{out_folder}/{prefix}_class-{c}_rate_matrix_times_rho.npy', 'wb') as g:
-                np.save(g, mat_to_save)
-            
-            np.savetxt( f'{out_folder}/{prefix}_ASCII_class-{c}_rate_matrix_times_rho.tsv', 
-                        np.array(mat_to_save), 
-                        fmt = '%.4f',
-                        delimiter= '\t' )
-            
-            del mat_to_save, g
-        
+        ### these depend on time
         # rho * Q * t
         to_expm = np.squeeze( out['to_expm'] )
         
@@ -853,8 +833,8 @@ class IndpSitesLoadAll(IndpSites):
         
         del new_key, mat, g
     
-        ### transition matrices
-        if self.indel_model_type in ['TKF91', 'TKF92']:
+        # transition matrices, or P(emit) for geometrically distributed model
+        if self.indel_model_type is not None:
             for key, mat in out['all_transit_matrices'].items():
                 mat = np.exp(mat)
                 new_key = key.replace('logprob','prob')
@@ -870,5 +850,37 @@ class IndpSitesLoadAll(IndpSites):
                                 delimiter= '\t' )
                 
                 del key, mat, g
+        
+        
+        ### these do not; only write once 
+        if write_time_static_objs:
+            # equilibrium distribution 
+            mat = np.exp(out['logprob_emit_at_indel'])
+            new_key = 'logprob_emit_at_indel'.replace('logprob','prob')
+            
+                with open(f'{out_folder}/{prefix}_{new_key}.npy', 'wb') as g:
+                    np.save(g, mat)
                 
+                mat = np.squeeze(mat)
+                np.savetxt( f'{out_folder}/{prefix}_ASCII_{new_key}.tsv', 
+                            mat, 
+                            fmt = '%.4f',
+                            delimiter= '\t' )
                 
+            del new_key, mat, g
+        
+            # emission from match sites
+            # rho * Q
+            scaled_rate_mat_per_class = out['rate_mat_times_rho']
+            for c in range(scaled_rate_mat_per_class.shape[0]):
+                mat_to_save = scaled_rate_mat_per_class[c,...]
+                
+                with open(f'{out_folder}/{prefix}_class-{c}_rate_matrix_times_rho.npy', 'wb') as g:
+                    np.save(g, mat_to_save)
+                
+                np.savetxt( f'{out_folder}/{prefix}_ASCII_class-{c}_rate_matrix_times_rho.tsv', 
+                            np.array(mat_to_save), 
+                            fmt = '%.4f',
+                            delimiter= '\t' )
+                
+                del mat_to_save, g
