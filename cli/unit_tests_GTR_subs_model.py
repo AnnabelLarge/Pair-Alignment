@@ -18,9 +18,7 @@ ordered_test_files = [
     'tests/substitution_model_tests/test_score_alignment.py',
     'tests/substitution_model_tests/test_alignment_loglike_GTR.py',
     'tests/substitution_model_tests/test_alignment_loglike_GTR_mixture.py',
-    'tests/substitution_model_tests/test_GTR_mixture_degeneracy.py',
-    'tests/substitution_model_tests/test_xrate_GTR_likelihood_match.py',
-    'tests/substitution_model_tests/test_xrate_GTR_mixture_likelihood_match.py'
+    'tests/substitution_model_tests/test_GTR_mixture_degeneracy.py'
 ]
 
 def load_and_run_tests(test_files):

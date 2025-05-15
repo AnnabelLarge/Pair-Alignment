@@ -50,9 +50,9 @@
         "times_from": "t_per_sample",
 
         "filenames": {
-            "exch": "tests/full_code_vs_xrate_tests/one_gtr_model/PF07734_xrate_fitted_exchanges_unnormed_Q.npy",
-            "equl_dist": "tests/full_code_vs_xrate_tests/one_gtr_model/PF07734_xrate_fitted_equlibriums.npy",
-            "geom_length_params_file": "tests/full_code_vs_xrate_tests/one_gtr_model/PF07734_xrate_geom_length_param.npy"
+            "exch": "tests/full_code_vs_xrate_tests/one_gtr_model/PARAM-MAT_one-GTR_PF07734_xrate_fitted_exchanges_unnormed_Q.npy",
+            "equl_dist": "tests/full_code_vs_xrate_tests/one_gtr_model/PARAM-MAT_one-GTR_PF07734_xrate_fitted_equlibriums.npy",
+            "geom_length_params_file": "tests/full_code_vs_xrate_tests/one_gtr_model/PARAM-MAT_one-GTR_PF07734_geom_length_params.npy"
         }
     }
 }

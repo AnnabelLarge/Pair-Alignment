@@ -76,7 +76,7 @@ class TestMainCodeGTR(unittest.TestCase):
         true_bits_str = pd.read_csv( (f'tests/'+
                                       'full_code_vs_xrate_tests/'+
                                       'one_gtr_model/'+
-                                      'xrate_score_per_sample_parsed.tsv'),
+                                      'xrate_loglikes.tsv'),
                                     sep='\t', 
                                     dtype=str)  # read everything as string
         precision = true_bits_str['inside_loglike_bits'].str.split('.', n=1).str[1].str.rstrip('0').str.len().fillna(0).astype(int)

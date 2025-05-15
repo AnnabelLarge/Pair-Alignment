@@ -11,7 +11,7 @@ Times from: args.pred_config["times_from"]
 2: model init
 
 3: main training loop
-New best test loss at epoch 0: 4.846488389905633
+New best test loss at epoch 0: 4.846493521106213
 
 4: post-training actions
 Regular stopping after 0 full epochs:

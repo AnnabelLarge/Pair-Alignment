@@ -358,7 +358,7 @@ class GTRRateMat(ModuleBase):
                     val_to_write = self.rate_mult_logits[i]
                     act = self.rate_mult_activation
                     lab = (f'{self.name}/logit BEFORE {act} activation- '+
-                           'rate multiplier for class {i}')
+                           f'rate multiplier for class {i}')
                     self.sow_histograms_scalars(mat= val_to_write, 
                                                 label=lab, 
                                                 which='scalars')
@@ -371,7 +371,7 @@ class GTRRateMat(ModuleBase):
                     val_to_write = rate_multiplier[i]
                     act = self.rate_mult_activation
                     lab = (f'{self.name}/logit AFTER {act} activation- '+
-                           'rate multiplier for class {i}')
+                           f'rate multiplier for class {i}')
                     self.sow_histograms_scalars(mat= val_to_write, 
                                                 label=lab, 
                                                 which='scalars')
@@ -834,7 +834,7 @@ class EqulDistLogprobsPerClass(ModuleBase):
         log_equl_dist = nn.log_softmax( self.logits, axis = 1 ) #(C, A)
 
         if sow_intermediates:
-            for c in range(out.shape[0]):
+            for c in range(log_equl_dist.shape[0]):
                 lab = f'{self.name}/equilibrium dist for class {c}'
                 self.sow_histograms_scalars(mat= jnp.exp(log_equl_dist[c,...]), 
                                             label=lab, 

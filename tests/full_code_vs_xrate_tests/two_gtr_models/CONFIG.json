@@ -50,11 +50,11 @@
         "times_from": "t_per_sample",
 
         "filenames": {
-            "class_probs": "tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS-PF07734_class_probs.npy",
-            "exch": "tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS-PF07734_exchangeabilities.npy",
-            "equl_dist": "tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS-PF07734_equilibrium_dists.npy",
-            "geom_length_params_file": "tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS-PF07734_length_params.npy",
-            "rate_mult": "tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS-PF07734_rate_multipliers.npy"
+            "class_probs": "tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS_GTR-mix_PF07734_class_probs.npy",
+            "exch": "tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS_GTR-mix_PF07734_exchangeabilities.npy",
+            "equl_dist": "tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS_GTR-mix_PF07734_equilibrium_dists.npy",
+            "geom_length_params_file": "tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS_GTR-mix_PF07734_length_params.npy",
+            "rate_mult": "tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS_GTR-mix_PF07734_rate_multipliers.npy"
         }
     }
 }

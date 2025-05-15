@@ -6,11 +6,11 @@ rate_mult_activation	bound_sigmoid
 norm_rate_matrix	False
 indel_model_type	None
 times_from	t_per_sample
-filenames/class_probs	tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS-PF07734_class_probs.npy
-filenames/exch	tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS-PF07734_exchangeabilities.npy
-filenames/equl_dist	tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS-PF07734_equilibrium_dists.npy
-filenames/geom_length_params_file	tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS-PF07734_length_params.npy
-filenames/rate_mult	tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS-PF07734_rate_multipliers.npy
+filenames/class_probs	tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS_GTR-mix_PF07734_class_probs.npy
+filenames/exch	tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS_GTR-mix_PF07734_exchangeabilities.npy
+filenames/equl_dist	tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS_GTR-mix_PF07734_equilibrium_dists.npy
+filenames/geom_length_params_file	tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS_GTR-mix_PF07734_length_params.npy
+filenames/rate_mult	tests/full_code_vs_xrate_tests/two_gtr_models/PARAM-MATS_GTR-mix_PF07734_rate_multipliers.npy
 tkf_err 	0.0001
 num_tkf_site_classes	1
 seq_padding_idx	0
