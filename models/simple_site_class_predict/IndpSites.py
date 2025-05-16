@@ -220,6 +220,7 @@ class IndpSites(ModuleBase):
         
         elif not self.norm_loss_by_length:
             loss = jnp.mean( aux_dict['joint_neg_logP'] )
+            
         return loss, aux_dict
     
     
