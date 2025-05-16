@@ -67,8 +67,7 @@ def main():
     
     # ## UNCOMMENT TO RUN IN SPYDER IDE
     # args.task = 'train'
-    # args.configs = 'CONFIG_GTRMix.json'
-    
+    # args.configs = 'CONFIG_summed_loss.json'
     
     
     ### helper function to open a single config file and extract additional arguments

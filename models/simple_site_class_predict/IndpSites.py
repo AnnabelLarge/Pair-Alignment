@@ -122,6 +122,7 @@ class IndpSites(ModuleBase):
         self.subst_model_type = self.config['subst_model_type']
         self.indel_model_type = self.config['indel_model_type']
         self.times_from = self.config['times_from']
+        self.norm_loss_by_length = self.config['norm_loss_by_length']
         num_mixtures = self.config['num_mixtures']
         
         # optional
@@ -212,9 +213,13 @@ class IndpSites(ModuleBase):
                                            exponential_dist_param = self.exponential_dist_param,
                                            norm_loss_by = self.norm_loss_by )
         
-        loss = jnp.mean( aux_dict['joint_neg_logP_length_normed'] )
         aux_dict['used_tkf_beta_approx'] = scoring_matrices_dict['used_tkf_beta_approx']
+
+        if self.norm_loss_by_length:
+            loss = jnp.mean( aux_dict['joint_neg_logP_length_normed'] )
         
+        elif not self.norm_loss_by_length:
+            loss = jnp.mean( aux_dict['joint_neg_logP'] )
         return loss, aux_dict
     
     
