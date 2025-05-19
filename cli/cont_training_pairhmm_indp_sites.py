@@ -410,7 +410,12 @@ def cont_training_pairhmm_indp_sites(args,
         for batch_idx, batch in enumerate(test_dl):
             eval_metrics = eval_fn_jitted(batch=batch, 
                                           pairhmm_trainstate=pairhmm_trainstate)
-            batch_loss = jnp.mean( eval_metrics['joint_neg_logP_length_normed'] )
+            
+            if args.pred_config['norm_loss_by_length']:
+                batch_loss = jnp.mean( eval_metrics['joint_neg_logP_length_normed'] )
+            
+            elif not args.pred_config['norm_loss_by_length']:
+                batch_loss = jnp.mean( eval_metrics['joint_neg_logP'] )
             
             ### add to total loss for this epoch; weight by number of
             ###   samples/valid tokens in this batch
