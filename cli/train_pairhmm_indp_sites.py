@@ -137,7 +137,6 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     
     # add equilibrium counts under two different labels
     args.pred_config['training_dset_emit_counts'] = training_dset.emit_counts
-    args.pred_config['training_dset_aa_counts'] = training_dset.emit_counts
     
     
     
@@ -591,7 +590,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
 
 
     ###########################################
-    ### loop through training dataloader and  #
+    ### loop through test dataloader and      #
     ### score with best params                #
     ###########################################
     with open(args.logfile_name,'a') as g:

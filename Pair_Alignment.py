@@ -66,8 +66,11 @@ def main():
     
     
     # ## UNCOMMENT TO RUN IN SPYDER IDE
-    # args.task = 'train'
-    # args.configs = 'CONFIG_summed_loss.json'
+    # args.task = 'continue_train'
+    # args.new_training_wkdir = 'CONT-TRAINING'
+    # args.prev_model_ckpts_dir = 'RESULTS/model_ckpts'
+    # args.tstate_to_load = 'FINAL_PRED_BEST.pkl'
+    # args.configs = 'CONFIG.json'
     
     
     ### helper function to open a single config file and extract additional arguments

@@ -104,10 +104,9 @@ def cont_training_pairhmm_indp_sites(args,
     
     # create a new logfile
     with open(args.logfile_name,'w') as g:
-        g.write( f'CONTINUING TRAINING AT EPOCH: {epoch_ended-1}\n\n' )
+        g.write( f'CONTINUING TRAINING AT EPOCH: {epoch_ended}\n\n' )
         
         g.write( f'PairHMM with independent site classes over emissions\n' )
-        g.write( f'Preset: args.pred_config["preset_name"]\n')
         g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )
         g.write( f'Indel model: {args.pred_config.get("indel_model_type","None")}\n' )
         g.write( (f'  - Number of site classes for emissions: '+
@@ -144,7 +143,6 @@ def cont_training_pairhmm_indp_sites(args,
     test_dl = dataloader_dict['test_dl']
     t_array_for_all_samples = dataloader_dict['t_array_for_all_samples']
     args.pred_config['training_dset_emit_counts'] = training_dset.emit_counts
-    args.pred_config['training_dset_aa_counts'] = training_dset.emit_counts
     
     
     
@@ -190,7 +188,7 @@ def cont_training_pairhmm_indp_sites(args,
     
     ### initialize functions
     out = init_pairhmm( seq_shapes = fake_batch, 
-                        dummy_t_array = dummy_t_array,
+                        dummy_t_array = dummy_t_array_for_all_samples,
                         tx = tx, 
                         model_init_rngkey = model_init_rngkey,
                         pred_config = args.pred_config,
@@ -251,6 +249,7 @@ def cont_training_pairhmm_indp_sites(args,
         g.write(f'3: main training loop\n')
     
     # when to save/what to save
+    # does reset best epoch conditions...
     best_epoch = -1
     best_test_loss = 999999
     best_pairhmm_trainstate = pairhmm_trainstate
@@ -601,7 +600,6 @@ def cont_training_pairhmm_indp_sites(args,
     
     
     ### jit-compile new eval function
-    t_array = test_dset.return_time_array()
     parted_eval_fn = partial( eval_one_batch,
                               t_array = t_array_for_all_samples,
                               pairhmm_trainstate = best_pairhmm_trainstate,
@@ -628,24 +626,8 @@ def cont_training_pairhmm_indp_sites(args,
                                              outfile_prefix = f'train-set')
 
 
-    ### un-transform parameters and write to numpy arrays
-    # if using one branch length per sample, write arrays with the test set
-    if t_array_for_all_samples is not None:
-        t_for_writing_params = t_array_for_all_samples
-        prefix = ''
-    
-    elif t_array_for_all_samples is None:
-        t_for_writing_params = test_dset.times
-        prefix = 'test-set'
-        
-    best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
-                                      t_array = t_for_writing_params,
-                                      prefix = prefix,
-                                      out_folder = args.out_arrs_dir,
-                                      method = pairhmm_instance.write_params )
-
     ###########################################
-    ### loop through training dataloader and  #
+    ### loop through test dataloader and      #
     ### score with best params                #
     ###########################################
     with open(args.logfile_name,'a') as g:
@@ -658,7 +640,32 @@ def cont_training_pairhmm_indp_sites(args,
                                             logfile_dir = args.logfile_dir,
                                             out_arrs_dir = args.out_arrs_dir,
                                             outfile_prefix = f'test-set')
-    
+
+
+    ### un-transform parameters and write to numpy arrays
+    # if using one branch length per sample, write arrays with the test set
+    if t_array_for_all_samples is not None:
+        best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
+                                          t_array = t_array_for_all_samples,
+                                          prefix = '',
+                                          out_folder = args.out_arrs_dir,
+                                          method = pairhmm_instance.write_params )
+        
+    elif t_array_for_all_samples is None:
+        t_arr = test_dset.times
+        
+        pt_id = 0
+        for i in tqdm( range(0, t_arr.shape[0], args.batch_size) ):
+            batch_t = t_arr[i : (i + args.batch_size)]
+            batch_prefix = f'test-set_pt{pt_id}'
+            best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
+                                              t_array = batch_t,
+                                              prefix = batch_prefix,
+                                              out_folder = args.out_arrs_dir,
+                                              write_time_static_objs = (pt_id==0),
+                                              method = pairhmm_instance.write_params )
+            
+            pt_id += 1
     
     ###########################################
     ### update the logfile with final losses  #
