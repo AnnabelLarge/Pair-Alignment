@@ -740,6 +740,7 @@ class IndpSitesLoadAll(IndpSites):
         self.subst_model_type = self.config['subst_model_type']
         self.indel_model_type = self.config['indel_model_type']
         self.times_from = self.config['times_from']
+        self.norm_loss_by_length = self.config['norm_loss_by_length']
         num_mixtures = self.config['num_mixtures']
         
         # optional
@@ -795,7 +796,11 @@ class IndpSitesLoadAll(IndpSites):
         
         if write_time_static_objs:
             with open(f'{out_folder}/activations_and_times_used.tsv','w') as g:
-                act = self.rate_matrix_module.rate_mult_activation
+                if 'rate_mult_activation' in dir(self.rate_matrix_module):
+                    act = self.rate_matrix_module.rate_mult_activation
+                else:
+                    act = 'N/A'
+                
                 g.write(f'activation for rate multipliers: {act}\n')
                 g.write(f'activation for exchangeabiliites: bound_sigmoid\n')
                 

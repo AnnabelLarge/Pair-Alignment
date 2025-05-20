@@ -47,6 +47,8 @@ def create_config(load_all: bool,
                          "LINEBREAK401": "",
                          'subst_model_type': '[STR="hky85","gtr"]',
                          "norm_rate_matrix": '[BOOL]',
+                         "norm_rate_mults": '[BOOL]',
+                         "random_init_exchanges": '[BOOL]',
                          
                          "LINEBREAK402": "",
                          'indel_model_type': '[ None, STR=["tkf91", "tkf92"] ]',

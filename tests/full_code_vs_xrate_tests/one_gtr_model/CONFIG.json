@@ -40,10 +40,13 @@
     "pred_config": {
         "load_all": true,
         "num_mixtures": 1,
+        "norm_loss_by_length": false,
 
         "subst_model_type": "gtr",
         "rate_mult_activation": "bound_sigmoid",
         "norm_rate_matrix": false,
+        "norm_rate_mults": false,
+        "random_init_exchanges": false,
 
         "indel_model_type": null,
 

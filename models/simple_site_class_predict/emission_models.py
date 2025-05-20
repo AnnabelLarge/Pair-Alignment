@@ -205,24 +205,33 @@ class GTRRateMat(ModuleBase):
         config['num_mixtures'] :  int
             number of emission site classes
         
-        config['rate_mult_activation'] : {'bound_sigmoid', 'softplus'}
+        config['random_init_exchanges'] : bool
+            whether or not to initialize exchangeabilities from random; if 
+            not random, initialize with LG08 values
+            
+        config['norm_rate_mults'] : bool
+            flag to normalize rate multipliers times class probabilites to 1
+        
+        config['norm_rate_matrix'] : bool
+            flag to normalize rate matrix to t = one substitution
+        
+        config['rate_mult_activation'] : {'bound_sigmoid', 'softplus'}, optional
             what activation to use for logits of rate multiplier
+            Default is 'bound_sigmoid'
         
         config['rate_mult_range'] : List[float, float], optional
             only needed when using bound_sigmoid for rate multipliers
             first value is min, second value is max
             Default is (0.01, 10)
-        
-        config['exchange_range'] : List[float, float]
+            
+        config['exchange_range'] : List[float, float], optional
             exchangeabilities undergo bound_sigmoid transformation, this
             specifies the min and max
             Default is (1e-4, 12)
         
-        config['filenames']['exch'] : str
-            name of the exchangeabilities to intiialize with
-        
-        config['norm_rate_matrix'] : bool
-            flag to normalize rate matrix to t = one substitution
+        config['filenames']['exch'] : str, optional
+            name of the exchangeabilities to intiialize with, if desired
+            Default is None
         
     name : str
         class name, for flax
@@ -262,12 +271,22 @@ class GTRRateMat(ModuleBase):
         ###################
         ### read config   #
         ###################
+        # required
         self.num_mixtures = self.config['num_mixtures']
-        self.rate_mult_activation = self.config['rate_mult_activation']
-        exchangeabilities_file = self.config['filenames']['exch']
+        self.random_init_exchanges = self.config['random_init_exchanges']
         self.norm_rate_mults = self.config['norm_rate_mults']
-        self.norm_rate_matrix = self.config.get('norm_rate_matrix', True)
+        self.norm_rate_matrix = self.config['norm_rate_matrix']
         
+        # have defaults; may or may not be used
+        self.rate_mult_activation = self.config.get('rate_mult_activation', 'bound_sigmoid')
+        self.rate_mult_min_val, self.rate_mult_max_val  = self.config.get( 'rate_mult_range', (0.01, 10) )
+        self.exchange_min_val, self.exchange_max_val  = self.config.get( 'exchange_range', (1e-4, 12) )
+        exchangeabilities_file = self.config['filenames'].get('exch', None)
+        
+        # provided upon model initialization; guaranteed to be here
+        emission_alphabet_size = self.config['emission_alphabet_size']
+        
+        # validate
         if self.rate_mult_activation not in ['bound_sigmoid', 'softplus']:
             raise ValueError('Pick either: bound_sigmoid, softplus')
             
@@ -280,11 +299,6 @@ class GTRRateMat(ModuleBase):
         if self.num_mixtures > 1:
             # activation
             if self.rate_mult_activation == 'bound_sigmoid':
-                out  = self.config.get( 'rate_mult_range',
-                                       (0.01, 10) )
-                self.rate_mult_min_val, self.rate_mult_max_val = out
-                del out
-                
                 self.rate_multiplier_activation = partial(bound_sigmoid,
                                                           min_val = self.rate_mult_min_val,
                                                           max_val = self.rate_mult_max_val)
@@ -303,26 +317,45 @@ class GTRRateMat(ModuleBase):
         #####################################
         ### EXCHANGEABILITIES AS A VECTOR   #
         #####################################
-        # get initial values from file
-        with open(exchangeabilities_file,'rb') as f:
-            vec = jnp.load(f)
-            
-        out  = self.config.get( 'exchange_range',
-                               (1e-4, 12) )
-        self.exchange_min_val, self.exchange_max_val = out
-        del out
-        
-        transformed_vec = bound_sigmoid_inverse(vec, 
-                                                  min_val = self.exchange_min_val,
-                                                  max_val = self.exchange_max_val)
-        
+        ### activation is bound sigmoid; setup the activation function with 
+        ###   min/max values
         self.exchange_activation = partial(bound_sigmoid,
                                            min_val = self.exchange_min_val,
                                            max_val = self.exchange_max_val)
         
-        self.exchangeabilities_logits_vec = self.param("exchangeabilities", 
-                                                       lambda rng, shape: transformed_vec,
-                                                       transformed_vec.shape ) #(n,)
+        
+        ### initialization
+        # init from file
+        if not self.random_init_exchanges:
+            err = f'Need a file to load exchangeabilities from!'
+            assert exchangeabilities_file is not None, err
+            del err
+            
+            with open(exchangeabilities_file,'rb') as f:
+                vec = jnp.load(f)
+        
+            transformed_vec = bound_sigmoid_inverse(vec, 
+                                                      min_val = self.exchange_min_val,
+                                                      max_val = self.exchange_max_val)
+        
+        
+            self.exchangeabilities_logits_vec = self.param("exchangeabilities", 
+                                                           lambda rng, shape: transformed_vec,
+                                                           transformed_vec.shape ) #(n,)
+        
+        # init from random
+        elif self.random_init_exchanges:
+            if emission_alphabet_size == 20:
+                num_exchange = 190
+            
+            elif emission_alphabet_size == 4:
+                num_exchange = 6
+            
+            self.exchangeabilities_logits_vec = self.param("exchangeabilities", 
+                                                           nn.initializers.normal(),
+                                                           (num_exchange,),
+                                                           jnp.float32 ) #(n,)
+        
         
     def __call__(self,
                  logprob_equl,
@@ -409,8 +442,12 @@ class GTRRateMat(ModuleBase):
             self.sow_histograms_scalars(mat= self.exchangeabilities_logits_vec, 
                                         label= 'logit BEFORE bound_sigmoid activation- exchangeabilities', 
                                         which='scalars')
-        
-        upper_triag_values = self.exchange_activation( self.exchangeabilities_logits_vec ) #(A, A)
+            
+        # number of upper triangular values for alphabet size A is (A * A-1)/2
+        # upper_triag_values will have this many values
+        # for proteins: upper_triag_values is (190,)
+        # for DNA: upper_triag_values is (6,)
+        upper_triag_values = self.exchange_activation( self.exchangeabilities_logits_vec ) 
     
         if sow_intermediates:
             self.sow_histograms_scalars(mat = upper_triag_values, 
@@ -517,8 +554,9 @@ class GTRRateMatFromFile(GTRRateMat):
         ### read config   #
         ###################
         self.num_mixtures = self.config['num_mixtures']
+        self.random_init_exchanges = self.config['random_init_exchanges']
         self.norm_rate_mults = self.config['norm_rate_mults']
-        self.norm_rate_matrix = self.config.get('norm_rate_matrix', True)
+        self.norm_rate_matrix = self.config['norm_rate_matrix']
 
         exchangeabilities_file = self.config['filenames']['exch']
         rate_multiplier_file = self.config['filenames'].get('rate_mult', None)
@@ -572,7 +610,7 @@ class GTRRateMatFromFile(GTRRateMat):
         equl = jnp.exp(logprob_equl) #(C, A)
         
         # possibly rescale rate multiplier
-        if self.norm_rate_mults:
+        if (self.norm_rate_mults) and (self.num_mixtures > 1):
             rate_multiplier = scale_rate_multipliers( unnormed_rate_multipliers = self.rate_multiplier,
                                     log_class_probs = log_class_probs )
         else:

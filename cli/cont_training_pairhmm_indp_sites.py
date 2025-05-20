@@ -121,7 +121,7 @@ def cont_training_pairhmm_indp_sites(args,
                      f'(same as desc length, because we remove gap '+
                      f'positions) \n' )
         
-        g.write( f'Times from: args.pred_config["times_from"]\n' )
+        g.write( f'Times from: {args.pred_config["times_from"]}\n' )
     
     # extra files to record if you use tkf approximations
     with open(f'{args.out_arrs_dir}/TRAIN_tkf_approx.tsv','w') as g:
@@ -500,7 +500,8 @@ def cont_training_pairhmm_indp_sites(args,
         ###              to previous epoch's test loss
         cond1 = jnp.allclose (prev_test_loss, 
                               jnp.minimum (prev_test_loss, ave_epoch_test_loss), 
-                              atol=args.early_stop_cond1_atol)
+                              atol=args.early_stop_cond1_atol,
+                              rtol=0)
 
         ### condition 2: if test loss is substatially worse than best test loss
         cond2 = (ave_epoch_test_loss - best_test_loss) > args.early_stop_cond2_gap
