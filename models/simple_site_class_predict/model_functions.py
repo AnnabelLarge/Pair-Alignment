@@ -52,6 +52,9 @@ def safe_log(x):
 
 def bound_sigmoid(x, min_val, max_val, *args, **kwargs):
     return min_val + (max_val - min_val) / (1 + jnp.exp(-x))
+
+# def log_bound_sigmoid(x, min_val, max_val, *args, **kwargs):
+#     return jnp.log(bound_sigmoid(x, min_val, max_val, *args, **kwargs))
     
 def bound_sigmoid_inverse(y, min_val, max_val, eps=1e-4):
     """
