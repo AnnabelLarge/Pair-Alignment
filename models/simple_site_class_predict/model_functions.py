@@ -41,6 +41,10 @@ from jax._src.typing import Array, ArrayLike
 
 from functools import partial
 
+# make this slightly more than true jnp.finfo(jnp.float32).eps, 
+#  for numerical safety at REALLY small parameter values
+SMALL_POSITIVE_NUM = 5e-7
+
 
 ###############################################################################
 ### general helpers for all pairHMM models   ##################################
@@ -53,9 +57,6 @@ def safe_log(x):
 def bound_sigmoid(x, min_val, max_val, *args, **kwargs):
     return min_val + (max_val - min_val) / (1 + jnp.exp(-x))
 
-# def log_bound_sigmoid(x, min_val, max_val, *args, **kwargs):
-#     return jnp.log(bound_sigmoid(x, min_val, max_val, *args, **kwargs))
-    
 def bound_sigmoid_inverse(y, min_val, max_val, eps=1e-4):
     """
     note: this is only for logit initialization; jnp.clip has bad 
@@ -64,47 +65,37 @@ def bound_sigmoid_inverse(y, min_val, max_val, eps=1e-4):
     y = jnp.clip(y, min_val + eps, max_val - eps)
     return safe_log( (y - min_val) / (max_val - y) )
 
-def concat_along_new_last_axis(arr_lst):
-    return jnp.concatenate( [arr[...,None] for arr in arr_lst], 
-                             axis = -1 )
-
-def logsumexp_with_arr_lst(arr_lst, coeffs = None):
+def logsumexp_with_arr_lst(array_of_log_vals, coeffs = None):
     """
     concatenate a list of arrays, then use logsumexp
     """
-    a_for_logsumexp = concat_along_new_last_axis(arr_lst)
-    
+    a_for_logsumexp = jnp.stack(array_of_log_vals, axis=-1)
     out = logsumexp(a = a_for_logsumexp,
                     b = coeffs,
                     axis=-1)
     return out
 
-def log_one_minus_x(x):
+def log_one_minus_x(log_x):
     """
     calculate log( exp(log(1)) - exp(log(x)) ), which is log( 1 - x )
     """
-    a_for_logsumexp = concat_along_new_last_axis( [jnp.zeros(x.shape), x] )
-    b_for_logsumexp = jnp.array([1.0, -1.0])
-    out = logsumexp(a = a_for_logsumexp,
-                    b = b_for_logsumexp,
-                    axis = -1)
-    
-    return out
+    return jnp.log1p( -jnp.exp(log_x) )
 
-def log_one_minus_x_with_floor(x, floor = 1e6 ):
+def log_x_minus_one(log_x):
     """
-    calculate log( exp(log(1)) - exp(log(x)) ), which is log( 1 - x ), or just 
-      return the floor value (but this will kill the gradient!)
+    calculate log( exp(log(x)) - exp(log(1)) ), which is log( x - 1 )
     """
-    x = jnp.minimum(x, floor)  # avoid exp overflow or NaN
-    
-    a_for_logsumexp = concat_along_new_last_axis( [jnp.zeros(x.shape), x] )
-    b_for_logsumexp = jnp.array([1.0, -1.0])
-    out = logsumexp(a = a_for_logsumexp,
-                    b = b_for_logsumexp,
-                    axis = -1)
-    
-    return out
+    return jnp.log( jnp.expm1(log_x) )
+
+def stable_log_one_minus_x(log_x):
+    """
+    use log_one_minus_x if value is not too small, but return -log_x otherwise 
+    """
+    return jax.lax.cond( log_x < -SMALL_POSITIVE_NUM,
+                         log_one_minus_x,
+                         lambda x: jnp.log(-x),
+                         log_x)
+
 
 
 ###############################################################################
@@ -416,23 +407,198 @@ def lse_over_equl_logprobs_per_class(log_class_probs: ArrayLike,
     return logsumexp( weighted_logprobs, axis=0 )
 
 
+
+###############################################################################
+### for tkf91, tkf92: tkf parameters and their approximations   ###############
+###############################################################################
+def true_beta(oper):
+    """
+    the true formula for beta, assuming mu = lambda * (1 - offset)
+    """
+    mu, offset, t = oper
+    
+    # log( (1 - offset) * (exp(mu*offset*t) - 1) )
+    log_num = jnp.log1p(-offset) + log_x_minus_one( mu*offset*t )
+    
+    # x = mu*offset*t
+    # y = jnp.log( 1 - offset )
+    # logsumexp with coeffs does: 
+    #   log( exp(x) - exp(y) ) = log( exp(mu*offset*t) - (1-offset) )
+    log_denom = logsumexp_with_arr_lst( [mu*offset*t, jnp.log1p(-offset)],
+                                    coeffs = jnp.array([1.0, -1.0]) )
+    
+    return log_num - log_denom
+
+def approx_beta(oper):
+    """
+    as lambda approaches mu (or as time shrinks to small values), use 
+      first-order taylor approximation
+    """
+    mu, offset, t = oper
+    
+    # log(  (1 - offset) * mu * t  )
+    log_num = jnp.log1p(-offset) + jnp.log(mu) + jnp.log(t)
+    
+    # log( mu*t + 1 )
+    log_denom = jnp.log1p( mu * t )
+    
+    return log_num - log_denom
+
+def approx_one_minus_gamma(oper):
+    """
+    where 1 - gamma is unstable, use this second-order taylor approximation
+        instead
+    """
+    mu, offset, t = oper
+    
+    # log( 1 + 0.5*mu*offset*t )
+    log_num = jnp.log1p( 0.5 * mu * offset * t )
+    
+    # log( (1 - 0.5*mu*t) (mu*t + 1) )
+    # there's another squared term here:
+    #   0.5 * offset * (mu*t)**2
+    # but it's so small that it's negligible
+    log_denom = jnp.log1p( -0.5*mu*t ) + jnp.log1p( mu*t )
+    
+    return log_num - log_denom
+
+def stable_tkf( mu, offset, t_array ):
+    """
+    return alpha, beta, gamma for TKF models
+
+    use real formulas where you can, and taylor-approximations where you can't
+    
+    T: number of branch lengths in t_array
+    
+    returns:
+    --------
+    out_dict: the tkf values
+        out_dict['log_alpha']: ArrayLike[float32], (T,)
+        out_dict['log_one_minus_alpha']: ArrayLike[float32], (T,)
+        out_dict['log_beta']: ArrayLike[float32], (T,)
+        out_dict['log_one_minus_beta']: ArrayLike[float32], (T,)
+        out_dict['log_gamma']: ArrayLike[float32], (T,)
+        out_dict['log_one_minus_gamma']: ArrayLike[float32], (T,)
+    
+    approx_flags_dict: where you used approx formulas
+        out_dict['log_one_minus_alpha']: ArrayLike[bool], (T,)
+        out_dict['log_beta']: ArrayLike[bool], (T,)
+        out_dict['log_one_minus_gamma']: ArrayLike[bool], (T,)
+        out_dict['log_gamma']: ArrayLike[bool], (T,)
+    
+    """
+    ######################################################
+    ### Some operations can be done with entire arrays   #
+    ######################################################
+    ### alpha = exp(-mu*t)
+    ### log(alpha) = -mu*t
+    log_alpha = -mu*t_array
+    
+    
+    ### start of calculation for 1 - gamma
+    # numerator:
+    # log( exp(mu*offset*t) - 1 )
+    gamm_full_log_num = log_x_minus_one( log_x = mu*offset*t_array )
+    
+    # denominator, term 1
+    # x = mu*offset*t
+    # y = jnp.log( 1 - offset )
+    # logsumexp with coeffs does: 
+    #   log( exp(x) - exp(y) ) = log( exp(mu*offset*t) - (1-offset) )
+    constant = jnp.broadcast_to(jnp.log1p(-offset), t_array.shape)
+    gamma_full_log_denom_term1 = logsumexp_with_arr_lst( [mu*offset*t_array, constant],
+                                              coeffs = jnp.array([1.0, -1.0]) )
+    
+    
+    ###############################################################
+    ### Most have to be done one-at-a-time, due to jax.lax.cond   #
+    ###############################################################
+    def tkf_params_per_timepoint(log_alpha_at_t, 
+                                 gamma_log_numerator_at_t,
+                                 gamma_log_denom_term1_at_t,
+                                 t):
+        ### 1 - alpha
+        log_one_minus_alpha = stable_log_one_minus_x(log_x = log_alpha_at_t)
+        
+        
+        ### beta, 1 - beta
+        # beta
+        log_beta = jax.lax.cond( mu*offset*t > SMALL_POSITIVE_NUM ,
+                                 true_beta,
+                                 approx_beta,
+                                 (mu, offset, t) )        
+        
+        # regardless of approx or not, 1-beta calculated from beta
+        log_one_minus_beta = log_one_minus_x(log_x = log_beta)
+        
+        
+        ### 1 - gamma, gamma
+        # need log(1 - alpha) to finish calculating denominator for log(1 - gamma)
+        gamma_log_denom = gamma_log_denom_term1_at_t + log_one_minus_alpha
+        
+        # ad hoc series of conditionals to determine if you approx
+        #   1-gamma or not (meh)
+        valid_frac = gamma_log_numerator_at_t < gamma_log_denom
+        large_product = mu * offset * t > 1e-3
+        log_diff_large = jnp.abs(gamma_log_numerator_at_t - gamma_log_denom) > 0.1
+        approx_formula_will_fail = (0.5*mu*t) > 1.0
+        
+        cond1 = large_product
+        cond2 = ~large_product & log_diff_large
+        cond3 = ~large_product & ~log_diff_large & approx_formula_will_fail
+        use_real_function = valid_frac & ( cond1 | cond2 | cond3 )
+        
+        # the final value
+        log_one_minus_gamma = jax.lax.cond( use_real_function,
+                                            lambda _: gamma_log_numerator_at_t - gamma_log_denom,
+                                            approx_one_minus_gamma,
+                                            (mu, offset, t) )
+        
+        # gamma
+        log_gamma = stable_log_one_minus_x(log_x = log_one_minus_gamma)
+        
+        
+        ### output everything
+        out_dict = {'log_one_minus_alpha': log_one_minus_alpha,
+                    'log_beta': log_beta,
+                    'log_one_minus_beta': log_one_minus_beta,
+                    'log_gamma': log_gamma,
+                    'log_one_minus_gamma': log_one_minus_gamma}
+        
+        approx_flags_dict = {'log_one_minus_alpha': ~(log_alpha_at_t < -SMALL_POSITIVE_NUM),
+                             'log_beta': ~(mu*offset*t > SMALL_POSITIVE_NUM),
+                             'log_one_minus_gamma': ~use_real_function,
+                             'log_gamma': ~(log_one_minus_gamma < -SMALL_POSITIVE_NUM)}
+        
+        return out_dict, approx_flags_dict
+    
+    vmapped_tkf_params_per_timepoint = jax.vmap(tkf_params_per_timepoint,
+                                                in_axes=(0,0,0,0))
+    out = vmapped_tkf_params_per_timepoint(log_alpha,
+                                           gamm_full_log_num,
+                                           gamma_full_log_denom_term1,
+                                           t_array)
+    out_dict, approx_flags_dict = out
+    del out
+    
+    out_dict['log_alpha'] = log_alpha
+    return out_dict, approx_flags_dict
+
+
+
 ###############################################################################
 ### for tkf91, tkf92: functions to get marginal and    ########################
 ### conditional transition matrices                    ########################
 ###############################################################################
-def MargTKF91TransitionLogprobs(lam,
-                                mu,
+def MargTKF91TransitionLogprobs(offset,
                                 **kwargs):
     """
     For scoring single-sequence marginals under TKF91 model
     
     Arguments
     ----------
-    lam : ArrayLike, (1,)
-        insert rate
-    
-    mu : ArrayLike, (1,)
-        delete rate
+    offset : ArrayLike, ()
+        1 - (lam/mu)
     
         
     Returns
@@ -444,19 +610,16 @@ def MargTKF91TransitionLogprobs(lam,
         start -> emit  |  start -> end
         
     """
-    log_lam = safe_log( lam )
-    log_mu = safe_log( mu )
-    
-    log_lam_div_mu = log_lam - log_mu
-    log_one_minus_lam_div_mu = log_one_minus_x(log_lam_div_mu)
-    
+    # lam / mu = 1 - offset
+    log_lam_div_mu = jnp.log1p(-offset)
+    log_one_minus_lam_div_mu = jnp.log(offset)
+
     log_arr = jnp.array( [[log_lam_div_mu, log_one_minus_lam_div_mu],
                           [log_lam_div_mu, log_one_minus_lam_div_mu]] ) #(2,2)
     return log_arr
 
 
-def MargTKF92TransitionLogprobs(lam,
-                                mu,
+def MargTKF92TransitionLogprobs(offset,
                                 class_probs,
                                 r_ext_prob,
                                 **kwargs):
@@ -468,11 +631,8 @@ def MargTKF92TransitionLogprobs(lam,
     
     Arguments
     ----------
-    lam : ArrayLike, (1,)
-        insert rate
-    
-    mu : ArrayLike, (1,)
-        delete rate
+    offset : ArrayLike, ()
+        1 - (lam/mu)
     
     class_probs : ArrayLike, (C,)
         probability of being in latent site classes
@@ -494,14 +654,13 @@ def MargTKF92TransitionLogprobs(lam,
     
     ### move values to log space
     log_class_prob = safe_log(class_probs) #(C,)
-    
     log_r_ext_prob = safe_log(r_ext_prob) #(C,)
     log_one_minus_r = log_one_minus_x(log_r_ext_prob) #(C,)
     
-    log_lam = safe_log(lam) #(1,)
-    log_mu = safe_log(mu) #(1,)
-    log_lam_div_mu = log_lam - log_mu #(1,)
-    log_one_minus_lam_div_mu = log_one_minus_x(log_lam_div_mu) #(1,)
+    # lam / mu = 1 - offset
+    # offset = 1 - (lam/mu)
+    log_lam_div_mu = jnp.log1p(-offset) #float
+    log_one_minus_lam_div_mu = jnp.log(offset) #float
     
     
     ### build cells
@@ -580,7 +739,7 @@ def CondTransitionLogprobs(marg_matrix,
 def _selectively_add_time_dim(x, ref):
     """
     add extra dimension for time, compared to ref
-    REF IS DETERMINED BASED ON STATIC ARGUMENT, SO THIS SHOULD BE JIT COMPATIBLE
+    confirmed to be jit-comptable, since ref is passed statically
     
     Arguments
     ----------
@@ -922,11 +1081,10 @@ def anc_marginal_probs_from_counts( batch: tuple[ArrayLike],
     
     ### emissions
     anc_emitCounts = subCounts.sum(axis=2) #(B,A)
-    
     if score_indels:
-        anc_emitCounts =+ delCounts #(B,A)
-    
+        anc_emitCounts = anc_emitCounts + delCounts #(B,A)
     anc_len = anc_emitCounts.sum(axis=(-1)) #(B,)
+    
     anc_marg_emit_score = jnp.einsum('i,bi->b',
                                      scoring_matrices_dict['logprob_emit_at_indel'],
                                      anc_emitCounts) #(B,)
@@ -1024,11 +1182,10 @@ def desc_marginal_probs_from_counts( batch: tuple[ArrayLike],
     
     ### emissions
     desc_emitCounts = subCounts.sum(axis=1) #(B,A)
-    
     if score_indels:
-        desc_emitCounts =+ insCounts #(B,A)
-    
+        desc_emitCounts = desc_emitCounts + insCounts #(B,A)
     desc_len = desc_emitCounts.sum(axis=(-1)) #(B,)
+    
     desc_marg_emit_score = jnp.einsum('i,bi->b',
                                      scoring_matrices_dict['logprob_emit_at_indel'],
                                      desc_emitCounts) #(B,)

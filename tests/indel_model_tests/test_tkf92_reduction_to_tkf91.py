@@ -16,7 +16,8 @@ import unittest
 
 from models.simple_site_class_predict.transition_models import (TKF91TransitionLogprobs,
                                                                 TKF92TransitionLogprobs)
-from models.simple_site_class_predict.model_functions import (MargTKF91TransitionLogprobs,
+from models.simple_site_class_predict.model_functions import (stable_tkf,
+                                                              MargTKF91TransitionLogprobs,
                                                               MargTKF92TransitionLogprobs,
                                                               CondTransitionLogprobs)
 
@@ -34,28 +35,28 @@ class TestTKF92ReductionToTKF91(unittest.TestCase):
     """
     def setUp(self):
         # fake params
-        self.lam = jnp.array([0.3])
-        self.mu = jnp.array([0.5])
+        self.lam = jnp.array(0.3)
+        self.mu = jnp.array(0.5)
+        self.offset = 1 - (self.lam/self.mu)
         self.r = jnp.array([0.0])
         t_array = jnp.array([0.3, 0.5, 0.9])
         
         # tkf91
-        self.tkf91_mod = TKF91TransitionLogprobs(config={'tkf_err': 1e-4}, 
+        self.tkf91_mod = TKF91TransitionLogprobs(config={}, 
                                                  name='tkf91')
         self.fake_tkf91_params = self.tkf91_mod.init(rngs=jax.random.key(0),
                                                t_array = t_array,
                                                sow_intermediates = False)
         
         # alpha, beta, gamma, yadda yadda
-        self.tkf_param_dict = self.tkf91_mod.apply(variables = self.fake_tkf91_params,
-                                              lam = jnp.squeeze(self.lam),
-                                              mu = jnp.squeeze(self.mu),
-                                             t_array = t_array,
-                                             method = 'tkf_params')
+        self.tkf_param_dict, _ = stable_tkf(mu = self.mu, 
+                                           offset = self.offset,
+                                           t_array = t_array)
+        self.tkf_param_dict['log_one_minus_offset'] = jnp.log1p(-self.offset)
+        self.tkf_param_dict['log_offset'] = jnp.log(self.offset)
         
         # tkf92
-        self.tkf92_mod = TKF92TransitionLogprobs(config={'tkf_err': 1e-4,
-                                                         'num_tkf_site_classes': 1}, 
+        self.tkf92_mod = TKF92TransitionLogprobs(config={'num_tkf_site_classes': 1}, 
                                                  name='tkf92')
         self.fake_tkf92_params = self.tkf92_mod.init(rngs=jax.random.key(0),
                                                t_array = t_array,
@@ -79,11 +80,9 @@ class TestTKF92ReductionToTKF91(unittest.TestCase):
     
     
     def test_marginal_reduction(self):
-        marg_tkf91 = MargTKF91TransitionLogprobs( jnp.squeeze(self.lam), 
-                                                  jnp.squeeze(self.mu) ) #(2,2)
+        marg_tkf91 = MargTKF91TransitionLogprobs( offset = self.offset ) #(2,2)
         
-        marg_tkf92 = MargTKF92TransitionLogprobs(lam = self.lam, 
-                                                 mu = self.mu,
+        marg_tkf92 = MargTKF92TransitionLogprobs(offset = self.offset,
                                                  class_probs = jnp.array([1]),
                                                  r_ext_prob = self.r)#(1, 1, 2, 2)
         marg_tkf92 = jnp.squeeze(marg_tkf92)
@@ -96,8 +95,7 @@ class TestTKF92ReductionToTKF91(unittest.TestCase):
                                            out_dict = self.tkf_param_dict,
                                            method = 'fill_joint_tkf91') #(T, 4, 4)
         
-        marg_tkf91 = MargTKF91TransitionLogprobs( jnp.squeeze(self.lam), 
-                                                  jnp.squeeze(self.mu) ) #(2,2)
+        marg_tkf91 = MargTKF91TransitionLogprobs( offset = self.offset ) #(2,2)
         
         cond_tkf91 = CondTransitionLogprobs( marg_tkf91, joint_tkf91 ) #(T, 4, 4)
         
@@ -110,8 +108,7 @@ class TestTKF92ReductionToTKF91(unittest.TestCase):
                                             class_probs = jnp.array([1]),
                                             method = 'fill_joint_tkf92') #(T, 1, 1, 4, 4)
         
-        marg_tkf92 = MargTKF92TransitionLogprobs(lam = self.lam, 
-                                                 mu = self.mu,
+        marg_tkf92 = MargTKF92TransitionLogprobs(offset = self.offset,
                                                  class_probs = jnp.array([1]),
                                                  r_ext_prob = self.r)#(1, 1, 2, 2)
         

@@ -15,7 +15,8 @@ import numpy.testing as npt
 import unittest
 
 from models.simple_site_class_predict.transition_models import TKF92TransitionLogprobs
-from models.simple_site_class_predict.model_functions import (MargTKF92TransitionLogprobs,
+from models.simple_site_class_predict.model_functions import (stable_tkf,
+                                                              MargTKF92TransitionLogprobs,
                                                               CondTransitionLogprobs)
 
 THRESHOLD = 1e-6
@@ -78,35 +79,34 @@ class TestTKF92AgainstIansFunc(unittest.TestCase):
     """
     def test_tkf92_cond(self):
         # fake params
-        lam = jnp.array([0.3])
-        mu = jnp.array([0.5])
+        lam = jnp.array(0.3)
+        mu = jnp.array(0.5)
+        offset = 1 - (lam/mu)
         r = jnp.array([0.1])
         t_array = jnp.array([0.3, 0.5, 0.9])
         
         ### my function comes packaged in a flax module
-        config = {'tkf_err': 1e-4,
-                  'num_tkf_site_classes': 1}
+        my_tkf_params, _ = stable_tkf(mu = mu, 
+                                      offset = offset,
+                                      t_array = t_array)
+        my_tkf_params['log_offset'] = jnp.log(offset)
+        my_tkf_params['log_one_minus_offset'] = jnp.log1p(-offset)
+        
+        config = {'num_tkf_site_classes': 1}
         my_model = TKF92TransitionLogprobs(config=config, name='tkf92')
         fake_params = my_model.init(rngs=jax.random.key(0),
                                     t_array = t_array,
                                     class_probs = jnp.array([1]),
                                     sow_intermediates = False)
         
-        out_dict = my_model.apply(variables = fake_params,
-                                       lam = jnp.squeeze(lam),
-                                       mu = jnp.squeeze(mu),
-                                       t_array = t_array,
-                                       method = 'tkf_params')
-        
         joint_tkf92 =  my_model.apply(variables = fake_params,
-                                      out_dict = out_dict,
+                                      out_dict = my_tkf_params,
                                       r_extend = r,
                                       class_probs = jnp.array([1]),
                                       method = 'fill_joint_tkf92') #(T, 1, 1, 4, 4)
         
         
-        marg_tkf92 = MargTKF92TransitionLogprobs(lam = lam, 
-                                                 mu = mu,
+        marg_tkf92 = MargTKF92TransitionLogprobs(offset = offset,
                                                  class_probs = jnp.array([1]),
                                                  r_ext_prob = r)
         pred_cond_tkf92 = CondTransitionLogprobs( marg_tkf92, joint_tkf92 )
@@ -116,7 +116,7 @@ class TestTKF92AgainstIansFunc(unittest.TestCase):
         true_tkf92 = []
 
         for i,t in enumerate(t_array):
-            true_tkf92.append( TKF92_Ftransitions (lam, mu, r, t) ) #(T, 4, 4, 1)
+            true_tkf92.append( TKF92_Ftransitions (lam[None], mu[None], r, t) ) #(T, 4, 4, 1)
         
         
         ### reshaping to (T, 4, 4)

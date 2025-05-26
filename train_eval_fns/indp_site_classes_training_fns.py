@@ -84,7 +84,7 @@ def train_one_batch(batch,
                 'batch_ave_joint_perpl': jnp.mean(joint_perplexity_perSamp),
                 'pred_layer_metrics': aux_dict['pred_layer_metrics'],
                 'finalpred_gradient': grad,
-                'used_tkf_beta_approx': aux_dict['used_tkf_beta_approx']}
+                'used_approx': aux_dict['used_approx']}
     
     return out_dict, new_trainstate
 
@@ -117,7 +117,7 @@ def eval_one_batch( batch,
     finalpred_sow_outputs = interms_for_tboard['finalpred_sow_outputs']
     
     if not return_all_loglikes:
-        (loss_NLL, aux_dict), sow_dict = pairhmm_trainstate.apply_fn(variables = pairhmm_trainstate.params,
+        (_, aux_dict), sow_dict = pairhmm_trainstate.apply_fn(variables = pairhmm_trainstate.params,
                                           batch = batch,
                                           t_array = t_array,
                                           sow_intermediates = False,
@@ -129,9 +129,6 @@ def eval_one_batch( batch,
                                           t_array = t_array,
                                           mutable=['histograms','scalars'] if finalpred_sow_outputs else [],
                                           method=pairhmm_instance.calculate_all_loglikes)
-        
-        # specifically use joint prob for loss
-        loss_NLL = jnp.mean( aux_dict['joint_neg_logP_length_normed'] )
         
         
     sow_dict = {'histograms': sow_dict.get( 'histograms', dict() ),
@@ -146,7 +143,7 @@ def eval_one_batch( batch,
                 'joint_neg_logP_length_normed': joint_neg_logP_length_normed,
                 'joint_perplexity_perSamp': joint_perplexity_perSamp,
                 'pred_layer_metrics': sow_dict,
-                'used_tkf_beta_approx': aux_dict['used_tkf_beta_approx']}
+                'used_approx': aux_dict['used_approx']}
     
     ### other metrics
     if return_all_loglikes:
@@ -217,17 +214,24 @@ def final_eval_wrapper(dataloader,
     for batch_idx, batch in tqdm( enumerate(dataloader), total=len(dataloader) ): 
         eval_metrics = eval_fn_jitted( batch=batch )
         
-        if eval_metrics["used_tkf_beta_approx"][0].any():
-            with open(f'{out_arrs_dir}/FINAL-EVAL_tkf_approx.tsv','a') as g:
-                g.write(f'batch {batch_idx}:\n')
+        # check if any approximations were used; just return sums for now, and 
+        #   in separate debugging scripts, extract these flags
+        if eval_metrics['used_approx'] is not None:
+            used_approx = False
+            to_write = ''
+            for key, val in eval_metrics['used_approx'].items():
+                if val.any():
+                    used_approx = True
+                    approx_count = val.sum()
+                    to_write += f'{key}: {approx_count}\n'
+            
+            if used_approx:
+                with open(f'{out_arrs_dir}/FINAL-EVAL_tkf_approx.tsv','a') as g:
+                    g.write(f'{outfile_prefix}, batch {batch_idx}:\n')
+                    g.write(to_write + '\n')
+            del used_approx, to_write, key, val
                 
-                g.write(f'beta was zero:\n')
-                g.write(f'{eval_metrics["used_tkf_beta_approx"][1]}\n')
-                
-                g.write(f'gamma was undefined:\n')
-                g.write(f'{eval_metrics["used_tkf_beta_approx"][2]}\n\n')
-        
-                
+            
         #########################################
         ### start df; record metrics per sample #
         #########################################

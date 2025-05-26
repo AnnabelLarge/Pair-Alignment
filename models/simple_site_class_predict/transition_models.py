@@ -15,6 +15,7 @@ modules used for training:
  
  'TKF92TransitionLogprobs',
  'TKF92TransitionLogprobsFromFile',
+
 """
 # jumping jax and leaping flax
 from jax.core import Tracer
@@ -27,10 +28,9 @@ import pickle
 from models.BaseClasses import ModuleBase
 from models.simple_site_class_predict.model_functions import (bound_sigmoid,
                                                               safe_log,
-                                                              concat_along_new_last_axis,
                                                               logsumexp_with_arr_lst,
                                                               log_one_minus_x,
-                                                              log_one_minus_x_with_floor,
+                                                              stable_tkf,
                                                               MargTKF91TransitionLogprobs,
                                                               MargTKF92TransitionLogprobs,
                                                               CondTransitionLogprobs)
@@ -103,7 +103,7 @@ class GeomLenTransitionLogprobs(ModuleBase):
             out_dict["conditional"]: (2,)
                 score transitions in conditional probability calculation
         
-        (output tuple) : Tuple[False, False]
+        (output tuple) :  None
             placeholder values
         """
         p_emit = nn.sigmoid(self.p_emit_logit) #(1,)
@@ -119,7 +119,7 @@ class GeomLenTransitionLogprobs(ModuleBase):
                     'marginal': out_vec,
                     'conditional': out_vec}
         
-        return out_dict, (jnp.array([False]), jnp.array([False]))
+        return out_dict, None
         
 
 class GeomLenTransitionLogprobsFromFile(GeomLenTransitionLogprobs):
@@ -185,14 +185,14 @@ class GeomLenTransitionLogprobsFromFile(GeomLenTransitionLogprobs):
             out_dict["conditional"]: (2,)
                 score transitions in conditional probability calculation
         
-        (output tuple) : Tuple[False, False]
+        (output tuple) : None
             placeholder values
         """
         out_dict = {'joint': self.out_vec,
                     'marginal': self.out_vec,
                     'conditional': self.out_vec}
         
-        return out_dict, (jnp.array([False]), jnp.array([False]))
+        return out_dict, None
         
         
     
@@ -247,9 +247,6 @@ class TKF91TransitionLogprobs(ModuleBase):
     logits_to_indel_rates
         converts lambda/offset logits to lambda/mu values
     
-    tkf_params
-        from lambda and mu, calculate TKF alpha, beta, gamma
-    
     return_all_matrices
         return transition matrices used for joint, marginal, and conditional 
         log-likelihood transitions
@@ -268,8 +265,6 @@ class TKF91TransitionLogprobs(ModuleBase):
         
         """
         ### unpack config
-        self.tkf_err = self.config.get('tkf_err', 1e-4)
-        
         # initializing lamda, offset
         init_lam_offset_logits = self.config.get( 'init_lambda_offset_logits',
                                                 [-2, -5] )
@@ -281,8 +276,6 @@ class TKF91TransitionLogprobs(ModuleBase):
         
         # were options at one point, but I'm fixing the values now
         self.sigmoid_temp = 1
-        self.approx_floor = 1e-4
-        self.GAMMA_FLOOR = 1e-7
         
         
         ### initialize logits for lambda, offset
@@ -318,8 +311,16 @@ class TKF91TransitionLogprobs(ModuleBase):
             out_dict["conditional"]: (T,4,4)
                 score transitions in conditional probability calculation
         
-        use_approx : Tuple( ArrayLike, ArrayLike ), ( (T,), (T,) )
-            where tkf approximation formulas were used
+        approx_flags_dict : dict
+            where approximations are used in tkf formulas
+            
+            out_dict['log_one_minus_alpha']: (T,)
+            
+            out_dict['log_beta']: (T,)
+            
+            out_dict['log_one_minus_gamma']: (T,)
+            
+            out_dict['log_gamma']: (T,)
             
         """
         out = self.logits_to_indel_rates(lam_mu_logits = self.tkf_lam_mu_logits,
@@ -327,15 +328,32 @@ class TKF91TransitionLogprobs(ModuleBase):
                                          lam_max_val = self.lam_max_val,
                                          offs_min_val = self.offs_min_val,
                                          offs_max_val = self.offs_max_val)
-        lam, mu = out
+        lam, mu, offset = out
         del out
         
         # get alpha, beta, gamma
-        # only one class for TKF91
-        out_dict = self.tkf_params(lam = lam, 
-                                   mu = mu, 
-                                   t_array = t_array)
-        use_approx = out_dict['used_tkf_approx']
+        # contents of out_dict ( all ArrayLike[float32], (T,) ):
+        #   out_dict['log_alpha']
+        #   out_dict['log_one_minus_alpha']
+        #   out_dict['log_beta']
+        #   out_dict['log_one_minus_beta']
+        #   out_dict['log_gamma']
+        #   out_dict['log_one_minus_gamma']
+        #
+        # contents of approx_flags_dict ( all ArrayLike[bool], (T,) ):
+        #   out_dict['log_one_minus_alpha']
+        #   out_dict['log_beta']
+        #   out_dict['log_one_minus_gamma']
+        #   out_dict['log_gamma']
+        out_dict, approx_flags_dict = stable_tkf(mu = mu, 
+                                                 offset = offset,
+                                                 t_array = t_array)
+        
+        # add to these dictionaries before filling out matrix
+        out_dict['log_offset'] = jnp.log(offset)
+        out_dict['log_one_minus_offset'] = jnp.log1p(-offset)
+        approx_flags_dict['t_array'] = t_array
+
         
         # record values
         if sow_intermediates:
@@ -361,10 +379,9 @@ class TKF91TransitionLogprobs(ModuleBase):
         
         joint_matrix =  self.fill_joint_tkf91(out_dict)
         
-        matrix_dict = self.return_all_matrices(lam=lam,
-                                               mu=mu,
+        matrix_dict = self.return_all_matrices(offset=offset,
                                                joint_matrix=joint_matrix)
-        return matrix_dict, use_approx
+        return matrix_dict, approx_flags_dict
         
     
     def fill_joint_tkf91(self, 
@@ -373,10 +390,10 @@ class TKF91TransitionLogprobs(ModuleBase):
         Arguments
         ----------
         out_dict : dict
-            contains values for calculating matrix terms: lambda, mu, 
-            alpha, beta, gamma, 1 - alpha, 1 - beta, 1 - gamma
-            (all in log space)
-          
+            contains values for calculating matrix terms: (all in log space)
+                - offset = 1 - (lam/mu)
+                - alpha, beta, gamma, 1 - alpha, 1 - beta, 1 - gamma
+                  
         Returns
         -------
         out : ArrayLike, (T,4,4)
@@ -384,8 +401,9 @@ class TKF91TransitionLogprobs(ModuleBase):
         
         """
         ### entries in the matrix
-        log_lam_div_mu = out_dict['log_lam'] - out_dict['log_mu']
-        log_one_minus_lam_div_mu = log_one_minus_x(log_lam_div_mu)
+        # lam / mu = 1 - offset
+        log_lam_div_mu = out_dict['log_one_minus_offset']
+        log_one_minus_lam_div_mu = out_dict['log_offset']
         
         
         # a_f = (1-beta)*alpha*(lam/mu);     log(a_f) = log(1-beta) + log(alpha) + log_lam_div_mu
@@ -455,219 +473,22 @@ class TKF91TransitionLogprobs(ModuleBase):
         """
         # lambda
         lam = bound_sigmoid(x = lam_mu_logits[0],
-                              min_val = lam_min_val,
-                              max_val = lam_max_val,
-                              temperature = self.sigmoid_temp)
+                            min_val = lam_min_val,
+                            max_val = lam_max_val,
+                            temperature = self.sigmoid_temp)
         
         # mu
         offset = bound_sigmoid(x = lam_mu_logits[1],
-                                 min_val = offs_min_val,
-                                 max_val = offs_max_val,
-                                 temperature = self.sigmoid_temp)
+                               min_val = offs_min_val,
+                               max_val = offs_max_val,
+                               temperature = self.sigmoid_temp)
         mu = lam / ( 1 -  offset) 
 
-        return (lam, mu)
-    
-    
-    def tkf_params(self,
-                   lam,
-                   mu,
-                   t_array):
-        """
-        Arguments
-        ---------
-        lam : ArrayLike, ()
-            insert rate
-        
-        mu : ArrayLike, ()
-            delete rate
-        
-        t_array : ArrayLike, (T,)
-            branch lengths 
-            
-        
-        Returns
-        -------
-        out_dict
-            parameters for tkf models
-            
-            out_dict["log_lam"] : ArrayLike, ()
-            out_dict["log_mu"] : ArrayLike, ()
-            out_dict["log_alpha"] : ArrayLike, ()
-            out_dict["log_beta"] : ArrayLike, ()
-            out_dict["log_gamma"] : ArrayLike, ()
-            out_dict["log_one_minus_alpha"] : ArrayLike, ()
-            out_dict["log_one_minus_beta"] : ArrayLike, ()
-            out_dict["log_one_minus_gamma"] : ArrayLike, ()
-            out_dict["use_approx"] : Tuple( (T,), (T,) )
-        """
-        ######################
-        ### initial values   #
-        ######################
-        # lam * t, mu * t
-        mu_per_t = mu * t_array
-        lam_per_t = lam * t_array
-        
-        # log(lam), log(mu); one value
-        log_lam = safe_log(lam)
-        log_mu = safe_log(mu)
-        
-        
-        ##############################################
-        ### alpha and one minus alpha IN LOG SPACE   #
-        ##############################################
-        log_alpha = -mu_per_t
-        log_one_minus_alpha = log_one_minus_x(log_alpha)
-        
-        
-        ###########################################
-        ### beta and gamma in log space           #
-        ###   use either approx or real formula   #
-        ###########################################
-        def original( arr_dict ):
-            ### unpack
-            lam_at_this_t = arr_dict['lam_per_t']
-            mu_at_this_t = arr_dict['mu_per_t']
-            log_one_minus_alpha_at_this_t = arr_dict['log_one_minus_alpha']
-            
-            
-            ### beta
-            # log( exp(-lambda * t) - exp(-mu * t) )
-            term2_logsumexp = logsumexp_with_arr_lst( [-lam_at_this_t, -mu_at_this_t],
-                                                      coeffs = jnp.array([1, -1]) )
-            
-            # log( mu*exp(-lambda * t) - lambda*exp(-mu * t) )
-            mixed_coeffs = concat_along_new_last_axis([mu, -lam])
-            term3_logsumexp = logsumexp_with_arr_lst([-lam_at_this_t, -mu_at_this_t],
-                                                     coeffs = mixed_coeffs)
-            del mixed_coeffs
-            
-            # combine
-            log_beta = log_lam + term2_logsumexp - term3_logsumexp
-            
-            
-            ### gamma
-            # numerator = mu * beta; log(numerator) = log(mu) + log(beta)
-            gamma_numerator = log_mu + log_beta
-            
-            # denom = lambda * (1-alpha); log(denom) = log(lam) + log(1-alpha)
-            gamma_denom = log_lam + log_one_minus_alpha_at_this_t
-            
-            # 1 - gamma = num/denom; log(1 - gamma) = log(num) - log(denom)
-            # no floor value (i.e. set it very high, to avoid tripping this)
-            log_one_minus_gamma = gamma_numerator - gamma_denom
-            log_gamma = log_one_minus_x_with_floor(log_one_minus_gamma, 1e6 )
-            
-            # don't forget about one minus beta
-            log_one_minus_beta = log_one_minus_x(log_beta)
-            
-            out_dict = {'log_gamma': log_gamma,
-                        'log_beta': log_beta,
-                        'log_one_minus_gamma': log_one_minus_gamma, 
-                        'log_one_minus_beta': log_one_minus_beta}
-            
-            return out_dict
-        
-        
-        def approx( arr_dict ):
-            ### unpack
-            mu_at_this_t = arr_dict['mu_per_t']
-            log_one_minus_alpha_at_this_t = arr_dict['log_one_minus_alpha']
-            
-            
-            ### beta
-            beta = ( (1 - self.tkf_err) * mu_at_this_t ) / ( mu_at_this_t + 1 )
-            log_beta = safe_log(beta)
-            
-            
-            ### gamma (formula unchanged, but usese beta approx here)
-            # numerator = mu * beta; log(numerator) = log(mu) + log(beta)
-            gamma_numerator = log_mu + log_beta
-            
-            # denom = lambda * (1-alpha); log(denom) = log(lam) + log(1-alpha)
-            gamma_denom = log_lam + log_one_minus_alpha_at_this_t
-            
-            # 1 - gamma = num/denom; log(1 - gamma) = log(num) - log(denom)
-            log_one_minus_gamma = gamma_numerator - gamma_denom
-            log_gamma = log_one_minus_x_with_floor( log_one_minus_gamma, 
-                                                    self.GAMMA_FLOOR )
-            
-            # don't forget about one minus beta
-            log_one_minus_beta = log_one_minus_x(log_beta)
-            
-            out_dict = {'log_gamma': log_gamma,
-                        'log_beta': log_beta,
-                        'log_one_minus_gamma': log_one_minus_gamma, 
-                        'log_one_minus_beta': log_one_minus_beta}
-            
-            return out_dict
-        
-        
-        #############################################################
-        ### scan down times (lam*t and mu*t), and decide per time   #
-        ###   if you'll use approx_beta or orig_beta                #
-        #############################################################
-        def safe_calc( arr_dict ):
-            beta_gamma_dict = original( arr_dict )
-            
-            # if beta is -inf or gamma is NaN, use approximation instead
-            recalc = jnp.isinf( beta_gamma_dict['log_beta'] ) | jnp.isnan( beta_gamma_dict['log_gamma'] )
-            recalc = jnp.any(recalc)
-            
-            beta_gamma_dict = jax.lax.cond( recalc,
-                                            lambda _: approx( arr_dict ),
-                                            lambda _: beta_gamma_dict,
-                                            operand=None )
-            
-            return beta_gamma_dict, recalc
-        
-        
-        # inputs for scan
-        arrs_to_use = {'lam_per_t': lam_per_t,
-                       'mu_per_t': mu_per_t,
-                       'log_one_minus_alpha': log_one_minus_alpha}
-        axes_to_scan = {'lam_per_t': 0,
-                       'mu_per_t': 0,
-                       'log_one_minus_alpha': 0}
-        
-        # scan
-        vmapped_fn = jax.vmap( safe_calc, 
-                               in_axes=({'lam_per_t': 0,
-                                         'mu_per_t': 0,
-                                         'log_one_minus_alpha': 0},) )
-        out_dict, use_approx = vmapped_fn( arrs_to_use )
-        del arrs_to_use, vmapped_fn
-        
-        
-        ##############################
-        ### build final dictionary   #
-        ##############################
-        to_add = {'log_lam': log_lam,
-                  'log_mu':log_mu,
-                  'log_alpha': log_alpha,
-                  'log_one_minus_alpha': log_one_minus_alpha,
-                  'used_tkf_approx': use_approx
-                  }
-
-        out_dict = {**out_dict, **to_add}
-        
-        # intermediates in here include:
-            
-        # log_lam
-        # log_mu
-        # log_alpha
-        # log_beta
-        # log_gamma
-        # log_one_minus_alpha
-        # log_one_minus_beta
-        # log_one_minus_gamma
-        # use_approx (a tuple of arrays)
-        return out_dict
+        return (lam, mu, offset)
     
     
     def return_all_matrices(self,
-                            lam,
-                            mu,
+                            offset,
                             joint_matrix):
         """
         T = times
@@ -675,9 +496,8 @@ class TKF91TransitionLogprobs(ModuleBase):
         
         Arguments
         ---------
-        lam : ArrayLike, ()
-        
-        mu : ArrayLike, ()
+        offset : ArrayLike, ()
+            1 - (lam/mu)
         
         joint_matrix : ArrayLike, (T, 4, 4)
         
@@ -690,8 +510,7 @@ class TKF91TransitionLogprobs(ModuleBase):
         
         """
         # output is: (4, 4)
-        marginal_matrix = MargTKF91TransitionLogprobs(lam=lam,
-                                                      mu=mu)
+        marginal_matrix = MargTKF91TransitionLogprobs(offset=offset)
         
         # output is same as joint: (T, 4, 4)
         cond_matrix = CondTransitionLogprobs(marg_matrix=marginal_matrix, 
@@ -745,9 +564,6 @@ class TKF91TransitionLogprobsFromFile(TKF91TransitionLogprobs):
     logits_to_indel_rates
         converts lambda/offset logits to lambda/mu values
     
-    tkf_params
-        from lambda and mu, calculate TKF alpha, beta, gamma
-    
     return_all_matrices
         return transition matrices used for joint, marginal, and conditional 
         log-likelihood transitions
@@ -765,7 +581,6 @@ class TKF91TransitionLogprobsFromFile(TKF91TransitionLogprobs):
         
         """
         ### unpack config
-        self.tkf_err = self.config.get('tkf_err', 1e-4)
         in_file = self.config['filenames']['tkf_params_file']
         
         with open(in_file,'rb') as f:
@@ -798,19 +613,20 @@ class TKF91TransitionLogprobsFromFile(TKF91TransitionLogprobs):
         """
         lam = self.tkf_lam_mu[...,0]
         mu = self.tkf_lam_mu[...,1]
-        use_approx = False
+        offset = 1 - (lam /mu)
         
         # get alpha, beta, gamma
-        out_dict = self.tkf_params(lam = lam, 
-                                   mu = mu, 
-                                   t_array = t_array)
+        out_dict, _ = stable_tkf(mu = mu, 
+                                 offset = offset,
+                                 t_array = t_array)
+        out_dict['log_offset'] = jnp.log(offset)
+        out_dict['log_one_minus_offset'] = jnp.log1p(-offset)
         
         joint_matrix =  self.fill_joint_tkf91(out_dict)
         
-        matrix_dict = self.return_all_matrices(lam=lam,
-                                               mu=mu,
+        matrix_dict = self.return_all_matrices(offset=offset,
                                                joint_matrix=joint_matrix)
-        return matrix_dict, False
+        return matrix_dict, None
         
     
     
@@ -906,7 +722,6 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         
         """
         ### unpack config
-        self.tkf_err = self.config.get('tkf_err', 1e-4)
         self.num_tkf_site_classes = self.config['num_tkf_site_classes']
         
         # initializing lamda, offset
@@ -927,9 +742,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
                                                                 [1e-4, 0.999] )
         
         # were options at one point, but I'm fixing the values now
-        self.approx_floor = 1e-4
         self.sigmoid_temp = 1
-        self.GAMMA_FLOOR = 1e-7
         
         
         ### initialize logits for lambda, offset
@@ -988,7 +801,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
                                          lam_max_val = self.lam_max_val,
                                          offs_min_val = self.offs_min_val,
                                          offs_max_val = self.offs_max_val)
-        lam, mu = out
+        lam, mu, offset = out
         del out
         
         # r_extend is of size (C,)
@@ -996,11 +809,28 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
                                    min_val = self.r_extend_min_val,
                                    max_val = self.r_extend_max_val)
         
-        # get alpha, beta, gamma; these are of size (T,)
-        out_dict = self.tkf_params(lam = lam, 
-                                   mu = mu, 
-                                   t_array = t_array)
-        use_approx = out_dict['used_tkf_approx']
+        # get alpha, beta, gamma
+        # contents of out_dict ( all ArrayLike[float32], (T,) ):
+        #   out_dict['log_alpha']
+        #   out_dict['log_one_minus_alpha']
+        #   out_dict['log_beta']
+        #   out_dict['log_one_minus_beta']
+        #   out_dict['log_gamma']
+        #   out_dict['log_one_minus_gamma']
+        #
+        # contents of approx_flags_dict ( all ArrayLike[bool], (T,) ):
+        #   out_dict['log_one_minus_alpha']
+        #   out_dict['log_beta']
+        #   out_dict['log_one_minus_gamma']
+        #   out_dict['log_gamma']
+        out_dict, approx_flags_dict = stable_tkf(mu = mu, 
+                                                 offset = offset,
+                                                 t_array = t_array)
+        
+        # add to these dictionaries before filling out matrix
+        out_dict['log_offset'] = jnp.log(offset)
+        out_dict['log_one_minus_offset'] = jnp.log1p(-offset)
+        approx_flags_dict['t_array'] = t_array
         
         # record values
         if sow_intermediates:
@@ -1034,12 +864,11 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
                                               r_extend=r_extend,
                                               class_probs=class_probs)
         
-        matrix_dict = self.return_all_matrices(lam=lam,
-                                               mu=mu,
+        matrix_dict = self.return_all_matrices(offset=offset,
                                                class_probs=class_probs,
                                                r_ext_prob = r_extend,
                                                joint_matrix=joint_matrix)
-        return matrix_dict, use_approx
+        return matrix_dict, approx_flags_dict
         
     
     def fill_joint_tkf92(self,
@@ -1134,8 +963,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
     
     
     def return_all_matrices(self,
-                            lam,
-                            mu,
+                            offset,
                             class_probs,
                             r_ext_prob,
                             joint_matrix):
@@ -1146,9 +974,8 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         
         Arguments
         ---------
-        lam : ArrayLike, ()
-        
-        mu : ArrayLike, ()
+        offset : ArrayLike, ()
+            1 - (lam/mu)
         
         r_extend : ArrayLike, (C,)
             fragment extension probabilities
@@ -1167,8 +994,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         
         """
         # output is: (C, C, 4, 4)
-        marginal_matrix = MargTKF92TransitionLogprobs(lam=lam,
-                                                      mu=mu,
+        marginal_matrix = MargTKF92TransitionLogprobs(offset=offset,
                                                       class_probs=class_probs,
                                                       r_ext_prob=r_ext_prob)
         
@@ -1299,24 +1125,27 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
         """
         lam = self.tkf_lam_mu[0]
         mu = self.tkf_lam_mu[1]
+        offset = 1 - (lam/mu)
         r_extend = self.r_extend
         num_site_classes = r_extend.shape[0]
         use_approx = False
         
         # get alpha, beta, gamma
-        out_dict = self.tkf_params(lam = lam, 
-                                   mu = mu, 
-                                   t_array = t_array)
-        use_approx = out_dict['used_tkf_approx']
+        out_dict, _ = stable_tkf(mu = mu, 
+                                                 offset = offset,
+                                                 t_array = t_array)
+        
+        # add to these dictionaries before filling out matrix
+        out_dict['log_offset'] = jnp.log(offset)
+        out_dict['log_one_minus_offset'] = jnp.log1p(-offset)
         
         # (T, C_from, C_to, S_from=4, S_to=4)
         joint_matrix =  self.fill_joint_tkf92(out_dict, 
                                               r_extend,
                                               class_probs)
         
-        matrix_dict = self.return_all_matrices(lam=lam,
-                                               mu=mu,
+        matrix_dict = self.return_all_matrices(offset=offset,
                                                class_probs=class_probs,
                                                r_ext_prob=r_extend,
                                                joint_matrix=joint_matrix)
-        return matrix_dict, use_approx
+        return matrix_dict, None

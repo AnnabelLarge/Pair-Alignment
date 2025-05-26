@@ -117,10 +117,10 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     
     # extra files to record if you use tkf approximations
     with open(f'{args.out_arrs_dir}/TRAIN_tkf_approx.tsv','w') as g:
-        g.write('Used tkf beta approximation in the following locations:\n')
+        g.write('Used tkf approximations in the following locations:\n')
     
     with open(f'{args.out_arrs_dir}/FINAL-EVAL_tkf_approx.tsv','w') as g:
-        g.write('Used tkf beta approximation in the following locations:\n')
+        g.write('Used tkf approximations in the following locations:\n')
         
         
     ### save updated config, provide filename for saving model parameters
@@ -272,17 +272,24 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
             train_metrics, pairhmm_trainstate = out
             del out
             
-            # record if you used any approximations
-            if train_metrics["used_tkf_beta_approx"][0].any():
-                with open(f'{args.out_arrs_dir}/TRAIN_tkf_approx.tsv','a') as g:
-                    g.write(f'epoch {epoch_idx}, batch {batch_idx}:\n')
-                    
-                    g.write(f'beta was zero:\n')
-                    g.write(f'{train_metrics["used_tkf_beta_approx"][1]}\n')
-                    
-                    g.write(f'gamma was undefined:\n')
-                    g.write(f'{train_metrics["used_tkf_beta_approx"][2]}\n\n')
             
+            ### check if any approximations were used; just return sums for 
+            ###   now, and in separate debugging scripts, extract these flags
+            if train_metrics['used_approx'] is not None:
+                used_approx = False
+                to_write = ''
+                for key, val in train_metrics['used_approx'].items():
+                    if val.any():
+                        used_approx = True
+                        approx_count = val.sum()
+                        to_write += f'{key}: {approx_count}\n'
+                
+                if used_approx:
+                    with open(f'{args.out_arrs_dir}/TRAIN_tkf_approx.tsv','a') as g:
+                        g.write(f'epoch {epoch_idx}, batch {batch_idx}:\n')
+                        g.write(to_write + '\n')
+                del used_approx, to_write, key, val
+                        
             
             ### record metrics to tensorboard
             interm_rec = batch_epoch_idx % args.histogram_output_freq == 0
@@ -355,8 +362,9 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
         ##############################################################
         ### 3.3: also check current performance on held-out test set #
         ##############################################################
-        # Note: it's possible to output intermediates for these points too;
-        # but right now, that's not collected
+        # Note: it's possible to output intermediates and check if 
+        #   approximations were used for these points too;
+        #   but right now, that's not collected
         ave_epoch_test_loss = 0
         ave_epoch_test_perpl = 0
         
@@ -611,6 +619,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
                                           t_array = t_array_for_all_samples,
                                           prefix = '',
                                           out_folder = args.out_arrs_dir,
+                                          write_time_static_objs = True,
                                           method = pairhmm_instance.write_params )
         
     elif t_array_for_all_samples is None:

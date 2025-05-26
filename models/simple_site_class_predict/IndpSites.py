@@ -213,7 +213,7 @@ class IndpSites(ModuleBase):
                                            exponential_dist_param = self.exponential_dist_param,
                                            norm_loss_by = self.norm_loss_by )
         
-        aux_dict['used_tkf_beta_approx'] = scoring_matrices_dict['used_tkf_beta_approx']
+        aux_dict['used_approx'] = scoring_matrices_dict['used_approx']
 
         if self.norm_loss_by_length:
             loss = jnp.mean( aux_dict['joint_neg_logP_length_normed'] )
@@ -267,7 +267,7 @@ class IndpSites(ModuleBase):
                                            t_array = t_array,
                                            exponential_dist_param = self.exponential_dist_param,
                                            norm_loss_by = self.norm_loss_by )
-        aux_dict['used_tkf_beta_approx'] = scoring_matrices_dict['used_tkf_beta_approx']
+        aux_dict['used_approx'] = scoring_matrices_dict['used_approx']
         
         
         #####################################
@@ -352,16 +352,16 @@ class IndpSites(ModuleBase):
             # all_transit_matrices['joint']: (T, A, A)
             # all_transit_matrices['conditional']: (T, A, A)
             # all_transit_matrices['marginal']: (T, A, A)
-            # used_tkf_beta_approx is a tuple of booleans arrays: ( (T,), (T,) )
-            all_transit_matrices, used_tkf_beta_approx = self.transitions_module(t_array = t_array,
+            # used_approx is a dictionary of boolean arrays
+            all_transit_matrices, used_approx = self.transitions_module(t_array = t_array,
                                                            sow_intermediates = sow_intermediates) 
         
         elif self.indel_model_type == 'tkf92':
             # all_transit_matrices['joint']: (T, C, C, A, A)
             # all_transit_matrices['conditional']: (T, C, C, A, A)
             # all_transit_matrices['marginal']: (T, C, C, A, A)
-            # used_tkf_beta_approx is a tuple of booleans arrays: ( (T,), (T,) )
-            all_transit_matrices, used_tkf_beta_approx = self.transitions_module(t_array = t_array,
+            # used_approx is a dictionary of boolean arrays
+            all_transit_matrices, used_approx = self.transitions_module(t_array = t_array,
                                                            class_probs = jnp.array([1.]),
                                                            sow_intermediates = sow_intermediates)
             
@@ -374,8 +374,8 @@ class IndpSites(ModuleBase):
             # all_transit_matrices['joint']: (2, 1)
             # all_transit_matrices['conditional']: (2, 1)
             # all_transit_matrices['marginal']: (2, 1)
-            # used_tkf_beta_approx is a tuple of two False arrays: ( (1,), (1,) )
-            all_transit_matrices, used_tkf_beta_approx = self.transitions_module(sow_intermediates = sow_intermediates)
+            # used_approx is None
+            all_transit_matrices, used_approx = self.transitions_module(sow_intermediates = sow_intermediates)
             
         out_dict = {'logprob_emit_at_indel': logprob_emit_at_indel, #(A,)
                     'joint_logprob_emit_at_match': joint_logprob_emit_at_match, #(T,A,A)
@@ -383,7 +383,7 @@ class IndpSites(ModuleBase):
                     'rate_mat_times_rho': scaled_rate_mat_per_class, #(C,A,A)
                     'to_expm': to_expm, #(T,C,A,A)
                     'cond_logprob_emit_at_match': cond_logprob_emit_at_match_per_class, #(T,C,A,A)
-                    'used_tkf_beta_approx': used_tkf_beta_approx} #( (T,), (T,) )
+                    'used_approx': used_approx} #( (T,), (T,) )
         
         return out_dict
     
@@ -575,7 +575,7 @@ class IndpSites(ModuleBase):
             ### for TKF models
             elif self.indel_model_type.lower() in ['tkf91', 'tkf92']:
                 # always write lambda and mu
-                # also record if you used beta approximation or not
+                # also record if you used any tkf approximations
                 if 'tkf_lam_mu_logits' in dir(self.transitions_module):
                     lam_min_val = self.transitions_module.lam_min_val
                     lam_max_val = self.transitions_module.lam_max_val
@@ -583,11 +583,11 @@ class IndpSites(ModuleBase):
                     offs_max_val = self.transitions_module.offs_max_val
                     lam_mu_logits = self.transitions_module.tkf_lam_mu_logits
                 
-                    lam = bounded_sigmoid(x = lam_mu_logits[0],
+                    lam = bound_sigmoid(x = lam_mu_logits[0],
                                           min_val = lam_min_val,
                                           max_val = lam_max_val)
                     
-                    offset = bounded_sigmoid(x = lam_mu_logits[1],
+                    offset = bound_sigmoid(x = lam_mu_logits[1],
                                              min_val = offs_min_val,
                                              max_val = offs_max_val)
                     mu = lam / ( 1 -  offset) 
@@ -595,15 +595,15 @@ class IndpSites(ModuleBase):
                     with open(f'{out_folder}/PARAMS_{self.indel_model_type}_indel_params.txt','w') as g:
                         g.write(f'insert rate, lambda: {lam}\n')
                         g.write(f'deletion rate, mu: {mu}\n')
-                        g.write(f'used tkf beta approximation? {out["used_tkf_beta_approx"]}\n\n')
-                
+                    
+                                
                 # if tkf92, have extra r_ext param
                 if self.indel_model_type == 'tkf92':
                     r_extend_min_val = self.transitions_module.r_extend_min_val
                     r_extend_max_val = self.transitions_module.r_extend_max_val
                     r_extend_logits = self.transitions_module.r_extend_logits
                     
-                    r_extend = bounded_sigmoid(x = r_extend_logits,
+                    r_extend = bound_sigmoid(x = r_extend_logits,
                                                min_val = r_extend_min_val,
                                                max_val = r_extend_max_val)
                     

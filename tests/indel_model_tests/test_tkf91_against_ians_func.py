@@ -15,7 +15,8 @@ import numpy.testing as npt
 import unittest
 
 from models.simple_site_class_predict.transition_models import TKF91TransitionLogprobs
-from models.simple_site_class_predict.model_functions import (MargTKF91TransitionLogprobs,
+from models.simple_site_class_predict.model_functions import (stable_tkf,
+                                                              MargTKF91TransitionLogprobs,
                                                               CondTransitionLogprobs)
 
 THRESHOLD = 1e-6
@@ -50,27 +51,27 @@ class TestTKF91AgainstIansFunc(unittest.TestCase):
         # fake params
         lam = jnp.array(0.3)
         mu = jnp.array(0.5)
+        offset = 1 - (lam/mu)
         t_array = jnp.array([0.3, 0.5, 0.9])
         
         
         ### my function comes packaged in a flax module
-        config = {'tkf_err': 1e-4}
-        my_model = TKF91TransitionLogprobs(config=config, name='tkf91')
+        my_tkf_params, _ = stable_tkf(mu = mu, 
+                                      offset = offset,
+                                      t_array = t_array)
+        my_tkf_params['log_offset'] = jnp.log(offset)
+        my_tkf_params['log_one_minus_offset'] = jnp.log1p(-offset)
+        
+        my_model = TKF91TransitionLogprobs(config={}, name='tkf91')
         fake_params = my_model.init(rngs=jax.random.key(0),
                                     t_array = t_array,
                                     sow_intermediates = False)
         
-        out_dict = my_model.apply(variables = fake_params,
-                                       lam = lam,
-                                       mu = mu,
-                                       t_array = t_array,
-                                       method = 'tkf_params')
-        
         joint_tkf91 =  my_model.apply(variables = fake_params,
-                                      out_dict = out_dict,
+                                      out_dict = my_tkf_params,
                                       method = 'fill_joint_tkf91') #(T, 4, 4)
         
-        marg_tkf91 = MargTKF91TransitionLogprobs(lam, mu)
+        marg_tkf91 = MargTKF91TransitionLogprobs(offset)
         cond_tkf91 = CondTransitionLogprobs( marg_tkf91, joint_tkf91 )
         
         # don't include sentinel tokens 

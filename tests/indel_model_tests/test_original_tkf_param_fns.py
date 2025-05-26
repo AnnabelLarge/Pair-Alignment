@@ -14,7 +14,8 @@ import numpy as np
 import numpy.testing as npt
 import unittest
 
-from models.simple_site_class_predict.transition_models import TKF91TransitionLogprobs
+from models.simple_site_class_predict.model_functions import stable_tkf
+
 
 THRESHOLD = 1e-6
 
@@ -41,20 +42,13 @@ class TestOriginalTKFParamFns(unittest.TestCase):
         # fake params
         lam = jnp.array(0.3)
         mu = jnp.array(0.5)
+        offset = 1 - (lam/mu)
         t_array = jnp.array([0.3, 0.5, 0.9])
         
         # my function comes packaged in a flax module
-        config = {'tkf_err': 1e-4}
-        my_model = TKF91TransitionLogprobs(config=config, name='tkf91')
-        fake_params = my_model.init(rngs=jax.random.key(0),
-                                    t_array = t_array,
-                                    sow_intermediates = False)
-        
-        my_tkf_params = my_model.apply(variables = fake_params,
-                                       lam = lam,
-                                       mu = mu,
-                                       t_array = t_array,
-                                       method = 'tkf_params')
+        my_tkf_params, _ = stable_tkf(mu = mu, 
+                                      offset = offset,
+                                      t_array = t_array)
         
         pred_alpha = jnp.exp(my_tkf_params['log_alpha'])
         pred_beta = jnp.exp(my_tkf_params['log_beta'])

@@ -1,0 +1,59 @@
+n_samples = 5000
+
+
+C = 1
+rngnum = 24
+rngkey = jax.random.key(rngnum)
+param_file_prefixes = f'basic-hky85-tkf92_simul'
+dset_name = f'{n_samples*2}SAMPS-{param_file_prefixes}'
+
+# later, randomly validate 10% of the data
+validate_size = int( (n_samples * 2) * 0.1 )
+select_key, rngkey = jax.random.split(rngkey, 2)
+validate_samps = jax.random.choice( key=select_key, 
+                                    a= jnp.array(range(n_samples)), 
+                                    shape=(validate_size,), 
+                                    replace=False)
+validate_samps = np.array(validate_samps).tolist()
+
+
+###############################################################################
+### define transition and emission distributions   ############################
+###############################################################################
+### params associated with transitions
+true_lam = jnp.array([0.995/10])
+true_mu = jnp.array([1.0/10])
+true_r_ext = jnp.array([0.2])
+true_class_probs = jnp.array([1.])
+
+
+### params associated with emissions 
+true_ti = jnp.array([1.5])
+true_tv = jnp.array([1.1])
+true_rate_mult = jnp.array([1.])
+
+# hyperparams
+t_array = jnp.array([1.0])
+
+# dims
+T = t_array.shape[0]
+C = true_class_probs.shape[0]
+
+# marginals (at insert and delete sites)
+true_indel_emit_prob = jnp.array([25,  25, 20,  20])
+true_indel_emit_prob = true_indel_emit_prob/true_indel_emit_prob.sum()
+true_indel_emit_prob = true_indel_emit_prob[None,:]
+
+
+### make sure everything is the expected size
+### DON'T CHANGE THIS SECTION
+assert true_lam.shape == (1,)
+assert true_mu.shape == (1,)
+assert true_r_ext.shape == (1,)
+assert true_ti.shape == (1,)
+assert true_tv.shape == (1,)
+
+assert true_class_probs.shape == (C,)
+assert true_rate_mult.shape == (C,)
+
+assert true_indel_emit_prob.shape == (C, 4)

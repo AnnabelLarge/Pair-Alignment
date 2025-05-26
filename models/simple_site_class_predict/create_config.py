@@ -45,14 +45,13 @@ def create_config(load_all: bool,
                         "num_mixtures": "[INT]",
                         
                          "LINEBREAK401": "",
-                         'subst_model_type': '[STR="hky85","gtr"]',
+                         "subst_model_type": '[STR="hky85","gtr"]',
                          "norm_rate_matrix": '[BOOL]',
                          "norm_rate_mults": '[BOOL]',
                          "random_init_exchanges": '[BOOL]',
                          
                          "LINEBREAK402": "",
                          'indel_model_type': '[ None, STR=["tkf91", "tkf92"] ]',
-                         "tkf_err": "[FLOAT = 1e4]",
                          
                          "LINEBREAK403": "",
                          "times_from": "[ STR: ('geometric', 't_array_from_file', 't_per_sample') ]",
