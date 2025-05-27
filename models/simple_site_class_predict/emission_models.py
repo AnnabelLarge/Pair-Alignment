@@ -277,7 +277,6 @@ class GTRRateMat(ModuleBase):
         # have defaults; may or may not be used
         self.rate_mult_min_val, self.rate_mult_max_val  = self.config.get( 'rate_mult_range', (0.01, 10) )
         self.exchange_min_val, self.exchange_max_val  = self.config.get( 'exchange_range', (1e-4, 12) )
-        exchangeabilities_file = self.config['filenames'].get('exch', None)
         
         # tested on GTR; decided that these defaults are best
         #   change if you're comparing against XRATE or running previous tests
@@ -333,10 +332,7 @@ class GTRRateMat(ModuleBase):
         ### initialization
         # init from file
         if not self.random_init_exchanges:
-            err = f'Need a file to load exchangeabilities from!'
-            assert exchangeabilities_file is not None, err
-            del err
-            
+            exchangeabilities_file = self.config['filenames']['exch']
             with open(exchangeabilities_file,'rb') as f:
                 vec = jnp.load(f)
         
