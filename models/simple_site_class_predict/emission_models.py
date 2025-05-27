@@ -273,15 +273,21 @@ class GTRRateMat(ModuleBase):
         ###################
         # required
         self.num_mixtures = self.config['num_mixtures']
-        self.random_init_exchanges = self.config['random_init_exchanges']
-        self.norm_rate_mults = self.config['norm_rate_mults']
-        self.norm_rate_matrix = self.config['norm_rate_matrix']
         
         # have defaults; may or may not be used
-        self.rate_mult_activation = self.config.get('rate_mult_activation', 'bound_sigmoid')
         self.rate_mult_min_val, self.rate_mult_max_val  = self.config.get( 'rate_mult_range', (0.01, 10) )
         self.exchange_min_val, self.exchange_max_val  = self.config.get( 'exchange_range', (1e-4, 12) )
         exchangeabilities_file = self.config['filenames'].get('exch', None)
+        
+        # tested on GTR; decided that these defaults are best
+        #   change if you're comparing against XRATE or running previous tests
+        self.rate_mult_activation = self.config.get('rate_mult_activation', 
+                                                    'bound_sigmoid')
+        self.random_init_exchanges = self.config.get('random_init_exchanges', 
+                                                     True)
+        self.norm_rate_mults = self.config.get('norm_rate_mults', True)
+        self.norm_rate_matrix = self.config.get('norm_rate_matrix', True)
+        
         
         # provided upon model initialization; guaranteed to be here
         emission_alphabet_size = self.config['emission_alphabet_size']
@@ -554,9 +560,8 @@ class GTRRateMatFromFile(GTRRateMat):
         ### read config   #
         ###################
         self.num_mixtures = self.config['num_mixtures']
-        self.random_init_exchanges = self.config['random_init_exchanges']
-        self.norm_rate_mults = self.config['norm_rate_mults']
-        self.norm_rate_matrix = self.config['norm_rate_matrix']
+        self.norm_rate_mults = self.config.get('norm_rate_mults',True)
+        self.norm_rate_matrix = self.config.get('norm_rate_matrix',True)
 
         exchangeabilities_file = self.config['filenames']['exch']
         rate_multiplier_file = self.config['filenames'].get('rate_mult', None)
@@ -699,11 +704,20 @@ class HKY85RateMat(GTRRateMat):
             initialized from unit normal
         
         """
+        # required
         self.num_mixtures = self.config['num_mixtures']
-        self.norm_rate_mults = self.config['norm_rate_mults']
-        self.rate_mult_activation = self.config['rate_mult_activation']
-        self.norm_rate_matrix = self.config.get('norm_rate_matrix',True)
         
+        # have defaults; may or may not be used
+        self.rate_mult_min_val, self.rate_mult_max_val  = self.config.get( 'rate_mult_range', (0.01, 10) )
+        self.exchange_min_val, self.exchange_max_val  = self.config.get( 'exchange_range', (1e-4, 12) )
+        
+        # tested on GTR for proteins; decided that these defaults are best
+        self.rate_mult_activation = self.config.get('rate_mult_activation', 
+                                                    'bound_sigmoid')
+        self.norm_rate_mults = self.config.get('norm_rate_mults', True)
+        self.norm_rate_matrix = self.config.get('norm_rate_matrix', True)
+        
+        # validate
         if self.rate_mult_activation not in ['bound_sigmoid', 'softplus']:
             raise ValueError('Pick either: bound_sigmoid, softplus')
             
@@ -714,11 +728,6 @@ class HKY85RateMat(GTRRateMat):
         if self.num_mixtures > 1:
             # activation
             if self.rate_mult_activation == 'bound_sigmoid':
-                out  = self.config.get( 'rate_mult_range',
-                                       (0.01, 10) )
-                self.rate_mult_min_val, self.rate_mult_max_val = out
-                del out
-                
                 self.rate_multiplier_activation = partial(bound_sigmoid,
                                                           min_val = self.rate_mult_min_val,
                                                           max_val = self.rate_mult_max_val)
@@ -748,12 +757,6 @@ class HKY85RateMat(GTRRateMat):
                                                          ti_tv_vec[1], 
                                                          ti_tv_vec[0], 
                                                          ti_tv_vec[1] ] )
-        
-        out  = self.config.get( 'exchange_range',
-                               (1e-4, 12) )
-        
-        self.exchange_min_val, self.exchange_max_val = out
-        del out
         
         self.exchange_activation = partial(bound_sigmoid,
                                            min_val = self.exchange_min_val,
@@ -801,8 +804,9 @@ class HKY85RateMatFromFile(GTRRateMatFromFile):
     
     def setup(self):
         self.num_mixtures = self.config['num_mixtures']
-        self.norm_rate_mults = self.config['norm_rate_mults']
+        self.norm_rate_mults = self.config.get('norm_rate_mults',True)
         self.norm_rate_matrix = self.config.get('norm_rate_matrix',True)
+        
         rate_multiplier_file = self.config['filenames']['rate_mult']
         exchangeabilities_file = self.config['filenames']['exch']
         
