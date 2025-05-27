@@ -38,12 +38,12 @@
     "pred_model_type": "pairhmm_indp_sites",
     "pred_config": {
         "load_all": true,
-        "num_mixtures": 1,
+        "num_mixtures": 2,
         "norm_loss_by_length": false,
 
         "subst_model_type": "hky85",
         "norm_rate_matrix": true,
-        "norm_rate_mults": true,
+        "norm_rate_mults": false,
         "random_init_exchanges": false,
 
         "indel_model_type": "tkf92",

@@ -38,13 +38,14 @@
     "pred_model_type": "pairhmm_indp_sites",
     "pred_config": {
         "load_all": false,
-        "num_mixtures": 1,
+        "num_mixtures": 2,
         "norm_loss_by_length": false,
 
         "subst_model_type": "hky85",
         "norm_rate_matrix": true,
-        "norm_rate_mults": true,
+        "norm_rate_mults": false,
         "rate_mult_activation": "bound_sigmoid",
+        "rate_mult_range": [1, 0.5],
         "exchange_range": [0.8, 2.0],
 
         "indel_model_type": "tkf92",
