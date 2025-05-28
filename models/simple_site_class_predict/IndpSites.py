@@ -527,7 +527,7 @@ class IndpSites(ModuleBase):
                 
                 elif self.subst_model_type.lower() == 'hky85':
                     with open(f'{out_folder}/PARAMS_HKY85RateMat_model.txt','w') as g:
-                        g.write(f'transition rate, ti: {exchangeabilities[1]}')
+                        g.write(f'transition rate, ti: {exchangeabilities[1]}\n')
                         g.write(f'transition rate, tv: {exchangeabilities[0]}')
                     
                     

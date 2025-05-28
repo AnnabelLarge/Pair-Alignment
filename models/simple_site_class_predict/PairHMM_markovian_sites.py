@@ -48,6 +48,12 @@ def _log_dot_bigger(log_vec, log_mat):
     return logsumexp(broadcasted_sum, axis=1)
 
 def _expand_dims_like(x, target):
+    """
+    this is taken from flax RNN
+    
+    https://flax.readthedocs.io/en/v0.6.10/_modules/flax/linen/recurrent.html \
+        #RNN:~:text=.ndim))-,def%20flip_sequences(,-inputs%3A%20Array
+    """
     return x.reshape(list(x.shape) + [1] * (target.ndim - x.ndim))
 
 def _flip_sequences( inputs, 

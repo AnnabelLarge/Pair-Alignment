@@ -1218,3 +1218,136 @@ def desc_marginal_probs_from_counts( batch: tuple[ArrayLike],
     
     return {'desc_neg_logP': desc_neg_logP,  #(B,)
             'desc_neg_logP_length_normed': desc_neg_logP_length_normed}  #(B,)
+
+
+
+###############################################################################
+### logprob from forward/backward over site classes    ########################
+###############################################################################
+def get_emissions(aligned_inputs,
+                  pos,
+                  joint_logprob_emit_at_match,
+                  logprob_emit_at_indel):
+    """
+    can use this function in forward and backward functions to find 
+      emission probabilities (which are site independent)
+    """
+    T = joint_logprob_emit_at_match.shape[0]
+    C = joint_logprob_emit_at_match.shape[1]
+    B = aligned_inputs.shape[0]
+    
+    # unpack
+    anc_toks = aligned_inputs[:,pos,0]
+    desc_toks = aligned_inputs[:,pos,1]
+    state_at_pos = aligned_inputs[:,pos,2]
+    
+    # get all possible scores
+    joint_emit_if_match = joint_logprob_emit_at_match[:, :, anc_toks - 3, desc_toks - 3] # (T, C, B)
+    emit_if_indel_desc = logprob_emit_at_indel[:, desc_toks - 3] #(C,)
+    emit_if_indel_anc = logprob_emit_at_indel[:, anc_toks - 3] #(C,)
+    
+    # stack all; (3, T, C, B)
+    emit_if_indel_desc = jnp.broadcast_to(emit_if_indel_desc[None, :, :], (T, C, B)) #(T, C, B)
+    emit_if_indel_anc = jnp.broadcast_to(emit_if_indel_anc[None, :, :], (T, C, B)) #(T, C, B)
+    joint_emissions = jnp.stack([joint_emit_if_match, 
+                                 emit_if_indel_desc, 
+                                 emit_if_indel_anc], axis=0) #(3, T, C, B)
+
+    # expand current state for take_along_axis operation
+    state_at_pos_expanded = jnp.broadcast_to( state_at_pos[None, None, None, :]-1, 
+                                              (1, T, C, B) )  #(1, T, C, B)
+
+    # gather, remove temporary leading axis
+    joint_e = jnp.take_along_axis( joint_emissions, 
+                                   state_at_pos_expanded,
+                                   axis=0 )[0, ...] # (T, C, B)
+    
+    return joint_e
+
+def joint_only_forward(aligned_inputs,
+                       logprob_emit_at_indel,
+                       joint_logprob_emit_at_match,
+                       joint_logprob_transit):
+    """
+    forward algo ONLY to find joint loglike
+    """
+    ######################################################
+    ### initialize with <start> -> any (curr pos is 1)   #
+    ######################################################
+    pos = 1
+    L_align = aligned_inputs.shape[1]
+    
+    # emissions; (T, C_curr, B)
+    e = get_emissions( aligned_inputs=aligned_inputs,
+                       pos=pos,
+                       joint_logprob_emit_at_match=joint_logprob_emit_at_match,
+                       logprob_emit_at_indel=logprob_emit_at_indel )
+    
+    # transitions; assume there's never start -> end; (T, C_curr, B)
+    # joint_logprob_transit is (T, C_prev, C_curr, S_prev, S_curr)
+    # initial state is 4 (<start>); take the last row
+    # use C_prev=0 for start class (but it doesn't matter, because the 
+    # transition probability is the same for all C_prev)
+    curr_state = aligned_inputs[:, pos, 2]
+    start_any = joint_logprob_transit[:, 0, :, -1, :]
+    tr = start_any[...,curr_state-1]
+    
+    # carry value; (T, C_curr, B)
+    init_alpha = e + tr
+    del e, tr, start_any, curr_state, pos
+    
+    
+    ######################################################
+    ### scan down length dimension to end of alignment   #
+    ######################################################
+    def scan_fn(prev_alpha, pos):
+        ### unpack
+        anc_toks =   aligned_inputs[:,   pos, 0]
+        desc_toks =  aligned_inputs[:,   pos, 1]
+
+        prev_state = aligned_inputs[:, pos-1, 2]
+        curr_state = aligned_inputs[:,   pos, 2]
+        curr_state = jnp.where( curr_state!=5, curr_state, 4 )
+        
+        
+        ### emissions
+        e = get_emissions( aligned_inputs=aligned_inputs,
+                           pos=pos,
+                           joint_logprob_emit_at_match=joint_logprob_emit_at_match,
+                           logprob_emit_at_indel=logprob_emit_at_indel )
+        
+        
+        ### transition probabilities
+        def main_body(in_carry):
+            # like dot product with C_prev, C_curr
+            tr_per_class = joint_logprob_transit[..., prev_state-1, curr_state-1]                
+            return e + logsumexp(in_carry[:, :, None, :] + tr_per_class, axis=1)
+        
+        def end(in_carry):
+            # if end, then curr_state = -1 (<end>)
+            tr_per_class = joint_logprob_transit[..., -1, prev_state-1, -1]
+            return tr_per_class + in_carry
+        
+        
+        ### alpha update, in log space ONLY if curr_state is not pad
+        new_alpha = jnp.where(curr_state != 0,
+                              jnp.where( curr_state != 4,
+                                          main_body(prev_alpha),
+                                          end(prev_alpha) ),
+                              prev_alpha )
+        
+        return (new_alpha, new_alpha)
+    
+    ### end scan function definition, use scan
+    idx_arr = jnp.array( [ i for i in range(2, L_align) ] )
+    _, stacked_outputs = jax.lax.scan( f = scan_fn,
+                                       init = init_alpha,
+                                       xs = idx_arr,
+                                       length = idx_arr.shape[0] )
+    
+    # stacked_outputs is cumulative sum PER POSITION, PER TIME
+    # append the first return value (from sentinel -> first alignment column)
+    stacked_outputs = jnp.concatenate( [ init_alpha[None,...],
+                                         stacked_outputs ],
+                                      axis=0) #(L_align, T, C, B)
+    return stacked_outputs
