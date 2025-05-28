@@ -38,10 +38,7 @@ def init_time_array(args):
                                   )
         t_array = [ (t_grid_center * t_grid_step**q_i) for q_i in quantization_grid ]
         
-        # postproc
-        t_array = np.array(t_array)
-        t_array_filtered = t_array[t_array >= args.pred_config['min_time']]
-        return t_array_filtered
+        return np.array(t_array)
     
     
     ### read times from flat text file
@@ -54,10 +51,7 @@ def init_time_array(args):
             for line in f:
                 t_array.append( float( line.strip() ) )
         
-        # postproc
-        t_array = np.array(t_array)
-        t_array_filtered = t_array[t_array >= args.pred_config['min_time']]
-        return t_array_filtered
+        return np.array(t_array)
     
     
     ### figure out time quantization per sample... later
