@@ -28,7 +28,7 @@ def train_one_batch(batch,
                     interms_for_tboard,
                     indel_model_type,
                     update_grads: bool = True,
-                    whole_dset_grad_desc: bool = False
+                    whole_dset_grad_desc: bool = False,
                     **kwargs):
     """
     provided during part + jit:

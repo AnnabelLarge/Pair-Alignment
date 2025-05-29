@@ -239,11 +239,11 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     
     # when to save/what to save
     best_epoch = -1
-    best_test_loss = 999999
+    best_test_loss = jnp.finfo(jnp.float32).max
     best_pairhmm_trainstate = pairhmm_trainstate
     
     # quit training if test loss increases for X epochs in a row
-    prev_test_loss = 999999
+    prev_test_loss = jnp.finfo(jnp.float32).max
     early_stopping_counter = 0
     
     # rng key for train
