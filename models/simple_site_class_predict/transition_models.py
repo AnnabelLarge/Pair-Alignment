@@ -722,7 +722,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         
         """
         ### unpack config
-        self.num_tkf_site_classes = self.config['num_tkf_site_classes']
+        self.num_tkf_fragment_classes = self.config['num_tkf_fragment_classes']
         
         # initializing lamda, offset
         init_lam_offset_logits = self.config.get( 'init_lambda_offset_logits', 
@@ -736,7 +736,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         # initializing r extension prob
         init_r_extend_logits = self.config.get( 'init_r_extend_logits',
                                                [-x/10 for x in 
-                                                range(1, self.num_tkf_site_classes+1)] )
+                                                range(1, self.num_tkf_fragment_classes+1)] )
         init_r_extend_logits = jnp.array(init_r_extend_logits, dtype=float)
         self.r_extend_min_val, self.r_extend_max_val = self.config.get( 'r_range', 
                                                                 [1e-4, 0.999] )
@@ -754,7 +754,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
                                             init_lam_offset_logits.shape,
                                             jnp.float32)
         
-        # up to num_tkf_site_classes different r extension probabilities
+        # up to num_tkf_fragment_classes different r extension probabilities
         # with default first 10 values: 
         #   0.40004998, 0.38006914, 0.3601878, 0.34050342, 0.32110974
         #   0.30209476, 0.2835395, 0.26551658, 0.24808942, 0.2313115

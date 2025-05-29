@@ -122,12 +122,15 @@ class IndpSites(ModuleBase):
         self.subst_model_type = self.config['subst_model_type']
         self.indel_model_type = self.config['indel_model_type']
         self.times_from = self.config['times_from']
-        self.norm_loss_by_length = self.config['norm_loss_by_length']
         num_mixtures = self.config['num_mixtures']
         
         # optional
-        self.norm_loss_by = self.config.get('norm_loss_by', 'desc_len')
+        self.norm_loss_by = self.config.get('norm_loss_by', 'desc_len') # this is for reporting
+        self.norm_loss_by_length = self.config.get('norm_loss_by_length', False) # this is the objective during training
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
+        
+        # update config file to enforce this default
+        self.config['num_tkf_fragment_classes'] = 1
         
         
         ###########################################
@@ -185,13 +188,12 @@ class IndpSites(ModuleBase):
         Use this during active model training
         
         returns:
-            - loss: average across the batch, based on length-normalized
-                    joint log-likelihood
+            - loss: average across the batch, based on joint log-likelihood
                     
             - aux_dict: has the following keys and values
               1.) 'joint_neg_logP': sum down the length
               2.) 'joint_neg_logP_length_normed': sum down the length,  
-                  normalized by desired length (set by self.norm_by)
+                  normalized by desired length (set by self.norm_loss_by)
               3.) whether or not you used approximation formula for TKF indel model
         """
         # which times to use for scoring matrices
@@ -206,6 +208,7 @@ class IndpSites(ModuleBase):
                                         sow_intermediates=sow_intermediates)
         
         # calculate loglikelihoods; provide both batch and t_array, just in case
+        # time marginalization hidden in joint_prob_from_counts function
         aux_dict = joint_prob_from_counts( batch = batch,
                                            times_from = self.times_from,
                                            score_indels = False if self.indel_model_type is None else True,
@@ -213,8 +216,8 @@ class IndpSites(ModuleBase):
                                            t_array = t_array,
                                            exponential_dist_param = self.exponential_dist_param,
                                            norm_loss_by = self.norm_loss_by )
-        
         aux_dict['used_approx'] = scoring_matrices_dict['used_approx']
+        
 
         # if doing stochastic gradient descent, take the average over the batch
         # if doing gradient descent with whole dataset, only use the sum
@@ -265,6 +268,7 @@ class IndpSites(ModuleBase):
         #########################
         ### joint probability   #
         #########################
+        # time marginalization hidden in joint_prob_from_counts function
         aux_dict = joint_prob_from_counts( batch = batch,
                                            times_from = self.times_from,
                                            score_indels = False if self.indel_model_type is None else True,
@@ -354,26 +358,26 @@ class IndpSites(ModuleBase):
         ### build transition log-probability matrix        #
         ####################################################
         if self.indel_model_type == 'tkf91':
-            # all_transit_matrices['joint']: (T, A, A)
-            # all_transit_matrices['conditional']: (T, A, A)
-            # all_transit_matrices['marginal']: (T, A, A)
+            # all_transit_matrices['joint']: (T, C, C, S, S) or (B, C, C, S, S)
+            # all_transit_matrices['conditional']: (T, C, C, S, S) or (B, C, C, S, S)
+            # all_transit_matrices['marginal']: (C, C, 2, 2)
             # used_approx is a dictionary of boolean arrays
             all_transit_matrices, used_approx = self.transitions_module(t_array = t_array,
                                                            sow_intermediates = sow_intermediates) 
         
         elif self.indel_model_type == 'tkf92':
-            # all_transit_matrices['joint']: (T, C, C, A, A)
-            # all_transit_matrices['conditional']: (T, C, C, A, A)
-            # all_transit_matrices['marginal']: (T, C, C, A, A)
+            # all_transit_matrices['joint']: (T, C, C, S, S) or (B, C, C, S, S)
+            # all_transit_matrices['conditional']: (T, C, C, S, S) or (B, C, C, S, S)
+            # all_transit_matrices['marginal']: (C, C, 2, 2)
             # used_approx is a dictionary of boolean arrays
             all_transit_matrices, used_approx = self.transitions_module(t_array = t_array,
                                                            class_probs = jnp.array([1.]),
                                                            sow_intermediates = sow_intermediates)
             
             # C=1, so remove intermediate dims
-            all_transit_matrices['joint'] = all_transit_matrices['joint'][:,0,0,...] # (T, A, A)
-            all_transit_matrices['conditional'] = all_transit_matrices['conditional'][:,0,0,...] # (T, A, A)
-            all_transit_matrices['marginal'] = all_transit_matrices['marginal'][0,0,...] # (T, A, A)
+            all_transit_matrices['joint'] = all_transit_matrices['joint'][:,0,0,...] # (T, S, S)
+            all_transit_matrices['conditional'] = all_transit_matrices['conditional'][:,0,0,...] # (T, S, S)
+            all_transit_matrices['marginal'] = all_transit_matrices['marginal'][0,0,...] # (T, S, S)
         
         elif self.indel_model_type is None:
             # all_transit_matrices['joint']: (2, 1)
@@ -384,11 +388,11 @@ class IndpSites(ModuleBase):
             
         out_dict = {'logprob_emit_at_indel': logprob_emit_at_indel, #(A,)
                     'joint_logprob_emit_at_match': joint_logprob_emit_at_match, #(T,A,A)
-                    'all_transit_matrices': all_transit_matrices, #(T,S,S)
+                    'all_transit_matrices': all_transit_matrices, #dict
                     'rate_mat_times_rho': scaled_rate_mat_per_class, #(C,A,A)
                     'to_expm': to_expm, #(T,C,A,A)
                     'cond_logprob_emit_at_match': cond_logprob_emit_at_match_per_class, #(T,C,A,A)
-                    'used_approx': used_approx} #( (T,), (T,) )
+                    'used_approx': used_approx} #dict
         
         return out_dict
     
@@ -627,17 +631,17 @@ class IndpSites(ModuleBase):
         # exchangeabilities
         exchange_min_val = self.rate_matrix_module.exchange_min_val
         exchange_max_val = self.rate_matrix_module.exchange_max_val
+        params_range = { "exchange_min_val": exchange_min_val,
+                         "exchange_max_val": exchange_max_val}
         
         #rate multiplier
         if self.rate_mult_activation == 'bound_sigmoid':
             rate_mult_min_val = self.rate_matrix_module.rate_mult_min_val
             rate_mult_max_val = self.rate_matrix_module.rate_mult_max_val
+            to_add = {"rate_mult_min_val": rate_mult_min_val,
+                      "rate_mult_max_val": rate_mult_max_val}
+            params_range = {**params_range, **to_add}
         
-        params_range = { "exchange_min_val": exchange_min_val,
-                         "exchange_max_val": exchange_max_val,
-                         "rate_mult_min_val": rate_mult_min_val,
-                         "rate_mult_max_val": rate_mult_max_val
-                         }
         
         ### transitions_module
         if self.indel_model_type is not None:
@@ -695,6 +699,8 @@ class IndpSitesLoadAll(IndpSites):
             Default is 1
         
         config['times_from'] : {geometric, t_array_from_file, t_per_sample}
+        
+        config['filenames'] : files of parameters to load
         
     name : str
         class name, for flax
