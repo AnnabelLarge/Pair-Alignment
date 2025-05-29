@@ -28,6 +28,7 @@ def train_one_batch(batch,
                     interms_for_tboard,
                     indel_model_type,
                     update_grads: bool = True,
+                    whole_dset_grad_desc: bool = False
                     **kwargs):
     """
     provided during part + jit:
@@ -45,6 +46,7 @@ def train_one_batch(batch,
         (loss_NLL, aux_dict), sow_dict = pairhmm_trainstate.apply_fn(variables = pairhmm_params,
                                           batch = batch,
                                           t_array = t_array,
+                                          whole_dset_grad_desc = whole_dset_grad_desc,
                                           sow_intermediates = finalpred_sow_outputs,
                                           mutable=['histograms','scalars'] if finalpred_sow_outputs else [])
         
@@ -120,6 +122,7 @@ def eval_one_batch( batch,
         (_, aux_dict), sow_dict = pairhmm_trainstate.apply_fn(variables = pairhmm_trainstate.params,
                                           batch = batch,
                                           t_array = t_array,
+                                          whole_dset_grad_desc = False,
                                           sow_intermediates = False,
                                           mutable=['histograms','scalars'] if finalpred_sow_outputs else [])
     

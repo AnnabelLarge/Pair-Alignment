@@ -179,7 +179,8 @@ class IndpSites(ModuleBase):
     def __call__(self,
                  batch,
                  t_array,
-                 sow_intermediates: bool):
+                 sow_intermediates: bool,
+                 whole_dset_grad_desc: bool=False):
         """
         Use this during active model training
         
@@ -215,11 +216,15 @@ class IndpSites(ModuleBase):
         
         aux_dict['used_approx'] = scoring_matrices_dict['used_approx']
 
+        # if doing stochastic gradient descent, take the average over the batch
+        # if doing gradient descent with whole dataset, only use the sum
+        reduction = jnp.mean if not whole_dset_grad_desc else jnp.sum
+
         if self.norm_loss_by_length:
-            loss = jnp.mean( aux_dict['joint_neg_logP_length_normed'] )
+            loss = reduction( aux_dict['joint_neg_logP_length_normed'] )
         
         elif not self.norm_loss_by_length:
-            loss = jnp.mean( aux_dict['joint_neg_logP'] )
+            loss = reduction( aux_dict['joint_neg_logP'] )
             
         return loss, aux_dict
     

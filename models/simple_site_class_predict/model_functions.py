@@ -10,28 +10,42 @@ About:
 standalone functions for pairHMM models; are NOT flax modules and do NOT 
   have parameters; also unable to record to tensorboard with these
 
+
 functions:
 ---------
- 'CondTransitionLogprobs',
- 'MargTKF91TransitionLogprobs',
- 'MargTKF92TransitionLogprobs'
- 'anc_marginal_probs_from_counts',
- 'desc_marginal_probs_from_counts',
- 'get_cond_logprob_emit_at_match_per_class',
- 'get_joint_logprob_emit_at_match_per_class',
- 'joint_prob_from_counts',
- 'lse_over_equl_logprobs_per_class',
- 'lse_over_match_logprobs_per_class',
- 'marginalize_over_times',
- 'rate_matrix_from_exch_equl',
- scale_rate_multipliers,
- 'scale_rate_matrix',
- 'upper_tri_vector_to_sym_matrix'
+'CondTransitionLogprobs',
+'MargTKF91TransitionLogprobs',
+'MargTKF92TransitionLogprobs',
+'anc_marginal_probs_from_counts',
+'approx_beta',
+'approx_one_minus_gamma',
+'bound_sigmoid',
+'bound_sigmoid_inverse',
+'desc_marginal_probs_from_counts',
+'get_cond_logprob_emit_at_match_per_class',
+'get_joint_loglike_emission',
+'get_joint_logprob_emit_at_match_per_class',
+'joint_only_forward',
+'joint_prob_from_counts',
+'log_one_minus_x',
+'log_x_minus_one',
+'logsumexp_with_arr_lst',
+'lse_over_equl_logprobs_per_class',
+'lse_over_match_logprobs_per_class',
+'marginalize_over_times',
+'rate_matrix_from_exch_equl',
+'safe_log',
+'scale_rate_matrix',
+'scale_rate_multipliers',
+'stable_log_one_minus_x',
+'stable_tkf',
+'true_beta',
+'upper_tri_vector_to_sym_matrix'
 
 
 internal:
 ---------
-'_selectively_add_time_dim'
+'_selectively_add_time_dim',
 """
 import jax
 from jax import numpy as jnp
@@ -1224,13 +1238,42 @@ def desc_marginal_probs_from_counts( batch: tuple[ArrayLike],
 ###############################################################################
 ### logprob from forward/backward over site classes    ########################
 ###############################################################################
-def get_emissions(aligned_inputs,
+def get_joint_loglike_emission(aligned_inputs,
                   pos,
                   joint_logprob_emit_at_match,
                   logprob_emit_at_indel):
     """
     can use this function in forward and backward functions to find 
       emission probabilities (which are site independent)
+    
+    L: length of pairwise alignment
+    T: number of timepoints
+    B: batch size
+    C: number of latent site clases
+    A: alphabet size (20 for proteins, 4 for amino acids)
+    
+    
+    Arguments
+    ----------
+    aligned_inputs : ArrayLike, (B, L, 3)
+        dim2=0: ancestor
+        dim2=1: descendant
+        dim2=2: alignment state; M=1, I=2, D=3, S=4, E=5
+    
+    pos : int
+        which alignment column you're at
+    
+    joint_logprob_emit_at_match : ArrayLike, (T, C, A, A)
+        logP(anc, desc | c, t); log-probability of emission at match site
+    
+    logprob_emit_at_indel : ArrayLike, (C, A)
+        logP(anc | c) or logP(desc | c); log-equilibrium distribution
+        
+    Returns
+    -------
+    joint_e : ArrayLike, (T, C, B)
+        log-probability of emission at given column, across all possible 
+        site classes
     """
     T = joint_logprob_emit_at_match.shape[0]
     C = joint_logprob_emit_at_match.shape[1]
@@ -1243,12 +1286,14 @@ def get_emissions(aligned_inputs,
     
     # get all possible scores
     joint_emit_if_match = joint_logprob_emit_at_match[:, :, anc_toks - 3, desc_toks - 3] # (T, C, B)
-    emit_if_indel_desc = logprob_emit_at_indel[:, desc_toks - 3] #(C,)
-    emit_if_indel_anc = logprob_emit_at_indel[:, anc_toks - 3] #(C,)
+    emit_if_indel_desc = logprob_emit_at_indel[:, desc_toks - 3] #(C, B)
+    emit_if_indel_anc = logprob_emit_at_indel[:, anc_toks - 3] #(C, B)
     
-    # stack all; (3, T, C, B)
-    emit_if_indel_desc = jnp.broadcast_to(emit_if_indel_desc[None, :, :], (T, C, B)) #(T, C, B)
-    emit_if_indel_anc = jnp.broadcast_to(emit_if_indel_anc[None, :, :], (T, C, B)) #(T, C, B)
+    # stack all
+    emit_if_indel_desc = jnp.broadcast_to( emit_if_indel_desc[None, :, :], 
+                                           (T, C, B) ) #(T, C, B)
+    emit_if_indel_anc = jnp.broadcast_to( emit_if_indel_anc[None, :, :], 
+                                          (T, C, B) ) #(T, C, B)
     joint_emissions = jnp.stack([joint_emit_if_match, 
                                  emit_if_indel_desc, 
                                  emit_if_indel_anc], axis=0) #(3, T, C, B)
@@ -1265,11 +1310,48 @@ def get_emissions(aligned_inputs,
     return joint_e
 
 def joint_only_forward(aligned_inputs,
-                       logprob_emit_at_indel,
                        joint_logprob_emit_at_match,
+                       logprob_emit_at_indel,
                        joint_logprob_transit):
     """
     forward algo ONLY to find joint loglike
+    
+    L_align: length of pairwise alignment
+    T: number of timepoints
+    B: batch size
+    C: number of latent site clases
+    A: alphabet (20 for proteins, 4 for DNA)
+    S: possible states; here, this is 4: M, I, D, start/end
+    
+    Arguments
+    ----------
+    aligned_inputs : ArrayLike, (B, L, 3)
+        dim2=0: ancestor
+        dim2=1: descendant
+        dim2=2: alignment state; M=1, I=2, D=3, S=4, E=5
+    
+    joint_logprob_emit_at_match : ArrayLike, (T, C, A, A)
+        logP(anc, desc | c, t); log-probability of emission at match site
+    
+    logprob_emit_at_indel : ArrayLike, (C, A)
+        logP(anc | c) or P(desc | c); log-equilibrium distribution
+    
+    joint_logprob_transit : ArrayLike, (T, C, C, S, S)
+        logP(new state, new class | prev state, prev class, t); the joint 
+        transition matrix for finding logP(anc, desc, align | c, t)
+    
+    Returns:
+    ---------
+    stacked_outputs : ArrayLike, (L_align, T, C, B)
+        the cache from the forward algorithm; this is the total log-probability 
+        of ending at a given alignment column (l \in L_align) in class C, given
+        the observed alignment
+        
+        to marginalize over all possible combinations of hidden site classes 
+        for a given alignment: extract the final element of the length 
+        dimension (i.e. stacked_outputs[-1,...]) and do logsumexp over all 
+        classes C. This leaves you with the joint probability of the observed 
+        alignment, at all branch lengths in T
     """
     ######################################################
     ### initialize with <start> -> any (curr pos is 1)   #
@@ -1277,23 +1359,23 @@ def joint_only_forward(aligned_inputs,
     pos = 1
     L_align = aligned_inputs.shape[1]
     
-    # emissions; (T, C_curr, B)
-    e = get_emissions( aligned_inputs=aligned_inputs,
+    # emissions;
+    e = get_joint_loglike_emission( aligned_inputs=aligned_inputs,
                        pos=pos,
                        joint_logprob_emit_at_match=joint_logprob_emit_at_match,
-                       logprob_emit_at_indel=logprob_emit_at_indel )
+                       logprob_emit_at_indel=logprob_emit_at_indel ) # (T, C, B)
     
-    # transitions; assume there's never start -> end; (T, C_curr, B)
+    # transitions; assume there's never start -> end
     # joint_logprob_transit is (T, C_prev, C_curr, S_prev, S_curr)
     # initial state is 4 (<start>); take the last row
     # use C_prev=0 for start class (but it doesn't matter, because the 
     # transition probability is the same for all C_prev)
-    curr_state = aligned_inputs[:, pos, 2]
-    start_any = joint_logprob_transit[:, 0, :, -1, :]
-    tr = start_any[...,curr_state-1]
+    curr_state = aligned_inputs[:, pos, 2] #(B,)
+    start_any = joint_logprob_transit[:, 0, :, -1, :] #(T, C_curr, S_curr)
+    tr = start_any[...,curr_state-1] #(T, C_curr, B)
     
-    # carry value; (T, C_curr, B)
-    init_alpha = e + tr
+    # carry value; 
+    init_alpha = e + tr # (T, C, B)
     del e, tr, start_any, curr_state, pos
     
     
@@ -1311,22 +1393,22 @@ def joint_only_forward(aligned_inputs,
         
         
         ### emissions
-        e = get_emissions( aligned_inputs=aligned_inputs,
+        e = get_joint_loglike_emission( aligned_inputs=aligned_inputs,
                            pos=pos,
                            joint_logprob_emit_at_match=joint_logprob_emit_at_match,
-                           logprob_emit_at_indel=logprob_emit_at_indel )
+                           logprob_emit_at_indel=logprob_emit_at_indel ) # (T, C, B)
         
         
         ### transition probabilities
         def main_body(in_carry):
             # like dot product with C_prev, C_curr
-            tr_per_class = joint_logprob_transit[..., prev_state-1, curr_state-1]                
-            return e + logsumexp(in_carry[:, :, None, :] + tr_per_class, axis=1)
+            tr_per_class = joint_logprob_transit[..., prev_state-1, curr_state-1] #(T, C_prev, C_curr, B)            
+            return e + logsumexp(in_carry[:, :, None, :] + tr_per_class, axis=1) #(T, C_curr, B)    
         
         def end(in_carry):
             # if end, then curr_state = -1 (<end>)
-            tr_per_class = joint_logprob_transit[..., -1, prev_state-1, -1]
-            return tr_per_class + in_carry
+            tr_per_class = joint_logprob_transit[..., -1, prev_state-1, -1] #(T, C, B)    
+            return tr_per_class + in_carry #(T, C, B)   
         
         
         ### alpha update, in log space ONLY if curr_state is not pad
@@ -1334,20 +1416,19 @@ def joint_only_forward(aligned_inputs,
                               jnp.where( curr_state != 4,
                                           main_body(prev_alpha),
                                           end(prev_alpha) ),
-                              prev_alpha )
-        
+                              prev_alpha ) #(T, C, B) 
         return (new_alpha, new_alpha)
     
     ### end scan function definition, use scan
-    idx_arr = jnp.array( [ i for i in range(2, L_align) ] )
+    idx_arr = jnp.array( [ i for i in range(2, L_align) ] ) #(L_align)
     _, stacked_outputs = jax.lax.scan( f = scan_fn,
                                        init = init_alpha,
                                        xs = idx_arr,
-                                       length = idx_arr.shape[0] )
+                                       length = idx_arr.shape[0] )  #(L_align-1, T, C, B) 
     
     # stacked_outputs is cumulative sum PER POSITION, PER TIME
     # append the first return value (from sentinel -> first alignment column)
-    stacked_outputs = jnp.concatenate( [ init_alpha[None,...],
-                                         stacked_outputs ],
+    stacked_outputs = jnp.concatenate( [ init_alpha[None,...], #(1, T, C, B))
+                                         stacked_outputs ], #(L_align-1, T, C, B) 
                                       axis=0) #(L_align, T, C, B)
-    return stacked_outputs
+    return stacked_outputs #(L_align, T, C, B)

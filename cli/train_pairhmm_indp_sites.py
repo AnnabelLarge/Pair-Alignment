@@ -135,6 +135,11 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     test_dl = dataloader_dict['test_dl']
     t_array_for_all_samples = dataloader_dict['t_array_for_all_samples']
     
+    # if doing gradient descent, the length of the training dataloader will be 
+    #   one; you'll use sum as the reduction function, instead of mean
+    # kind of rare, but sometimes it comes up
+    whole_dset_grad_desc = (len(training_dl) == 1)
+    
     # add equilibrium counts under two different labels
     args.pred_config['training_dset_emit_counts'] = training_dset.emit_counts
     
@@ -206,6 +211,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
                                indel_model_type = args.pred_config.get('indel_model_type', None),
                                t_array = t_array_for_all_samples, 
                                interms_for_tboard = args.interms_for_tboard,
+                               whole_dset_grad_desc = whole_dset_grad_desc,
                                update_grads = args.update_grads )
     train_fn_jitted = jax.jit(parted_train_fn)
     del parted_train_fn
@@ -376,12 +382,17 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
             eval_metrics = eval_fn_jitted(batch=batch, 
                                           pairhmm_trainstate=pairhmm_trainstate)
             
+            # if doing stochastic gradient descent, take the average over the batch
+            # if doing gradient descent with whole dataset, only use the sum
+            reduction = jnp.mean if not whole_dset_grad_desc else jnp.sum
+
             if args.pred_config['norm_loss_by_length']:
-                batch_loss = jnp.mean( eval_metrics['joint_neg_logP_length_normed'] )
+                batch_loss = reduction( eval_metrics['joint_neg_logP_length_normed'] )
             
             elif not args.pred_config['norm_loss_by_length']:
-                batch_loss = jnp.mean( eval_metrics['joint_neg_logP'] )
-            
+                batch_loss = reduction( eval_metrics['joint_neg_logP'] )
+                
+                
             ### add to total loss for this epoch; weight by number of
             ###   samples/valid tokens in this batch
             weight = args.batch_size / len(test_dset)

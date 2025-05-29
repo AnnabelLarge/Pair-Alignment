@@ -28,7 +28,6 @@ from models.simple_site_class_predict.transition_models import TKF92TransitionLo
 from models.simple_site_class_predict.model_functions import (stable_tkf,
                                                               MargTKF92TransitionLogprobs,
                                                               CondTransitionLogprobs,
-                                                              get_emissions,
                                                               joint_only_forward)
 
 THRESHOLD = 1e-6
@@ -49,13 +48,14 @@ class TestJointOnlyForward(unittest.TestCase):
         self.fake_aligns = [ ('AC-A','D-ED'),
                         ('D-ED','AC-A'),
                         ('ECDAD','-C-A-'),
+                        ('-C-A-','ECDAD'),
                         ('-C-A-','ECDAD') ]
         
         self.fake_aligns =  str_aligns_to_tensor(self.fake_aligns) #(B, L, 3)
         
         # fake params
         rngkey = jax.random.key(42) # note: reusing this rngkey over and over
-        t_array = jnp.array([0.3, 0.5, 0.7, 0.9])
+        t_array = jnp.array([0.3, 0.5])
         self.C = 3
         self.A = 20
         lam = jnp.array(0.3)
