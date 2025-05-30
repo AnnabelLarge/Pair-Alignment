@@ -309,7 +309,7 @@ def _load_aligned_mats(data_dir,
     
     # pairHMM: don't need alignment indices
     elif pred_model_type in ['pairhmm_indp_sites',
-                             'pairhmm_markov_sites']:
+                             'pairhmm_frag_and_site_classes']:
         neg_nine_padded_mat = None
     
     # (neural pairHMM: keep everything as-is)
@@ -469,7 +469,7 @@ class FullLenDset(Dataset):
         split_prefixes : List[str]
             prefixes of the datasets to include
         
-        pred_model_type : ['pairhmm_indp_sites', 'pairhmm_markov_sites', 
+        pred_model_type : ['pairhmm_indp_sites', 'pairhmm_frag_and_site_classes', 
                            'feedforward', 'neural_hmm']
             what the broad classification of the model is; changes behaviors here
         

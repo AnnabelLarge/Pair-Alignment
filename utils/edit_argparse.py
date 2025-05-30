@@ -51,15 +51,15 @@ def fill_with_default_values(args):
     
     
     elif args.pred_model_type in ['pairhmm_indp_sites',
-                                  'pairhmm_markov_sites']:
+                                  'pairhmm_frag_and_site_classes']:
         if 'tkf_err' not in args.pred_config.keys():
             args.pred_config['tkf_err '] = 1e-4
     
         if args.pred_model_type == 'pairhmm_indp_sites':
-            args.pred_config['num_tkf_site_classes'] = 1
+            args.pred_config['num_tkf_fragment_classes'] = 1
         
-        elif args.pred_model_type == 'pairhmm_markov_sites':
-            args.pred_config['num_tkf_site_classes'] = args.pred_config['num_mixtures']
+        elif args.pred_model_type == 'pairhmm_frag_and_site_classes':
+            args.pred_config['num_tkf_fragment_classes'] = args.pred_config['num_mixtures']
 
         
     
@@ -106,7 +106,7 @@ def share_top_level_args(args):
         args.pred_config['full_alphabet_size'] = args.full_alphabet_size
 
     elif args.pred_model_type in ['pairhmm_indp_sites',
-                                  'pairhmm_markov_sites']:
+                                  'pairhmm_frag_and_site_classes']:
         args.pred_config['gap_tok'] = args.gap_tok
         args.pred_config['norm_loss_by'] = args.norm_loss_by
         args.pred_config['emission_alphabet_size'] = args.emission_alphabet_size

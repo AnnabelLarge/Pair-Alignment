@@ -19,6 +19,9 @@ import shutil
 
 
 def main():
+    if 'RESULTS' in os.listdir():
+        shutil.rmtree('RESULTS')
+    
     ### for now, running models on single GPU
     err_ms = 'SELECT GPU TO RUN THIS COMPUTATION ON with CUDA_VISIBLE_DEVICES=DEVICE_NUM'
     assert len(jax.devices()) == 1, err_ms
@@ -29,48 +32,45 @@ def main():
     ###########################################################################
     parser = argparse.ArgumentParser(prog='Pair_Alignment')
     
-    ### which program do you want to run?
-    valid_tasks = ['train',
-                    'eval',
-                    'batched_train',
-                    'batched_eval',
-                    'label_class_post',
-                    'continue_train']
+    # ### which program do you want to run?
+    # valid_tasks = ['train',
+    #                 'eval',
+    #                 'batched_train',
+    #                 'batched_eval',
+    #                 # 'label_class_post',
+    #                 'continue_train']
     
-    parser.add_argument('-task',
-                        type=str,
-                        required=True,
-                        choices = valid_tasks,
-                        help='What do you want to do? Pick from: {valid_tasks}')
+    # parser.add_argument('-task',
+    #                     type=str,
+    #                     required=True,
+    #                     choices = valid_tasks,
+    #                     help='What do you want to do? Pick from: {valid_tasks}')
     
-    parser.add_argument('-configs',
-                        type = str,
-                        required=True,
-                        help='Load configs from file or folder of files, in json format.')
+    # parser.add_argument('-configs',
+    #                     type = str,
+    #                     required=True,
+    #                     help='Load configs from file or folder of files, in json format.')
     
-    # only needed when continuing training
-    parser.add_argument('-new_training_wkdir',
-                        type = str,
-                        help='ONLY FOR CONTINUE_TRAIN OPTION; Name for a new training working dir')
+    # # only needed when continuing training
+    # parser.add_argument('-new_training_wkdir',
+    #                     type = str,
+    #                     help='ONLY FOR CONTINUE_TRAIN OPTION; Name for a new training working dir')
     
-    parser.add_argument('-prev_model_ckpts_dir',
-                        type = str,
-                        help='ONLY FOR CONTINUE_TRAIN OPTION; Path to previous trainstate, argparse object')
+    # parser.add_argument('-prev_model_ckpts_dir',
+    #                     type = str,
+    #                     help='ONLY FOR CONTINUE_TRAIN OPTION; Path to previous trainstate, argparse object')
     
-    parser.add_argument('-tstate_to_load',
-                        type = str,
-                        help='ONLY FOR CONTINUE_TRAIN OPTION; The name of the tstate object to load')
+    # parser.add_argument('-tstate_to_load',
+    #                     type = str,
+    #                     help='ONLY FOR CONTINUE_TRAIN OPTION; The name of the tstate object to load')
     
     # parse the arguments
     args = parser.parse_args()
     
     
-    # ## UNCOMMENT TO RUN IN SPYDER IDE
-    # args.task = 'continue_train'
-    # args.new_training_wkdir = 'CONT-TRAINING'
-    # args.prev_model_ckpts_dir = 'RESULTS/model_ckpts'
-    # args.tstate_to_load = 'FINAL_PRED_BEST.pkl'
-    # args.configs = 'CONFIG.json'
+    ## UNCOMMENT TO RUN IN SPYDER IDE
+    args.task = 'train'
+    args.configs = 'example.json'
     
     
     ### helper function to open a single config file and extract additional arguments
@@ -97,9 +97,8 @@ def main():
             from cli.train_pairhmm_indp_sites import train_pairhmm_indp_sites as train_fn
             from dloaders.init_counts_dset import init_counts_dset as init_dataloaders
 
-        elif args.pred_model_type == 'pairhmm_markovian_sites':
-            raise NotImplementedError('not ready')
-            from cli.train_pairhmm_markovian_sites import train_pairhmm_markovian_sites as train_fn
+        elif args.pred_model_type == 'pairhmm_frag_and_site_classes':
+            from cli.train_pairhmm_frag_and_site_classes import train_pairhmm_frag_and_site_classes as train_fn
             from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
 
         elif args.pred_model_type == 'neural_hmm':
@@ -140,9 +139,8 @@ def main():
             from cli.train_pairhmm_indp_sites import train_pairhmm_indp_sites as train_fn
             from dloaders.init_counts_dset import init_counts_dset as init_dataloaders
 
-        elif first_args.pred_model_type == 'pairhmm_markovian_sites':
-            raise NotImplementedError('not ready')
-            from cli.train_pairhmm_markovian_sites import train_pairhmm_markovian_sites as train_fn
+        elif first_args.pred_model_type == 'pairhmm_frag_and_site_classes':
+            from cli.train_pairhmm_frag_and_site_classes import train_pairhmm_frag_and_site_classes as train_fn
             from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
 
         elif first_args.pred_model_type == 'neural_hmm':
@@ -228,9 +226,9 @@ def main():
             from cli.eval_pairhmm_indp_sites import eval_pairhmm_indp_sites as eval_fn
             from dloaders.init_counts_dset import init_counts_dset as init_dataloaders
 
-        elif pred_model_type == 'pairhmm_markovian_sites':
+        elif pred_model_type == 'pairhmm_frag_and_site_classes':
             raise NotImplementedError('not ready')
-            from cli.eval_pairhmm_markovian_sites import eval_pairhmm_markovian_sites as eval_fn
+            from cli.eval_pairhmm_frag_and_site_classes import eval_pairhmm_frag_and_site_classes as eval_fn
             from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
 
         # evaluate model
@@ -274,9 +272,9 @@ def main():
             from cli.eval_pairhmm_indp_sites import eval_pairhmm_indp_sites as eval_fn
             from dloaders.init_counts_dset import init_counts_dset as init_dataloaders
 
-        elif pred_model_type == 'pairhmm_markovian_sites':
+        elif pred_model_type == 'pairhmm_frag_and_site_classes':
             raise NotImplementedError('not ready')
-            from cli.eval_pairhmm_markovian_sites import eval_pairhmm_markovian_sites as eval_fn
+            from cli.eval_pairhmm_frag_and_site_classes import eval_pairhmm_frag_and_site_classes as eval_fn
             from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
 
         # load data
@@ -314,6 +312,7 @@ def main():
     ### EVAL: label class posterior marginals for markovian class sites   #####
     ###########################################################################
     elif args.task == 'label_class_post':
+        raise NotImplementedError('not ready yet')
         ### read argparse
         assert args.configs.endswith('.json'), print("input is one JSON file")
         print(f'EVALUATING WITH: {args.configs}')
@@ -331,7 +330,7 @@ def main():
         
         
         ### import correct wrappers, dataloader initializers
-        from cli.class_posteriors_pairhmm_markovian_sites import class_posteriors_pairhmm_markovian_sites as labeling_fn
+        from cli.class_posteriors_pairhmm_frag_and_site_classes import class_posteriors_pairhmm_frag_and_site_classes as labeling_fn
         from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
 
         # evaluate

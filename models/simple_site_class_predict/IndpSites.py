@@ -129,9 +129,6 @@ class IndpSites(ModuleBase):
         self.norm_loss_by_length = self.config.get('norm_loss_by_length', False) # this is the objective during training
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
         
-        # update config file to enforce this default
-        self.config['num_tkf_fragment_classes'] = 1
-        
         
         ###########################################
         ### module for equilibrium distribution   #
@@ -371,7 +368,7 @@ class IndpSites(ModuleBase):
             # all_transit_matrices['marginal']: (C, C, 2, 2)
             # used_approx is a dictionary of boolean arrays
             all_transit_matrices, used_approx = self.transitions_module(t_array = t_array,
-                                                           class_probs = jnp.array([1.]),
+                                                           log_class_probs = jnp.array([0.]),
                                                            sow_intermediates = sow_intermediates)
             
             # C=1, so remove intermediate dims

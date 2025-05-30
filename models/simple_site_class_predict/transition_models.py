@@ -765,7 +765,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
     
     def __call__(self,
                  t_array,
-                 class_probs,
+                 log_class_probs,
                  sow_intermediates: bool):
         """
         Arguments
@@ -773,8 +773,8 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         t_array : ArrayLike, (T,)
             branch lengths, times for marginalizing over
         
-        class_probs : ArrayLike, (C,)
-            support for classes i.e. P(ending at class c)
+        log_class_probs : ArrayLike, (C,)
+            support for classes i.e. logP(ending at class c)
         
         sow_intermediates : bool
             switch for tensorboard logging
@@ -795,6 +795,8 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
             where tkf approximation formulas were used
             
         """
+        class_probs = jnp.exp(log_class_probs)
+        
         # lam, mu are of size () (i.e. just floats)
         out = self.logits_to_indel_rates(lam_mu_logits = self.tkf_lam_mu_logits,
                                          lam_min_val = self.lam_min_val,
@@ -1093,7 +1095,7 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
     
     def __call__(self,
                  t_array,
-                 class_probs,
+                 log_class_probs,
                  sow_intermediates: bool):
         """
         Arguments
@@ -1101,8 +1103,8 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
         t_array : ArrayLike, (T,)
             branch lengths, times for marginalizing over
         
-        class_probs : ArrayLike, (C,)
-            support for classes i.e. P(ending at class c)
+        log_class_probs : ArrayLike, (C,)
+            support for classes i.e. logP(ending at class c)
         
         sow_intermediates : bool
             switch for tensorboard logging
@@ -1129,11 +1131,12 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
         r_extend = self.r_extend
         num_site_classes = r_extend.shape[0]
         use_approx = False
+        class_probs = jnp.exp(log_class_probs)
         
         # get alpha, beta, gamma
         out_dict, _ = stable_tkf(mu = mu, 
-                                                 offset = offset,
-                                                 t_array = t_array)
+                                 offset = offset,
+                                 t_array = t_array)
         
         # add to these dictionaries before filling out matrix
         out_dict['log_offset'] = jnp.log(offset)
