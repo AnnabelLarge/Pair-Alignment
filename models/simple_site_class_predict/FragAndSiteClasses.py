@@ -360,9 +360,10 @@ class FragAndSiteClasses(ModuleBase):
         
         if write_time_static_objs:
             with open(f'{out_folder}/activations_and_times_used.tsv','w') as g:
-                act = self.rate_matrix_module.rate_mult_activation
-                g.write(f'activation for rate multipliers: {act}\n')
-                g.write(f'activation for exchangeabiliites: bound_sigmoid\n')
+                if not self.config['load_all']:
+                    act = self.rate_matrix_module.rate_mult_activation
+                    g.write(f'activation for rate multipliers: {act}\n')
+                    g.write(f'activation for exchangeabiliites: bound_sigmoid\n')
                 
                 if self.times_from in ['geometric','t_array_from_file']:
                     g.write(f't_array for all samples; possible marginalized over them\n')
@@ -735,9 +736,6 @@ class FragAndSiteClassesLoadAll(FragAndSiteClasses):
         self.norm_loss_by_length = self.config.get('norm_loss_by_length', False) # doesn't really matter, but keep anyways
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
         self.gap_tok = self.config.get('gap_tok', 43)
-        
-        # update config file
-        self.config['num_tkf_fragment_classes'] = num_mixtures
         
         
         ###########################################

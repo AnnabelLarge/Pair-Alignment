@@ -84,8 +84,7 @@ def retrain():
         
         args = read_config_file(args.configs)
         
-        # "train" model i.e. run full evaluation script without updating 
-        #   gradients
+        # train model 
         dload_lst = init_dataloaders( args,
                                       'train',
                                       training_argparse = None )
