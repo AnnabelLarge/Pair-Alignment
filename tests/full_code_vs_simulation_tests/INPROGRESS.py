@@ -70,27 +70,27 @@ def retrain():
         train_fn( args, dload_lst )
         del parser, args, dload_lst
         
-        # ### refit
-        # # make sure this doesn't exist
-        # remove_folder('RESULTS_recover_params')
+        ### refit
+        # make sure this doesn't exist
+        remove_folder('RESULTS_recover_params')
         
-        # # parse the arguments
-        # parser = argparse.ArgumentParser(prog='Pair_Alignment')
-        # args = parser.parse_args()
-        # args.task = 'train'
-        # args.configs = ('tests/'+
-        #                 'full_code_vs_simulation_tests/'+
-        #                 'two-tkf92_two-hky/'+
-        #                 'two-tkf92_two-hky85_recover-params.json')
+        # parse the arguments
+        parser = argparse.ArgumentParser(prog='Pair_Alignment')
+        args = parser.parse_args()
+        args.task = 'train'
+        args.configs = ('tests/'+
+                        'full_code_vs_simulation_tests/'+
+                        'two-tkf92_two-hky/'+
+                        'two-tkf92_two-hky85_recover-params.json')
         
-        # args = read_config_file(args.configs, parser)
+        args = read_config_file(args.configs, parser)
         
-        # # train model 
-        # dload_lst = init_dataloaders( args,
-        #                               'train',
-        #                               training_argparse = None )
+        # train model 
+        dload_lst = init_dataloaders( args,
+                                      'train',
+                                      training_argparse = None )
         
-        # train_fn( args, dload_lst )
+        train_fn( args, dload_lst )
         
 
 class TestAgainstSimulationTwoTKF92TwoHKY85(unittest.TestCase):
