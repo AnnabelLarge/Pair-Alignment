@@ -19,9 +19,6 @@ import shutil
 
 
 def main():
-    if 'RESULTS' in os.listdir():
-        shutil.rmtree('RESULTS')
-    
     ### for now, running models on single GPU
     err_ms = 'SELECT GPU TO RUN THIS COMPUTATION ON with CUDA_VISIBLE_DEVICES=DEVICE_NUM'
     assert len(jax.devices()) == 1, err_ms
