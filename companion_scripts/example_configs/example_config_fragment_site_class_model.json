@@ -39,6 +39,7 @@
     "pred_config": {
         "load_all": false,
         "num_mixtures": 2,
+        "random_init_exchanges": false,
         "norm_loss_by_length": false,
 
         "subst_model_type": "gtr",
