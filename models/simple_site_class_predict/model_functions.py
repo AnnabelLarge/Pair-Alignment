@@ -657,7 +657,6 @@ def regular_tkf( mu, offset, t_array ):
     
     ### vmap + jax.lax.cond solely for stable_log_one_minus_x function
     def tkf_params_per_timepoint(idx):
-        t = t_array[idx]
         log_alpha_at_this_t = log_alpha[idx]
         log_beta_at_this_t = log_beta[idx]
         
@@ -738,7 +737,7 @@ def approx_tkf( mu, offset, t_array ):
         log_one_minus_alpha = stable_log_one_minus_x(log_x = log_alpha_at_this_t)
         
         # 1 - gamma
-        log_one_minus_gamma = approx_one_minus_gamma( (mu, offset, t_array) )
+        log_one_minus_gamma = approx_one_minus_gamma( (mu, offset, t) )
         
         # gamma
         log_gamma = stable_log_one_minus_x(log_x = log_one_minus_gamma)
