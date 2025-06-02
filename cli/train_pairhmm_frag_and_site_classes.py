@@ -152,7 +152,7 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
     
     else:
         dummy_t_array_for_all_samples = None
-        dummy_t_for_each_sample = jnp.empty( (B,) )
+        dummy_t_for_each_sample = jnp.empty( (args.batch_size,) )
         
     
     ### init sizes
@@ -611,7 +611,6 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
     with open(args.logfile_name,'a') as g:
         g.write(f'SCORING ALL TEST SEQS\n\n')
         
-    # output_attn_weights also controlled by cond1 and cond2
     test_summary_stats = final_eval_wrapper(dataloader = test_dl, 
                                             dataset = test_dset, 
                                             eval_fn_jitted = eval_fn_jitted,
@@ -637,7 +636,7 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
         
         pt_id = 0
         for i in tqdm( range(0, t_arr.shape[0], args.batch_size) ):
-            batch_t = t_arr[i : (i + args.batch_size)]
+            batch_t = jnp.array( t_arr[i : (i + args.batch_size)] )
             batch_prefix = f'test-set_pt{pt_id}'
             best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
                                               t_array = batch_t,

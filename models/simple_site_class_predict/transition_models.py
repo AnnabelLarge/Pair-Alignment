@@ -30,7 +30,9 @@ from models.simple_site_class_predict.model_functions import (bound_sigmoid,
                                                               safe_log,
                                                               logsumexp_with_arr_lst,
                                                               log_one_minus_x,
-                                                              stable_tkf,
+                                                              switch_tkf,
+                                                              regular_tkf,
+                                                              approx_tkf,                                                              
                                                               MargTKF91TransitionLogprobs,
                                                               MargTKF92TransitionLogprobs,
                                                               CondTransitionLogprobs)
@@ -218,11 +220,11 @@ class TKF91TransitionLogprobs(ModuleBase):
             error term for tkf approximation
             DEFAULT: 1e-4
             
-        config["init_lambda_offset_logits"] : Tuple, (2,)
+        config["init_mu_offset_logits"] : Tuple, (2,)
             initial values for logits that determine lambda, offset
             DEFAULT: -2, -5
         
-        config["lambda_range"] : Tuple, (2,)
+        config["mu_range"] : Tuple, (2,)
             range for bound sigmoid activation that determines lamdba
             DEFAULT: -1e-4, 2
         
@@ -245,7 +247,7 @@ class TKF91TransitionLogprobs(ModuleBase):
         fills in joint TKF91 transition matrix
         
     logits_to_indel_rates
-        converts lambda/offset logits to lambda/mu values
+        converts mu/offset logits to mu/offset values
     
     return_all_matrices
         return transition matrices used for joint, marginal, and conditional 
@@ -260,32 +262,45 @@ class TKF91TransitionLogprobs(ModuleBase):
         
         Flax Module Parameters
         -----------------------
-        tkf_lam_mu_logits: ArrayLike (2,)
-            first value is logit for lambda, second is for offset
+        tkf_mu_offset_logits: ArrayLike (2,)
+            first value is logit for mu, second is for offset
         
         """
         ### unpack config
         # initializing lamda, offset
-        init_lam_offset_logits = self.config.get( 'init_lambda_offset_logits',
+        init_mu_offset_logits = self.config.get( 'init_mu_offset_logits',
                                                 [-2, -5] )
-        init_lam_offset_logits = jnp.array(init_lam_offset_logits, dtype=float)
-        self.lam_min_val, self.lam_max_val = self.config.get( 'lambda_range', 
-                                                               [1e-4, 2] )
+        init_mu_offset_logits = jnp.array(init_mu_offset_logits, dtype=float)
+        self.mu_min_val, self.mu_max_val = self.config.get( 'mu_range', 
+                                                             [1e-4, 2] )
         self.offs_min_val, self.offs_max_val = self.config.get( 'offset_range', 
                                                                 [1e-4, 0.333] )
+        
+        # which tkf function
+        tkf_function_name = self.config.get('tkf_function', 'switch_tkf')
         
         # were options at one point, but I'm fixing the values now
         self.sigmoid_temp = 1
         
         
-        ### initialize logits for lambda, offset
+        ### initialize logits for mu, offset
         # with default values:
-        # init lam: 0.11929100006818771
+        # init mu: 0.11929100006818771
         # init offset: 0.0023280500900000334
-        self.tkf_lam_mu_logits = self.param('TKF91 lambda, mu',
-                                            lambda rng, shape, dtype: init_lam_offset_logits,
-                                            init_lam_offset_logits.shape,
+        self.tkf_mu_offset_logits = self.param('TKF91 lambda, mu',
+                                            lambda rng, shape, dtype: init_mu_offset_logits,
+                                            init_mu_offset_logits.shape,
                                             jnp.float32)
+        
+        
+        ### decide tkf function
+        if tkf_function_name == 'regular_tkf':
+            self.tkf_function = regular_tkf
+        elif tkf_function_name == 'approx_tkf':
+            self.tkf_function = approx_tkf
+        elif tkf_function_name == 'switch_tkf':
+            self.tkf_function = switch_tkf
+        
    
     def __call__(self,
                  t_array,
@@ -323,12 +338,12 @@ class TKF91TransitionLogprobs(ModuleBase):
             out_dict['log_gamma']: (T,)
             
         """
-        out = self.logits_to_indel_rates(lam_mu_logits = self.tkf_lam_mu_logits,
-                                         lam_min_val = self.lam_min_val,
-                                         lam_max_val = self.lam_max_val,
+        out = self.logits_to_indel_rates(mu_offset_logits = self.tkf_mu_offset_logits,
+                                         mu_min_val = self.mu_min_val,
+                                         mu_max_val = self.mu_max_val,
                                          offs_min_val = self.offs_min_val,
                                          offs_max_val = self.offs_max_val)
-        lam, mu, offset = out
+        mu, offset = out
         del out
         
         # get alpha, beta, gamma
@@ -345,14 +360,13 @@ class TKF91TransitionLogprobs(ModuleBase):
         #   out_dict['log_beta']
         #   out_dict['log_one_minus_gamma']
         #   out_dict['log_gamma']
-        out_dict, approx_flags_dict = stable_tkf(mu = mu, 
-                                                 offset = offset,
-                                                 t_array = t_array)
+        out_dict, approx_flags_dict = self.tkf_function(mu = mu, 
+                                                        offset = offset,
+                                                        t_array = t_array)
         
         # add to these dictionaries before filling out matrix
         out_dict['log_offset'] = jnp.log(offset)
         out_dict['log_one_minus_offset'] = jnp.log1p(-offset)
-        approx_flags_dict['t_array'] = t_array
 
         
         # record values
@@ -369,9 +383,11 @@ class TKF91TransitionLogprobs(ModuleBase):
                                         label=f'{self.name}/tkf_gamma', 
                                         which='scalars')
             
+            lam = mu * (1-offset)
             self.sow_histograms_scalars(mat= lam, 
                                         label=f'{self.name}/lam', 
                                         which='scalars')
+            del lam
             
             self.sow_histograms_scalars(mat= mu, 
                                         label=f'{self.name}/mu', 
@@ -439,22 +455,22 @@ class TKF91TransitionLogprobs(ModuleBase):
         return out
     
     def logits_to_indel_rates(self, 
-                              lam_mu_logits,
-                              lam_min_val,
-                              lam_max_val,
+                              mu_offset_logits,
+                              mu_min_val,
+                              mu_max_val,
                               offs_min_val,
                               offs_max_val):
         """
         Arguments
         ---------
-        lam_mu_logits : ArrayLike, (2,)
+        mu_offset_logits : ArrayLike, (2,)
             logits to transform with bound sigmoid activation
         
-        lam_min_val : float
-            minimum value for bound sigmoid, to get lambda
+        mu_min_val : float
+            minimum value for bound sigmoid, to get mu
         
-        lam_max_val : float
-            maximum value for bound sigmoid, to get lambda
+        mu_max_val : float
+            maximum value for bound sigmoid, to get mu
         
         offs_min_val : float
             minimum value for bound sigmoid, to get offset
@@ -464,27 +480,26 @@ class TKF91TransitionLogprobs(ModuleBase):
         
         Returns
         -------
-        lambda : ArrayLike, ()
-            insert rate
-        
         mu : ArrayLike, ()
             delete rate
         
+        offset : ArrayLike, ()
+            used to calculate lambda: lambda = mu * (1 - offset)
+        
         """
-        # lambda
-        lam = bound_sigmoid(x = lam_mu_logits[0],
-                            min_val = lam_min_val,
-                            max_val = lam_max_val,
-                            temperature = self.sigmoid_temp)
+        # mu
+        mu = bound_sigmoid(x = mu_offset_logits[0],
+                           min_val = mu_min_val,
+                           max_val = mu_max_val,
+                           temperature = self.sigmoid_temp)
         
         # mu
-        offset = bound_sigmoid(x = lam_mu_logits[1],
+        offset = bound_sigmoid(x = mu_offset_logits[1],
                                min_val = offs_min_val,
                                max_val = offs_max_val,
                                temperature = self.sigmoid_temp)
-        mu = lam / ( 1 -  offset) 
 
-        return (lam, mu, offset)
+        return (mu, offset)
     
     
     def return_all_matrices(self,
@@ -526,7 +541,7 @@ class TKF91TransitionLogprobsFromFile(TKF91TransitionLogprobs):
     """
     like TKF91TransitionLogprobs, but load values from a file
     
-    NOTE: mu is provided directly, no need for offset
+    NOTE: lambda and mu are provided directly, no need for offset
     
     B = batch size; number of samples
     T = number of branch lengths; this could be: 
@@ -562,7 +577,7 @@ class TKF91TransitionLogprobsFromFile(TKF91TransitionLogprobs):
         fills in joint TKF91 transition matrix
         
     logits_to_indel_rates
-        converts lambda/offset logits to lambda/mu values
+        converts mu/offset logits to mu/offset values
     
     return_all_matrices
         return transition matrices used for joint, marginal, and conditional 
@@ -580,11 +595,36 @@ class TKF91TransitionLogprobsFromFile(TKF91TransitionLogprobs):
         None
         
         """
-        ### unpack config
+        # unpack config
         in_file = self.config['filenames']['tkf_params_file']
+        tkf_function_name = self.config.get('tkf_function', 'switch_tkf')
         
-        with open(in_file,'rb') as f:
-            self.tkf_lam_mu = jnp.load(f)
+        # read file
+        if in_file.endswith('.pkl'):
+            with open(in_file,'rb') as f:
+                self.param_dict = pickle.load(f)
+                
+        elif in_file.endswith('.txt') or in_file.endswith('.tsv'):
+            param_dict = {}
+            with open(in_file,'r') as f:
+                for line in f:
+                    if not line.startswith('#'):
+                        param_name, value = line.strip().split('\t')
+                        param_dict[param_name] = jnp.array( float(value) )
+            self.param_dict = param_dict
+        
+        err = f'KEYS SEEN: {param_dict.keys()}'
+        assert 'lambda' in self.param_dict.keys(), err
+        assert 'mu' in self.param_dict.keys(), err
+        
+        # pick tkf function
+        if tkf_function_name == 'regular_tkf':
+            self.tkf_function = regular_tkf
+        elif tkf_function_name == 'approx_tkf':
+            self.tkf_function = approx_tkf
+        elif tkf_function_name == 'switch_tkf':
+            self.tkf_function = switch_tkf
+            
     
     def __call__(self,
                  t_array,
@@ -611,14 +651,14 @@ class TKF91TransitionLogprobsFromFile(TKF91TransitionLogprobs):
                 score transitions in conditional probability calculation
         
         """
-        lam = self.tkf_lam_mu[...,0]
-        mu = self.tkf_lam_mu[...,1]
+        lam = self.param_dict['lambda']
+        mu = self.param_dict['mu']
         offset = 1 - (lam /mu)
         
         # get alpha, beta, gamma
-        out_dict, _ = stable_tkf(mu = mu, 
-                                 offset = offset,
-                                 t_array = t_array)
+        out_dict, _ = self.tkf_function(mu = mu, 
+                                        offset = offset,
+                                        t_array = t_array)
         out_dict['log_offset'] = jnp.log(offset)
         out_dict['log_one_minus_offset'] = jnp.log1p(-offset)
         
@@ -652,12 +692,12 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
             error term for tkf approximation
             DEFAULT: 1e-4
             
-        config["init_lambda_offset_logits"] : Tuple, (2,)
-            initial values for logits that determine lambda, offset
+        config["init_mu_offset_logits"] : Tuple, (2,)
+            initial values for logits that determine mu, offset
             DEFAULT: -2, -5
         
-        config["lambda_range"] : Tuple, (2,)
-            range for bound sigmoid activation that determines lamdba
+        config["mu_range"] : Tuple, (2,)
+            range for bound sigmoid activation that determines mu
             DEFAULT: -1e-4, 2
         
         config["offset_range"] : Tuple, (2,)
@@ -666,7 +706,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
             DEFAULT: -1e-4, 0.333
             
         config["init_r_extend_logits"] : Tuple, (C,)
-            initial values for logits that determine lambda, offset
+            initial values for logits that determine mu, offset
             DEFAULT: -x/10 for x in range(1,C+1)
         
         config["r_range"]
@@ -697,12 +737,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         fills in joint TKF91 transition matrix
     
     logits_to_indel_rates
-        converts lambda/offset logits to lambda/mu values
-    
-    tkf_params
-        from lambda and mu, calculate TKF alpha, beta, gamma
-    
-    
+        converts mu/offset logits to mu/offset values
     """
     config: dict
     name: str
@@ -714,8 +749,8 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         
         Flax Module Parameters
         -----------------------
-        tkf_lam_mu_logits: ArrayLike (2,)
-            first value is logit for lambda, second is for offset
+        tkf_mu_offset_logits: ArrayLike (2,)
+            first value is logit for mu, second is for offset
         
         r_extend_logits: ArrayLike (C,)
             logits for TKF fragment extension probability, r
@@ -725,11 +760,11 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         self.num_tkf_fragment_classes = self.config['num_tkf_fragment_classes']
         
         # initializing lamda, offset
-        init_lam_offset_logits = self.config.get( 'init_lambda_offset_logits', 
+        init_mu_offset_logits = self.config.get( 'init_mu_offset_logits', 
                                                   [-2, -5] )
-        init_lam_offset_logits = jnp.array(init_lam_offset_logits, dtype=float)
-        self.lam_min_val, self.lam_max_val = self.config.get( 'lambda_range', 
-                                                               [1e-4, 2] )
+        init_mu_offset_logits = jnp.array(init_mu_offset_logits, dtype=float)
+        self.mu_min_val, self.mu_max_val = self.config.get( 'mu_range', 
+                                                            [1e-4, 2] )
         self.offs_min_val, self.offs_max_val = self.config.get( 'offset_range', 
                                                                 [1e-4, 0.333] )
         
@@ -741,17 +776,20 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         self.r_extend_min_val, self.r_extend_max_val = self.config.get( 'r_range', 
                                                                 [1e-4, 0.999] )
         
+        # which tkf function
+        tkf_function_name = self.config.get('tkf_function', 'switch_tkf')
+        
         # were options at one point, but I'm fixing the values now
         self.sigmoid_temp = 1
         
         
-        ### initialize logits for lambda, offset
+        ### initialize logits for mu, offset
         # with default values:
-        # init lam: ~0.35769683
-        # init offset: ~0.02017788
-        self.tkf_lam_mu_logits = self.param('TKF92 lambda, mu',
-                                            lambda rng, shape, dtype: init_lam_offset_logits,
-                                            init_lam_offset_logits.shape,
+        # init mu: 0.11929100006818771
+        # init offset: 0.0023280500900000334
+        self.tkf_mu_offset_logits = self.param('TKF92 lambda, mu',
+                                            lambda rng, shape, dtype: init_mu_offset_logits,
+                                            init_mu_offset_logits.shape,
                                             jnp.float32)
         
         # up to num_tkf_fragment_classes different r extension probabilities
@@ -762,6 +800,17 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
                                           lambda rng, shape, dtype: init_r_extend_logits,
                                           init_r_extend_logits.shape,
                                           jnp.float32)
+        
+        
+        ### decide tkf function
+        if tkf_function_name == 'regular_tkf':
+            self.tkf_function = regular_tkf
+        elif tkf_function_name == 'approx_tkf':
+            self.tkf_function = approx_tkf
+        elif tkf_function_name == 'switch_tkf':
+            self.tkf_function = switch_tkf
+        
+        
     
     def __call__(self,
                  t_array,
@@ -798,18 +847,18 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         class_probs = jnp.exp(log_class_probs)
         
         # lam, mu are of size () (i.e. just floats)
-        out = self.logits_to_indel_rates(lam_mu_logits = self.tkf_lam_mu_logits,
-                                         lam_min_val = self.lam_min_val,
-                                         lam_max_val = self.lam_max_val,
+        out = self.logits_to_indel_rates(mu_offset_logits = self.tkf_mu_offset_logits,
+                                         mu_min_val = self.mu_min_val,
+                                         mu_max_val = self.mu_max_val,
                                          offs_min_val = self.offs_min_val,
                                          offs_max_val = self.offs_max_val)
-        lam, mu, offset = out
+        mu, offset = out
         del out
         
         # r_extend is of size (C,)
         r_extend = bound_sigmoid(x = self.r_extend_logits,
-                                   min_val = self.r_extend_min_val,
-                                   max_val = self.r_extend_max_val)
+                                 min_val = self.r_extend_min_val,
+                                 max_val = self.r_extend_max_val)
         
         # get alpha, beta, gamma
         # contents of out_dict ( all ArrayLike[float32], (T,) ):
@@ -836,9 +885,11 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         
         # record values
         if sow_intermediates:
+            lam = mu * (1-offset)
             self.sow_histograms_scalars(mat= lam, 
                                         label=f'{self.name}/lam', 
                                         which='scalars')
+            del lam
             
             self.sow_histograms_scalars(mat= mu, 
                                         label=f'{self.name}/mu', 
@@ -1030,13 +1081,7 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
             DEFAULT: 1e-4
             
         config["tkf_params_file"] : str
-            loads a dictionary with two values:
-                
-                (output object)['lam_mu'] : ArrayLike, (2,)
-                    initial values for logits that determine lambda, offset
-                
-                (output object)['r_extend'] : ArrayLike, (C,)
-                    TKF fragment extension probabilities
+            contains values for lambda, mu, r-extension
                     
     name : str
         class name, for flax
@@ -1055,11 +1100,8 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
         fills in joint TKF91 transition matrix
         
     logits_to_indel_rates
-        converts lambda/offset logits to lambda/mu values
+        converts mu/offset logits to mu/offset values
     
-    tkf_params
-        from lambda and mu, calculate TKF alpha, beta, gamma
-        
     
     Inherited from TKF92TransitionLogprobs
     ---------------------------------------
@@ -1082,17 +1124,44 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
         
         """
         ### unpack config
-        self.tkf_err = self.config.get('tkf_err', 1e-4)
         in_file = self.config['filenames']['tkf_params_file']
+        tkf_function_name = self.config.get('tkf_function', 'switch_tkf')
 
-        # set this manually
-        self.approx_floor = -1e-4
+        # read file
+        if in_file.endswith('.pkl'):
+            with open(in_file,'rb') as f:
+                self.param_dict = pickle.load(f)
         
-        with open(in_file,'rb') as f:
-            in_dict = pickle.load(f)
-            self.tkf_lam_mu = in_dict['lam_mu']
-            self.r_extend = in_dict['r_extend']
-    
+        elif in_file.endswith('.txt') or in_file.endswith('.tsv'):
+            param_dict = {}
+            r_extend = []
+            with open(in_file,'r') as f:
+                for line in f:
+                    if not line.startswith('#'):
+                        param_name, value = line.strip().split('\t')
+                        value = float(value)
+                        
+                        if param_name.startswith('r_extend'):
+                            r_extend.append(value)
+                        else:
+                            param_dict[param_name] = jnp.array(value)
+            param_dict['r_extend'] = jnp.array(r_extend)
+            self.param_dict = param_dict
+        
+        err = f'KEYS SEEN: {param_dict.keys()}'
+        assert 'lambda' in self.param_dict.keys(), err
+        assert 'mu' in self.param_dict.keys(), err
+        assert 'r_extend' in self.param_dict.keys(), err
+        
+        # pick tkf function
+        if tkf_function_name == 'regular_tkf':
+            self.tkf_function = regular_tkf
+        elif tkf_function_name == 'approx_tkf':
+            self.tkf_function = approx_tkf
+        elif tkf_function_name == 'switch_tkf':
+            self.tkf_function = switch_tkf
+                    
+        
     def __call__(self,
                  t_array,
                  log_class_probs,
@@ -1125,18 +1194,17 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
             where tkf approximation formulas were used
             
         """
-        lam = self.tkf_lam_mu[0]
-        mu = self.tkf_lam_mu[1]
-        offset = 1 - (lam/mu)
-        r_extend = self.r_extend
+        lam = self.param_dict['lambda']
+        mu = self.param_dict['mu']
+        offset = 1 - (lam /mu)
+        r_extend = self.param_dict['r_extend']
         num_site_classes = r_extend.shape[0]
-        use_approx = False
         class_probs = jnp.exp(log_class_probs)
         
         # get alpha, beta, gamma
-        out_dict, _ = stable_tkf(mu = mu, 
-                                 offset = offset,
-                                 t_array = t_array)
+        out_dict, _ = self.tkf_function(mu = mu, 
+                                        offset = offset,
+                                        t_array = t_array)
         
         # add to these dictionaries before filling out matrix
         out_dict['log_offset'] = jnp.log(offset)

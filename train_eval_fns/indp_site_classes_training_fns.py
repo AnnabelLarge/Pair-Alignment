@@ -21,6 +21,8 @@ from jax import config
 from flax import linen as nn
 import optax
 
+from utils.write_approx_dict import write_approx_dict
+
 def train_one_batch(batch, 
                     training_rngkey, 
                     pairhmm_trainstate,
@@ -217,23 +219,15 @@ def final_eval_wrapper(dataloader,
     for batch_idx, batch in tqdm( enumerate(dataloader), total=len(dataloader) ): 
         eval_metrics = eval_fn_jitted( batch=batch )
         
-        # check if any approximations were used; just return sums for now, and 
-        #   in separate debugging scripts, extract these flags
+        # check if any approximations were used; just return sums for 
+        #   now, and in separate debugging scripts, extract these flags
         if eval_metrics['used_approx'] is not None:
-            used_approx = False
-            to_write = ''
-            for key, val in eval_metrics['used_approx'].items():
-                if val.any():
-                    used_approx = True
-                    approx_count = val.sum()
-                    to_write += f'{key}: {approx_count}\n'
+            subline = f'batch {batch_idx}:'
+            write_approx_dict( approx_dict = eval_metrics['used_approx'], 
+                               out_arrs_dir = out_arrs_dir,
+                               out_file = 'FINAL-EVAL_tkf_approx.tsv',
+                               subline = subline )
             
-            if used_approx:
-                with open(f'{out_arrs_dir}/FINAL-EVAL_tkf_approx.tsv','a') as g:
-                    g.write(f'{outfile_prefix}, batch {batch_idx}:\n')
-                    g.write(to_write + '\n')
-            del used_approx, to_write, key, val
-                
             
         #########################################
         ### start df; record metrics per sample #

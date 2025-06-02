@@ -15,7 +15,7 @@ import shutil
 
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update("jax_debug_infs", True)
-# jax.config.update("jax_enable_x64", True)
+jax.config.update("jax_enable_x64", True)
 
 
 def main():
@@ -67,7 +67,7 @@ def main():
     
     # ## UNCOMMENT TO RUN IN SPYDER IDE
     # args.task = 'train'
-    # args.configs = 'example.json'
+    # args.configs = 'eval_no-approx.json'
     
     
     ### helper function to open a single config file and extract additional arguments

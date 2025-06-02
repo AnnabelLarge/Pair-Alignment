@@ -45,6 +45,7 @@ from utils.setup_training_dir import setup_training_dir
 from utils.tensorboard_recording_utils import (write_times,
                                                write_optional_outputs_during_training_hmms)
 from utils.write_timing_file import write_timing_file
+from utils.write_approx_dict import write_approx_dict
 
 # specific to training this model
 from models.simple_site_class_predict.initializers import init_pairhmm_indp_sites as init_pairhmm
@@ -278,25 +279,20 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
             train_metrics, pairhmm_trainstate = out
             del out
             
+            #   out_dict['log_one_minus_alpha']
+            #   out_dict['log_beta']
+            #   out_dict['log_one_minus_gamma']
+            #   out_dict['log_gamma']
             
             ### check if any approximations were used; just return sums for 
             ###   now, and in separate debugging scripts, extract these flags
             if train_metrics['used_approx'] is not None:
-                used_approx = False
-                to_write = ''
-                for key, val in train_metrics['used_approx'].items():
-                    if val.any():
-                        used_approx = True
-                        approx_count = val.sum()
-                        to_write += f'{key}: {approx_count}\n'
-                
-                if used_approx:
-                    with open(f'{args.out_arrs_dir}/TRAIN_tkf_approx.tsv','a') as g:
-                        g.write(f'epoch {epoch_idx}, batch {batch_idx}:\n')
-                        g.write(to_write + '\n')
-                del used_approx, to_write, key, val
+                subline = f'epoch {epoch_idx}, batch {batch_idx}:'
+                write_approx_dict( approx_dict = train_metrics['used_approx'], 
+                                   out_arrs_dir = args.out_arrs_dir,
+                                   out_file = 'TRAIN_tkf_approx.tsv',
+                                   subline = subline )
                         
-            
             ### record metrics to tensorboard
             interm_rec = batch_epoch_idx % args.histogram_output_freq == 0
             final_rec = (batch_idx == len(training_dl)) & (epoch_idx == args.num_epochs)
@@ -638,7 +634,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
         
         pt_id = 0
         for i in tqdm( range(0, t_arr.shape[0], args.batch_size) ):
-            batch_t = t_arr[i : (i + args.batch_size)]
+            batch_t = jnp.array( t_arr[i : (i + args.batch_size)] )
             batch_prefix = f'test-set_pt{pt_id}'
             best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
                                               t_array = batch_t,

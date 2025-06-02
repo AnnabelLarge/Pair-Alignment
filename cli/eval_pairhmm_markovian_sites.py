@@ -73,15 +73,21 @@ def eval_pairhmm_markovian_sites( args,
     # create a new logfile
     with open(args.logfile_name,'w') as g:
         g.write( f'Loading from {args.training_wkdir} to eval new data\n' )
-        g.write( (f'  - Number of site classes for emissions and transitions: '+
-                  f'{training_argparse.pred_config["num_emit_site_classes"]}\n' )
+        
+        g.write(f'PairHMM TKF92 with latent site and fragment classes\n')
+                
+        g.write( (f'  - Number of latent site and fragment classes: '+
+                  f'{training_argparse.pred_config["num_mixtures"]}\n' )
                 )
-        g.write( f'  - Normalizing losses by: {training_argparse.norm_loss_by}\n' )
+        g.write(f'  - When reporting, normalizing losses by: {training_argparse.norm_loss_by}\n')
+        
+        g.write( f'Times from: {training_argparse.pred_config["times_from"]}\n' )
     
     
     ### extract data from dataloader_dict
     test_dset = dataloader_dict['test_dset']
     test_dl = dataloader_dict['test_dl']
+    t_array_for_all_samples = dataloader_dict['t_array_for_all_samples']
     
     
     ###########################################################################
@@ -100,9 +106,14 @@ def eval_pairhmm_markovian_sites( args,
     
     ### determine shapes for init
     # time
-    num_timepoints = test_dset.retrieve_num_timepoints(times_from = training_argparse.pred_config['times_from'])
-    dummy_t_array = jnp.empty( (num_timepoints, ) )
+    if t_array_for_all_samples is not None:
+        dummy_t_array_for_all_samples = jnp.empty( (t_array_for_all_samples.shape[0], ) )
+        dummy_t_for_each_sample = None
     
+    else:
+        dummy_t_array_for_all_samples = None
+        dummy_t_for_each_sample = jnp.empty( (args.batch_size,) )
+        
     
     ### init sizes
     # (B, L, 3)
@@ -119,8 +130,11 @@ def eval_pairhmm_markovian_sites( args,
     
     
     ### initialize functions
-    out = init_pairhmm( seq_shapes = largest_aligns, 
-                        dummy_t_array = dummy_t_array,
+    seq_shapes = [largest_aligns,
+                  dummy_t_for_each_sample]
+    
+    out = init_pairhmm( seq_shapes = seq_shapes, 
+                        dummy_t_array = dummy_t_array_for_all_samples,
                         tx = tx, 
                         model_init_rngkey = jax.random.key(0),
                         pred_config = training_argparse.pred_config,
@@ -138,15 +152,12 @@ def eval_pairhmm_markovian_sites( args,
     
     
     ### part+jit eval function
-    t_array = test_dset.return_time_array()
-    null_interms_dict = {k: False for k in training_argparse.interms_for_tboard.keys()}
+    no_outputs = {k: False for k in training_argparse.interms_for_tboard.keys()}
     parted_eval_fn = partial( eval_one_batch,
-                              t_array = t_array,
-                              pairhmm_trainstate = best_pairhmm_trainstate,
+                              t_array = t_array_for_all_samples,
                               pairhmm_instance = pairhmm_instance,
-                              interms_for_tboard = null_interms_dict,
-                              return_all_loglikes = True )
-    
+                              interms_for_tboard = no_outputs,
+                              return_all_loglikes = False )
     eval_fn_jitted = jax.jit(parted_eval_fn, 
                               static_argnames = ['max_align_len'])
     del parted_eval_fn
@@ -154,7 +165,7 @@ def eval_pairhmm_markovian_sites( args,
     
     ### write the parameters again
     best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
-                                      t_array = t_array,
+                                      t_array = t_array_for_all_samples,
                                       out_folder = args.out_arrs_dir,
                                       method = pairhmm_instance.write_params )
     
@@ -166,7 +177,7 @@ def eval_pairhmm_markovian_sites( args,
     # write to logfile
     with open(args.logfile_name,'a') as g:
         g.write('\n')
-        g.write(f'2: eval\n')
+        g.write(f'BEGIN eval\n')
 
     test_summary_stats = final_eval_wrapper(dataloader = test_dl, 
                                             dataset = test_dset, 

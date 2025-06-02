@@ -582,26 +582,30 @@ class IndpSites(ModuleBase):
             elif self.indel_model_type.lower() in ['tkf91', 'tkf92']:
                 # always write lambda and mu
                 # also record if you used any tkf approximations
-                if 'tkf_lam_mu_logits' in dir(self.transitions_module):
-                    lam_min_val = self.transitions_module.lam_min_val
-                    lam_max_val = self.transitions_module.lam_max_val
+                if 'tkf_mu_offset_logits' in dir(self.transitions_module):
+                    mu_min_val = self.transitions_module.mu_min_val
+                    mu_max_val = self.transitions_module.mu_max_val
                     offs_min_val = self.transitions_module.offs_min_val
                     offs_max_val = self.transitions_module.offs_max_val
-                    lam_mu_logits = self.transitions_module.tkf_lam_mu_logits
+                    mu_offset_logits = self.transitions_module.tkf_mu_offset_logits
                 
-                    lam = bound_sigmoid(x = lam_mu_logits[0],
-                                          min_val = lam_min_val,
-                                          max_val = lam_max_val)
+                    mu = bound_sigmoid(x = mu_offset_logits[0],
+                                       min_val = mu_min_val,
+                                       max_val = mu_max_val)
                     
-                    offset = bound_sigmoid(x = lam_mu_logits[1],
+                    offset = bound_sigmoid(x = mu_offset_logits[1],
                                              min_val = offs_min_val,
                                              max_val = offs_max_val)
-                    mu = lam / ( 1 -  offset) 
+                    lam = mu * (1 - offset) 
                     
                     with open(f'{out_folder}/PARAMS_{self.indel_model_type}_indel_params.txt','w') as g:
                         g.write(f'insert rate, lambda: {lam}\n')
                         g.write(f'deletion rate, mu: {mu}\n')
+                        g.write(f'offset: {offset}\n\n')
                     
+                    out_dict = {'lambda': lam,
+                                'mu': mu,
+                                'offset': offset}
                                 
                 # if tkf92, have extra r_ext param
                 if self.indel_model_type == 'tkf92':
@@ -622,6 +626,13 @@ class IndpSites(ModuleBase):
                         g.write(f'mean indel length: ')
                         [g.write(f'{elem}\t') for elem in mean_indel_lengths]
                         g.write('\n')
+                    
+                    out_dict['r_extend'] = r_extend
+                
+                with open(f'{out_folder}/{self.indel_model_type}_indel_params.pkl','wb') as g:
+                    pickle.dump(out_dict)
+                del out_dict
+
         
     def return_bound_sigmoid_limits(self):
         ### rate_matrix_module
@@ -642,16 +653,16 @@ class IndpSites(ModuleBase):
         
         ### transitions_module
         if self.indel_model_type is not None:
-            # insert rate lambda
-            lam_min_val = self.transitions_module.lam_min_val
-            lam_max_val = self.transitions_module.lam_max_val
+            # delete rate mu
+            mu_min_val = self.transitions_module.mu_min_val
+            mu_max_val = self.transitions_module.mu_max_val
             
             # offset (for deletion rate mu)
             offs_min_val = self.transitions_module.offs_min_val
             offs_max_val = self.transitions_module.offs_max_val
             
-            to_add = {"lam_min_val": lam_min_val,
-                      "lam_max_val": lam_max_val,
+            to_add = {"mu_min_val": mu_min_val,
+                      "mu_max_val": mu_max_val,
                       "offs_min_val": offs_min_val,
                       "offs_max_val": offs_max_val}
             
@@ -801,7 +812,6 @@ class IndpSitesLoadAll(IndpSites):
                      out_folder: str,
                      prefix: str,
                      write_time_static_objs: bool):
-        
         if write_time_static_objs:
             with open(f'{out_folder}/activations_and_times_used.tsv','w') as g:
                 if 'rate_mult_activation' in dir(self.rate_matrix_module):

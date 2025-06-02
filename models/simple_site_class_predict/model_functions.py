@@ -438,7 +438,8 @@ def true_beta(oper):
     # y = jnp.log( 1 - offset )
     # logsumexp with coeffs does: 
     #   log( exp(x) - exp(y) ) = log( exp(mu*offset*t) - (1-offset) )
-    log_denom = logsumexp_with_arr_lst( [mu*offset*t, jnp.log1p(-offset)],
+    log_one_minus_offset = jnp.broadcast_to( jnp.log1p(-offset), t.shape )
+    log_denom = logsumexp_with_arr_lst( [mu*offset*t, log_one_minus_offset],
                                     coeffs = jnp.array([1.0, -1.0]) )
     
     return log_num - log_denom
@@ -476,7 +477,7 @@ def approx_one_minus_gamma(oper):
     
     return log_num - log_denom
 
-def stable_tkf( mu, offset, t_array ):
+def switch_tkf( mu, offset, t_array ):
     """
     return alpha, beta, gamma for TKF models
 
@@ -538,9 +539,9 @@ def stable_tkf( mu, offset, t_array ):
         ### beta, 1 - beta
         # beta
         log_beta = jax.lax.cond( mu*offset*t > SMALL_POSITIVE_NUM ,
-                                 true_beta,
-                                 approx_beta,
-                                 (mu, offset, t) )        
+                                  true_beta,
+                                  approx_beta,
+                                  (mu, offset, t) )  
         
         # regardless of approx or not, 1-beta calculated from beta
         log_one_minus_beta = log_one_minus_x(log_x = log_beta)
@@ -579,10 +580,26 @@ def stable_tkf( mu, offset, t_array ):
                     'log_gamma': log_gamma,
                     'log_one_minus_gamma': log_one_minus_gamma}
         
-        approx_flags_dict = {'log_one_minus_alpha': ~(log_alpha_at_t < -SMALL_POSITIVE_NUM),
-                             'log_beta': ~(mu*offset*t > SMALL_POSITIVE_NUM),
-                             'log_one_minus_gamma': ~use_real_function,
-                             'log_gamma': ~(log_one_minus_gamma < -SMALL_POSITIVE_NUM)}
+        used_one_minus_alpha_approx = ~(log_alpha_at_t < -SMALL_POSITIVE_NUM)
+        used_beta_approx = ~(mu*offset*t > SMALL_POSITIVE_NUM)
+        used_log_one_minus_gamma_approx = ~use_real_function
+        used_log_gamma_approx = ~(log_one_minus_gamma < -SMALL_POSITIVE_NUM)
+        
+        # if you used an approx anywhere, save the time
+        flag = used_one_minus_alpha_approx | used_beta_approx | used_log_one_minus_gamma_approx | used_log_gamma_approx
+        t_to_add = jnp.where( flag,
+                              t,
+                              -1. )
+        
+        approx_flags_dict = {'log_one_minus_alpha': used_one_minus_alpha_approx,
+                              'log_beta': used_beta_approx,
+                              'log_one_minus_gamma': used_log_one_minus_gamma_approx,
+                              'log_gamma': used_log_gamma_approx,
+                              'valid_frac_log_one_minus_gamma': ~valid_frac,
+                              'cond1_log_one_minus_gamma': ~cond1,
+                              'cond2_log_one_minus_gamma': ~cond2,
+                              'cond3_log_one_minus_gamma': ~cond3,
+                              't_array': t_to_add}
         
         return out_dict, approx_flags_dict
     
@@ -597,6 +614,150 @@ def stable_tkf( mu, offset, t_array ):
     
     out_dict['log_alpha'] = log_alpha
     return out_dict, approx_flags_dict
+
+
+def regular_tkf( mu, offset, t_array ):
+    """
+    return alpha, beta, gamma for TKF models; no approximations made, 
+        except still allow use of switch between approx and real for 
+        log(1-x) function
+
+    T: number of branch lengths in t_array
+    
+    returns:
+    --------
+    out_dict: the tkf values
+        out_dict['log_alpha']: ArrayLike[float32], (T,)
+        out_dict['log_one_minus_alpha']: ArrayLike[float32], (T,)
+        out_dict['log_beta']: ArrayLike[float32], (T,)
+        out_dict['log_one_minus_beta']: ArrayLike[float32], (T,)
+        out_dict['log_gamma']: ArrayLike[float32], (T,)
+        out_dict['log_one_minus_gamma']: ArrayLike[float32], (T,)
+    
+    approx_flags_dict: None (placeholder)
+    
+    """
+    ### alpha
+    # alpha = exp(-mu*t)
+    # log(alpha) = -mu*t
+    log_alpha = -mu*t_array
+    
+    
+    ### beta
+    # log( (1 - offset) * (exp(mu*offset*t) - 1) )
+    # x = mu*offset*t
+    # y = jnp.log( 1 - offset )
+    # logsumexp with coeffs does: 
+    #   log( exp(x) - exp(y) ) = log( exp(mu*offset*t) - (1-offset) )
+    log_beta = true_beta( (mu, offset, t_array) )
+    
+    # 1 - beta; never use stable log one minus x for this
+    log_one_minus_beta = log_one_minus_x(log_x = log_beta)
+    
+    
+    ### vmap + jax.lax.cond solely for stable_log_one_minus_x function
+    def tkf_params_per_timepoint(idx):
+        t = t_array[idx]
+        log_alpha_at_this_t = log_alpha[idx]
+        log_beta_at_this_t = log_beta[idx]
+        
+        # 1 - alpha
+        log_one_minus_alpha = stable_log_one_minus_x(log_x = log_alpha_at_this_t)
+        
+        # 1 - gamma
+        log_one_minus_gamma = (log_beta_at_this_t - 
+                               ( jnp.log( 1-offset) + log_one_minus_alpha )
+                               )
+        
+        # gamma
+        log_gamma = stable_log_one_minus_x(log_x = log_one_minus_gamma)
+        
+        return {'log_one_minus_alpha': log_one_minus_alpha,
+                'log_gamma': log_gamma,
+                'log_one_minus_gamma': log_one_minus_gamma}
+    
+    vmapped_tkf_params_per_timepoint = jax.vmap(tkf_params_per_timepoint)
+    to_add = vmapped_tkf_params_per_timepoint( jnp.arange(t_array.shape[0]) )
+        
+    
+    ### output
+    out_dict = {'log_alpha': log_alpha,
+                'log_beta': log_beta,
+                'log_one_minus_beta': log_one_minus_beta}
+    out_dict = {**out_dict, **to_add}
+    
+    return out_dict, None
+
+
+def approx_tkf( mu, offset, t_array ):
+    """
+    return alpha, beta, gamma for TKF models; only use approx formulas, 
+        except still allow use of switch between approx and real for 
+        log(1-x) function
+
+    T: number of branch lengths in t_array
+    
+    returns:
+    --------
+    out_dict: the tkf values
+        out_dict['log_alpha']: ArrayLike[float32], (T,)
+        out_dict['log_one_minus_alpha']: ArrayLike[float32], (T,)
+        out_dict['log_beta']: ArrayLike[float32], (T,)
+        out_dict['log_one_minus_beta']: ArrayLike[float32], (T,)
+        out_dict['log_gamma']: ArrayLike[float32], (T,)
+        out_dict['log_one_minus_gamma']: ArrayLike[float32], (T,)
+    
+    approx_flags_dict: None (placeholder)
+    
+    """
+    ### alpha
+    # alpha = exp(-mu*t)
+    # log(alpha) = -mu*t
+    log_alpha = -mu*t_array
+    
+    
+    ### beta
+    # log( (1 - offset) * (exp(mu*offset*t) - 1) )
+    # x = mu*offset*t
+    # y = jnp.log( 1 - offset )
+    # logsumexp with coeffs does: 
+    #   log( exp(x) - exp(y) ) = log( exp(mu*offset*t) - (1-offset) )
+    log_beta = approx_beta( (mu, offset, t_array) )
+    
+    # 1 - beta; never use stable log one minus x for this
+    log_one_minus_beta = log_one_minus_x(log_x = log_beta)
+    
+    
+    ### vmap + jax.lax.cond solely for stable_log_one_minus_x function
+    def tkf_params_per_timepoint(idx):
+        t = t_array[idx]
+        log_alpha_at_this_t = log_alpha[idx]
+        log_beta_at_this_t = log_beta[idx]
+        
+        # 1 - alpha
+        log_one_minus_alpha = stable_log_one_minus_x(log_x = log_alpha_at_this_t)
+        
+        # 1 - gamma
+        log_one_minus_gamma = approx_one_minus_gamma( (mu, offset, t_array) )
+        
+        # gamma
+        log_gamma = stable_log_one_minus_x(log_x = log_one_minus_gamma)
+        
+        return {'log_one_minus_alpha': log_one_minus_alpha,
+                'log_gamma': log_gamma,
+                'log_one_minus_gamma': log_one_minus_gamma}
+    
+    vmapped_tkf_params_per_timepoint = jax.vmap(tkf_params_per_timepoint)
+    to_add = vmapped_tkf_params_per_timepoint( jnp.arange(t_array.shape[0]) )
+        
+    
+    ### output
+    out_dict = {'log_alpha': log_alpha,
+                'log_beta': log_beta,
+                'log_one_minus_beta': log_one_minus_beta}
+    out_dict = {**out_dict, **to_add}
+    
+    return out_dict, None
 
 
 

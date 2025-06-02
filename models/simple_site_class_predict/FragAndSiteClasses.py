@@ -522,21 +522,21 @@ class FragAndSiteClasses(ModuleBase):
             ####################################################
             # always write lambda and mu
             # also record if you used any tkf approximations
-            if 'tkf_lam_mu_logits' in dir(self.transitions_module):
-                lam_min_val = self.transitions_module.lam_min_val
-                lam_max_val = self.transitions_module.lam_max_val
+            if 'tkf_mu_offset_logits' in dir(self.transitions_module):
+                mu_min_val = self.transitions_module.mu_min_val
+                mu_max_val = self.transitions_module.mu_max_val
                 offs_min_val = self.transitions_module.offs_min_val
                 offs_max_val = self.transitions_module.offs_max_val
-                lam_mu_logits = self.transitions_module.tkf_lam_mu_logits
+                mu_offset_logits = self.transitions_module.tkf_mu_offset_logits
             
-                lam = bound_sigmoid(x = lam_mu_logits[0],
-                                      min_val = lam_min_val,
-                                      max_val = lam_max_val)
+                mu = bound_sigmoid(x = mu_offset_logits[0],
+                                   min_val = mu_min_val,
+                                   max_val = mu_max_val)
                 
-                offset = bound_sigmoid(x = lam_mu_logits[1],
+                offset = bound_sigmoid(x = mu_offset_logits[1],
                                          min_val = offs_min_val,
                                          max_val = offs_max_val)
-                mu = lam / ( 1 -  offset) 
+                lam = mu * (1 - offset)
                 
                 r_extend_min_val = self.transitions_module.r_extend_min_val
                 r_extend_max_val = self.transitions_module.r_extend_max_val
@@ -557,6 +557,16 @@ class FragAndSiteClasses(ModuleBase):
                     g.write(f'mean indel length: ')
                     [g.write(f'{elem}\t') for elem in mean_indel_lengths]
                     g.write('\n')
+                
+                to_write = {'lambda': lam,
+                            'mu': mu,
+                            'r_extend': r_extend,
+                            'offset': offset}
+                
+                with open(f'{out_folder}/TKF92_indel_params.pkl','wb') as g:
+                    pickle.dump(to_write)
+                del to_write
+                
         
     def return_bound_sigmoid_limits(self):
         ### rate_matrix_module
@@ -577,8 +587,8 @@ class FragAndSiteClasses(ModuleBase):
         
         ### transitions_module
         # insert rate lambda
-        lam_min_val = self.transitions_module.lam_min_val
-        lam_max_val = self.transitions_module.lam_max_val
+        mu_min_val = self.transitions_module.mu_min_val
+        mu_max_val = self.transitions_module.mu_max_val
         
         # offset (for deletion rate mu)
         offs_min_val = self.transitions_module.offs_min_val
@@ -588,8 +598,8 @@ class FragAndSiteClasses(ModuleBase):
         r_extend_min_val = self.transitions_module.r_extend_min_val
         r_extend_max_val = self.transitions_module.r_extend_max_val
         
-        to_add = {"lam_min_val": lam_min_val,
-                  "lam_max_val": lam_max_val,
+        to_add = {"mu_min_val": mu_min_val,
+                  "mu_max_val": mu_max_val,
                   "offs_min_val": offs_min_val,
                   "offs_max_val": offs_max_val,
                   "r_extend_min_val": r_extend_min_val,
