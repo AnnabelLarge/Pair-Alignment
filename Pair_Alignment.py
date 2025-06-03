@@ -441,7 +441,7 @@ def main():
             
             # determine if four or two dataloaders should be returned
             checklist = ['train_dset_splits', 'test_dset_splits', 'optimizer_config']
-            train_flag = all(arg in dir(args) for arg in checklist)
+            train_flag = all(arg in dir(this_run_args) for arg in checklist)
             
             # load
             dload_dict = init_datasets( this_run_args, 
