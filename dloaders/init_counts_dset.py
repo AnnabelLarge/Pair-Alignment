@@ -18,6 +18,7 @@ import numpy as np
 
 from dloaders.CountsDset import CountsDset 
 from dloaders.CountsDset import jax_collator as collator
+from dloaders.init_dataloader import init_dataloader
 
 
 def init_time_array(args):
@@ -63,9 +64,10 @@ def init_time_array(args):
         
         
    
-def init_counts_dset(args, 
-                     task, 
-                     training_argparse=None):
+def init_counts_dset( args, 
+                      task, 
+                      training_argparse=None,
+                      include_dataloader=True ):
     """
     initialize the dataloaders
     """
@@ -122,6 +124,8 @@ def init_counts_dset(args,
                             subs_only = subs_only,
                             toss_alignments_longer_than = args.toss_alignments_longer_than,
                             bos_eos_as_match = args.bos_eos_as_match)
+    out = {'test_dset': test_dset,
+           't_array_for_all_samples': t_array_for_all_samples}
 
 
     # training data
@@ -140,29 +144,24 @@ def init_counts_dset(args,
                                     subs_only = subs_only,
                                     toss_alignments_longer_than = args.toss_alignments_longer_than,
                                     bos_eos_as_match = args.bos_eos_as_match)
+        out['training_dset'] = training_dset
         
         
     ############################################
     ### create dataloaders, output dictionary  #
     ############################################
-    test_dl = DataLoader( test_dset, 
-                          batch_size = args.batch_size, 
-                          shuffle = False,
-                          collate_fn = collator
-                         )
-    
-    out = {'test_dset': test_dset,
-           'test_dl': test_dl,
-           't_array_for_all_samples': t_array_for_all_samples}
-    
-    if not only_test:
-        training_dl = DataLoader( training_dset, 
-                                  batch_size = args.batch_size, 
-                                  shuffle = True,
-                                  collate_fn = collator
-                                 )
+    if include_dataloader:
+        test_dl = init_dataloader(args = args, 
+                                  pytorch_custom_dset = test_dset,
+                                  shuffle = False,
+                                  collate_fn = collator)
+        out['test_dl'] = test_dl
         
-        out['training_dset'] = training_dset
-        out['training_dl'] = training_dl
-    
+        if not only_test:
+            training_dl = init_dataloader(args = args, 
+                                          pytorch_custom_dset = training_dset,
+                                          shuffle = True,
+                                          collate_fn = collator)
+            out['training_dl'] = training_dl
+            
     return out

@@ -12,6 +12,7 @@ import argparse
 import jax
 import pickle
 import shutil
+import gc
 
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update("jax_debug_infs", True)
@@ -38,7 +39,7 @@ def main():
                    'continue_train',
                    'eval',
                    'batched_eval',
-                   'prep_dataloaders']
+                   'prep_datasets']
     
     parser.add_argument('-task',
                         type=str,
@@ -52,7 +53,7 @@ def main():
                         help='Load configs from file or folder of files, in json format.')
     
     # optional: might have pre-processed some dataloaders
-    parser.add_argument('-load_dload_pkl', 
+    parser.add_argument('-load_dset_pkl', 
                         action='store_true', 
                         help='If added, load dataloaders from a pickle object (it was already created and pre-processed beforehand)')
     
@@ -76,7 +77,7 @@ def main():
     # ## UNCOMMENT TO RUN IN SPYDER IDE
     # top_level_args.task = 'train'
     # top_level_args.configs = 'example_config_indp_sites_model.json'
-    # top_level_args.load_dload_pkl = False
+    # top_level_args.load_dset_pkl = False
     
     
     ### helper functions 
@@ -89,12 +90,28 @@ def main():
             args = parser.parse_args(namespace=t_args)
         return args
     
-    # load a pre-computed dataloader
-    def load_dload_pkl(training_wkdir):
-        file_to_load = f'TMP-dload-lst_' + training_wkdir.replace('.json','.pkl')
+    # load a pre-computed dataset; make a pytorch dataloader
+    def load_dset_pkl(args, collate_fn):
+        # partial dictionary with dataset objects; need dataloaders
+        file_to_load = f'TMP-dload-lst_' + args.training_wkdir.replace('.json','.pkl')
         with open(file_to_load,'rb') as f:
-            dload_lst = pickle.load(f)
-        return dload_lst
+            dset_dict = pickle.load(f)
+        
+        # add dataloader objects
+        test_dset = init_dataloader(args = args, 
+                                    shuffle = False,
+                                    pytorch_custom_dset = dset_dict['test_dset'],
+                                    collate_fn = collate_fn)
+        dset_dict['test_dset'] = test_dset
+        
+        if 'training_dset' in dset_dict.keys():
+            training_dset = init_dataloader(args = args, 
+                                            shuffle = True,
+                                            pytorch_custom_dset = dset_dict['training_dset'],
+                                            collate_fn = collate_fn)
+            dset_dict['training_dset'] = training_dset
+        
+        return dload_dict
 
 
     ###########################################################################
@@ -109,32 +126,37 @@ def main():
         # import correct wrappers, dataloader initializers
         if args.pred_model_type == 'pairhmm_indp_sites':
             from cli.train_pairhmm_indp_sites import train_pairhmm_indp_sites as train_fn
-            from dloaders.init_counts_dset import init_counts_dset as init_dataloaders
-
+            from dloaders.init_counts_dset import init_counts_dset as init_datasets
+            from dloaders.CountsDset import jax_collator as collate_fn
+            
         elif args.pred_model_type == 'pairhmm_frag_and_site_classes':
             from cli.train_pairhmm_frag_and_site_classes import train_pairhmm_frag_and_site_classes as train_fn
-            from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
+            from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
+            from dloaders.FullLenDset import jax_collator as collate_fn
 
         elif args.pred_model_type == 'neural_hmm':
             raise NotImplementedError('not ready')
             from cli.train_neural_hmm import train_neural_hmm as train_fn
-            from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
+            from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
+            from dloaders.FullLenDset import jax_collator as collate_fn
 
         elif args.pred_model_type == 'feedforward':
             raise NotImplementedError('not ready')
             from cli.train_feedforward import train_feedforward as train_fn
-            from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
+            from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
+            from dloaders.FullLenDset import jax_collator as collate_fn
 
         # make dataloder list
-        if not top_level_args.load_dload_pkl:
-            dload_lst = init_dataloaders( args,
+        if not top_level_args.load_dset_pkl:
+            dload_dict = init_datasets( args,
                                           'train',
-                                          training_argparse = None )
-        elif top_level_args.load_dload_pkl:
-            dload_lst = load_dload_pkl(training_wkdir = args.training_wkdir)
+                                          training_argparse = None,
+                                          include_dataloader = True)
+        elif top_level_args.load_dset_pkl:
+            dload_dict = load_dset_pkl(training_wkdir = args.training_wkdir)
             
         # train model
-        train_fn( args, dload_lst )
+        train_fn( args, dload_dict )
 
 
     elif top_level_args.task == 'batched_train':
@@ -155,29 +177,34 @@ def main():
         # import correct wrappers, dataloader initializers
         if first_args.pred_model_type == 'pairhmm_indp_sites':
             from cli.train_pairhmm_indp_sites import train_pairhmm_indp_sites as train_fn
-            from dloaders.init_counts_dset import init_counts_dset as init_dataloaders
+            from dloaders.init_counts_dset import init_counts_dset as init_datasets
+            from dloaders.CountsDset import jax_collator as collate_fn
 
         elif first_args.pred_model_type == 'pairhmm_frag_and_site_classes':
             from cli.train_pairhmm_frag_and_site_classes import train_pairhmm_frag_and_site_classes as train_fn
-            from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
+            from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
+            from dloaders.FullLenDset import jax_collator as collate_fn
 
         elif first_args.pred_model_type == 'neural_hmm':
             raise NotImplementedError('not ready')
             from cli.train_neural_hmm import train_neural_hmm as train_fn
-            from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
+            from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
+            from dloaders.FullLenDset import jax_collator as collate_fn
 
         elif first_args.pred_model_type == 'feedforward':
             raise NotImplementedError('not ready')
             from cli.train_feedforward import train_feedforward as train_fn
-            from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
+            from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
+            from dloaders.FullLenDset import jax_collator as collate_fn
 
         # load data; due to batched nature, no option to pre-compute (for now? 
         #   if I need it later, make it happen)
-        dload_lst_for_all = init_dataloaders( first_args,
+        dload_dict_for_all = init_datasets( first_args,
                                               'train',
-                                              training_argparse = None )
+                                              training_argparse = None,
+                                              include_dataloader = True )
             
-        ### with this dload_lst, train using ALL config files
+        ### with this dload_dict, train using ALL config files
         for file in file_lst:
             # read argparse
             assert file.endswith('.json'), print("input is one JSON file")
@@ -185,10 +212,9 @@ def main():
             print(f'TRAINING WITH: {top_level_args.configs}/{file}')
             
             train_fn( this_run_args, 
-                      dload_lst_for_all )
+                      dload_dict_for_all )
             
             del this_run_args
-    
     
     elif top_level_args.task == 'continue_train':
         # read argparse
@@ -199,22 +225,24 @@ def main():
         # import correct wrappers, dataloader initializers
         if args_from_training_config.pred_model_type == 'pairhmm_indp_sites':
             from cli.cont_training_pairhmm_indp_sites import cont_training_pairhmm_indp_sites as cont_train_fn
-            from dloaders.init_counts_dset import init_counts_dset as init_dataloaders
+            from dloaders.init_counts_dset import init_counts_dset as init_datasets
+            from dloaders.CountsDset import jax_collator as collate_fn
         
         else:
             raise NotImplementedError('Cannot continue training yet!')
 
         # make dataloader objects
-        if not top_level_args.load_dload_pkl:
-            dload_lst = init_dataloaders( args_from_training_config,
+        if not top_level_args.load_dset_pkl:
+            dload_dict = init_datasets( args_from_training_config,
                                           'train',
-                                          training_argparse = None )
-        elif top_level_args.load_dload_pkl:
-            dload_lst = load_dload_pkl(training_wkdir = args_from_training_config.training_wkdir)
+                                          training_argparse = None,
+                                          include_dataloader = True )
+        elif top_level_args.load_dset_pkl:
+            dload_dict = load_dset_pkl(training_wkdir = args_from_training_config.training_wkdir)
             
         # train model
         cont_train_fn( args=args_from_training_config, 
-                        dataloader_dict=dload_lst,
+                        dataloader_dict=dload_dict,
                         new_training_wkdir=args.new_training_wkdir,
                         prev_model_ckpts_dir=args.prev_model_ckpts_dir,
                         tstate_to_load=args.tstate_to_load
@@ -244,23 +272,26 @@ def main():
         ### import correct wrappers, dataloader initializers
         if pred_model_type == 'pairhmm_indp_sites':
             from cli.eval_pairhmm_indp_sites import eval_pairhmm_indp_sites as eval_fn
-            from dloaders.init_counts_dset import init_counts_dset as init_dataloaders
+            from dloaders.init_counts_dset import init_counts_dset as init_datasets
+            from dloaders.CountsDset import jax_collator as collate_fn
 
         elif pred_model_type == 'pairhmm_frag_and_site_classes':
             from cli.eval_pairhmm_frag_and_site_classes import eval_pairhmm_frag_and_site_classes as eval_fn
-            from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
+            from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
+            from dloaders.FullLenDset import jax_collator as collate_fn
 
         # load data; saved under trianing_wkdir name
-        if not top_level_args.load_dload_pkl:
-            dload_lst = init_dataloaders( args,
-                                          'eval',
-                                          training_argparse )
-        elif top_level_args.load_dload_pkl:
-            dload_lst = load_dload_pkl(training_wkdir = args.training_wkdir)
+        if not top_level_args.load_dset_pkl:
+            dload_dict = init_datasets( args,
+                                        'eval',
+                                        training_argparse,
+                                        include_dataloader = True )
+        elif top_level_args.load_dset_pkl:
+            dload_dict = load_dset_pkl(training_wkdir = args.training_wkdir)
             
         # evaluate model
         eval_fn( args, 
-                  dload_lst, 
+                  dload_dict, 
                   training_argparse )
     
     
@@ -293,22 +324,24 @@ def main():
         # import correct wrappers, dataloader initializers
         if pred_model_type == 'pairhmm_indp_sites':
             from cli.eval_pairhmm_indp_sites import eval_pairhmm_indp_sites as eval_fn
-            from dloaders.init_counts_dset import init_counts_dset as init_dataloaders
+            from dloaders.init_counts_dset import init_counts_dset as init_datasets
+            from dloaders.CountsDset import jax_collator as collate_fn
 
         elif pred_model_type == 'pairhmm_frag_and_site_classes':
-            raise NotImplementedError('not ready')
             from cli.eval_pairhmm_frag_and_site_classes import eval_pairhmm_frag_and_site_classes as eval_fn
-            from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
+            from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
+            from dloaders.FullLenDset import jax_collator as collate_fn
 
         # load data
-        dload_lst_for_all = init_dataloaders( first_args, 
+        dload_dict_for_all = init_datasets( first_args, 
                                              'eval',
-                                             first_training_argparse )
+                                             first_training_argparse,
+                                             include_dataloader = True )
         
         del first_training_argparse, first_args
         
         
-        ### with this dload_lst, train using ALL config files
+        ### with this dload_dict, train using ALL config files
         for file in file_lst:
             # read argparse
             assert file.endswith('.json'), print("input is one JSON file")
@@ -325,7 +358,7 @@ def main():
                 training_argparse = pickle.load(g)
             
             eval_fn( this_run_args, 
-                     dload_lst_for_all, 
+                     dload_dict_for_all, 
                      training_argparse )
             
             del this_run_args, training_argparse
@@ -354,26 +387,28 @@ def main():
         
         ### import correct wrappers, dataloader initializers
         from cli.class_posteriors_pairhmm_frag_and_site_classes import class_posteriors_pairhmm_frag_and_site_classes as labeling_fn
-        from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
+        from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
+        from dloaders.FullLenDset import jax_collator as collate_fn
 
         # load data (saved under training_wkdir name)
-        if not top_level_args.load_dload_pkl:
-            dload_lst = init_dataloaders( args,
+        if not top_level_args.load_dset_pkl:
+            dload_dict = init_datasets( args,
                                           'eval',
-                                          training_argparse )
-        elif top_level_args.load_dload_pkl:
-            dload_lst = load_dload_pkl(training_wkdir = args.training_wkdir)
+                                          training_argparse,
+                                          include_dataloader = True )
+        elif top_level_args.load_dset_pkl:
+            dload_dict = load_dset_pkl(training_wkdir = args.training_wkdir)
         
         # evaluate
         labeling_fn( args, 
-                     dload_lst, 
+                     dload_dict, 
                      training_argparse )
     
     
     ###########################################################################
     ### MISC: prepare dataloaders for downstream use   ########################
     ###########################################################################
-    elif top_level_args.task == 'prep_dataloaders':
+    elif top_level_args.task == 'prep_datasets':
         file_lst = [file for file in os.listdir(top_level_args.configs) if not file.startswith('.')
                     and file.endswith('.json')]
         assert len(file_lst) > 0, f'{top_level_args.configs} is empty!'
@@ -386,13 +421,13 @@ def main():
         # import correct wrappers, dataloader initializers
         if first_args.pred_model_type == 'pairhmm_indp_sites':
             from cli.train_pairhmm_indp_sites import train_pairhmm_indp_sites as train_fn
-            from dloaders.init_counts_dset import init_counts_dset as init_dataloaders
+            from dloaders.init_counts_dset import init_counts_dset as init_datasets
 
         elif first_args.pred_model_type in ['pairhmm_frag_and_site_classes',
                                             'neural_hmm',
                                             'feedforward']:
             from cli.train_pairhmm_frag_and_site_classes import train_pairhmm_frag_and_site_classes as train_fn
-            from dloaders.init_full_len_dset import init_full_len_dset as init_dataloaders
+            from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
             
         del first_config_file, first_args
         
@@ -409,15 +444,18 @@ def main():
             train_flag = all(arg in dir(args) for arg in checklist)
             
             # load
-            dload_lst = init_dataloaders( this_run_args, 
+            dload_dict = init_datasets( this_run_args, 
                                           'train' if train_flag else 'eval',
-                                          training_argparse = None )
+                                          training_argparse = None,
+                                          include_dataloader = False)
             
             # dump
             new_file_name = f'TMP-dload-lst_' + file.replace('.json','.pkl')
             print(f'SAVING TO: {new_file_name}')
             with open(new_file_name, 'wb') as g:
-                pickle.dump(dload_lst, g)
+                pickle.dump(dload_dict, g)
+
+            del this_run_args, checklist, train_flag, dload_dict, new_file_name
         
         print('done')
         
