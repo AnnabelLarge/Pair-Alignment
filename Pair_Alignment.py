@@ -40,37 +40,37 @@ def main():
                     # 'label_class_post',
                     'continue_train']
     
-    # parser.add_argument('-task',
-    #                     type=str,
-    #                     required=True,
-    #                     choices = valid_tasks,
-    #                     help='What do you want to do? Pick from: {valid_tasks}')
+    parser.add_argument('-task',
+                        type=str,
+                        required=True,
+                        choices = valid_tasks,
+                        help='What do you want to do? Pick from: {valid_tasks}')
     
-    # parser.add_argument('-configs',
-    #                     type = str,
-    #                     required=True,
-    #                     help='Load configs from file or folder of files, in json format.')
+    parser.add_argument('-configs',
+                        type = str,
+                        required=True,
+                        help='Load configs from file or folder of files, in json format.')
     
-    # # only needed when continuing training
-    # parser.add_argument('-new_training_wkdir',
-    #                     type = str,
-    #                     help='ONLY FOR CONTINUE_TRAIN OPTION; Name for a new training working dir')
+    # only needed when continuing training
+    parser.add_argument('-new_training_wkdir',
+                        type = str,
+                        help='ONLY FOR CONTINUE_TRAIN OPTION; Name for a new training working dir')
     
-    # parser.add_argument('-prev_model_ckpts_dir',
-    #                     type = str,
-    #                     help='ONLY FOR CONTINUE_TRAIN OPTION; Path to previous trainstate, argparse object')
+    parser.add_argument('-prev_model_ckpts_dir',
+                        type = str,
+                        help='ONLY FOR CONTINUE_TRAIN OPTION; Path to previous trainstate, argparse object')
     
-    # parser.add_argument('-tstate_to_load',
-    #                     type = str,
-    #                     help='ONLY FOR CONTINUE_TRAIN OPTION; The name of the tstate object to load')
+    parser.add_argument('-tstate_to_load',
+                        type = str,
+                        help='ONLY FOR CONTINUE_TRAIN OPTION; The name of the tstate object to load')
     
     # parse the arguments
     args = parser.parse_args()
     
     
-    ## UNCOMMENT TO RUN IN SPYDER IDE
-    args.task = 'train'
-    args.configs = 'dry-run.json'
+    # ## UNCOMMENT TO RUN IN SPYDER IDE
+    # args.task = 'train'
+    # args.configs = 'dry-run.json'
     
     
     ### helper function to open a single config file and extract additional arguments
