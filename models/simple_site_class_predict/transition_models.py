@@ -874,9 +874,9 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         #   out_dict['log_beta']
         #   out_dict['log_one_minus_gamma']
         #   out_dict['log_gamma']
-        out_dict, approx_flags_dict = stable_tkf(mu = mu, 
-                                                 offset = offset,
-                                                 t_array = t_array)
+        out_dict, approx_flags_dict = self.tkf_function(mu = mu, 
+                                                        offset = offset,
+                                                        t_array = t_array)
         
         # add to these dictionaries before filling out matrix
         out_dict['log_offset'] = jnp.log(offset)
