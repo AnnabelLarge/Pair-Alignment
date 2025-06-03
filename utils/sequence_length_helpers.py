@@ -78,6 +78,11 @@ def determine_seqlen_bin(batch,
 def determine_alignlen_bin(batch,
                            chunk_length: int,
                            seq_padding_idx: int = 0):
+    ### batch has 4 entries:
+    ### 0.) unaligned seqs: (B, L, 2)
+    ### 1.) aligned matrices: (B, L, 2)
+    ### 2.) time (optional): (B,) or None
+    ### 3.) dataloader idx (B,)
     # use the first sequence from aligned matrix for this (gapped ancestor for 
     #   neural_pairhmm, alignment-augmented descendant for feedforward); 
     #   exclude <bos> for the clip_by_bins function

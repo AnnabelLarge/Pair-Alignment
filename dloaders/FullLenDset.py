@@ -275,8 +275,8 @@ def _load_aligned_mats(data_dir,
     dels = np.where(gapped_seqs[...,1] == gap_idx, 3, 0)
     
     # bos, eos
-    bos = jnp.where(mat == bos_idx, 4, 0)[...,0]
-    eos = jnp.where(mat == eos_idx, 5, 0)[...,0]
+    bos = np.where(mat == bos_idx, 4, 0)[...,0]
+    eos = np.where(mat == eos_idx, 5, 0)[...,0]
     
     
     ### concatenate
@@ -320,7 +320,7 @@ def _load_unaligned(data_dir,
                    split, 
                    idxes_to_keep=None):
     with open(f'{data_dir}/{split}_seqs_unaligned.npy','rb') as f:
-        mat = jnp.load(f)
+        mat = np.load(f)
     
     if (idxes_to_keep is not None):
         mat = mat[idxes_to_keep, :, :]

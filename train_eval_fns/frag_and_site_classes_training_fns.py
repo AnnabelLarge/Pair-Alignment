@@ -28,7 +28,11 @@ def train_one_batch(batch,
                     interms_for_tboard,
                     update_grads: bool = True,
                     **kwargs):
-    
+    ### batch has 4 entries:
+    ### 0.) unaligned seqs: (B, L, 2)
+    ### 1.) aligned matrices: (B, L, 2)
+    ### 2.) time (optional): (B,) or None
+    ### 3.) dataloader idx (B,)
     finalpred_sow_outputs = interms_for_tboard['finalpred_sow_outputs']
     batch_aligned_mats = batch[1]
     clipped_aligned_mats = batch_aligned_mats[:, :max_align_len, :]
@@ -36,6 +40,9 @@ def train_one_batch(batch,
     del batch
     
     def apply_model(pairhmm_params):
+        ### new_batch_inputs only has 2 entries:
+        ### 0.) aligned matrices: (B, max_align_len, 2)
+        ### 1.) time (optional): (B,) or None
         # in training, only evaluate joint loglike i.e. use default __call__
         (loss_NLL, aux_dict), sow_dict = pairhmm_trainstate.apply_fn(variables = pairhmm_params,
                                           batch = new_batch_inputs,
@@ -92,6 +99,11 @@ def eval_one_batch( batch,
                     interms_for_tboard,
                     return_all_loglikes: bool,
                     **kwargs):
+    ### batch has 4 entries:
+    ### 0.) unaligned seqs: (B, L, 2)
+    ### 1.) aligned matrices: (B, L, 2)
+    ### 2.) time (optional): (B,) or None
+    ### 3.) dataloader idx (B,)
     finalpred_sow_outputs = interms_for_tboard['finalpred_sow_outputs']
     batch_aligned_mats = batch[1]
     clipped_aligned_mats = batch_aligned_mats[:, :max_align_len, :]
@@ -99,6 +111,9 @@ def eval_one_batch( batch,
     del batch
     
     if not return_all_loglikes:
+        ### new_batch_inputs only has 2 entries:
+        ### 0.) aligned matrices: (B, max_align_len, 2)
+        ### 1.) time (optional): (B,) or None
         (loss_NLL, aux_dict), sow_dict = pairhmm_trainstate.apply_fn(variables = pairhmm_trainstate.params,
                                           batch = new_batch_inputs,
                                           t_array = t_array,
