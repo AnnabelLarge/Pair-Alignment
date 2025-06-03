@@ -208,15 +208,15 @@ class FragAndSiteClasses(ModuleBase):
                                                  logprob_emit_at_indel = logprob_emit_at_indel,
                                                  joint_logprob_transit = joint_logprob_transit,
                                                  unique_time_per_branch = unique_time_per_branch)
+        
         joint_logprob_perSamp_maybePerTime = logsumexp(forward_intermeds[-1,...], 
                                                        axis = 1 if not unique_time_per_branch else 0) #(T, B) or (B,)
-        
         
         ### marginalize over times where needed
         if (not unique_time_per_branch) and (t_array.shape[0] > 1):
             joint_neg_logP = -marginalize_over_times(logprob_perSamp_perTime = joint_logprob_perSamp_maybePerTime,
-                                                     exponential_dist_param = self.exponential_dist_param,
-                                                     t_array = times_for_matrices) #(B,)
+                                                      exponential_dist_param = self.exponential_dist_param,
+                                                      t_array = times_for_matrices) #(B,)
              
         elif (not unique_time_per_branch) and (t_array.shape[0] == 1):
             joint_neg_logP = -joint_logprob_perSamp_maybePerTime[0,:] #(B,)
@@ -299,7 +299,7 @@ class FragAndSiteClasses(ModuleBase):
         desc_len = desc_len.sum(axis=1)
         
         # score matrices
-        scoring_matrices_dict = self._get_scoring_matrices( t_array=t_array,
+        scoring_matrices_dict = self._get_scoring_matrices( t_array=times_for_matrices,
                                                             sow_intermediates=False )
         
         
@@ -564,7 +564,7 @@ class FragAndSiteClasses(ModuleBase):
                             'offset': offset}
                 
                 with open(f'{out_folder}/TKF92_indel_params.pkl','wb') as g:
-                    pickle.dump(to_write)
+                    pickle.dump(to_write, g)
                 del to_write
                 
         

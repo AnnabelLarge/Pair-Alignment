@@ -19,8 +19,7 @@ from tests.data_processing import (str_aligns_to_tensor,
                                    summarize_alignment)
 from models.simple_site_class_predict.transition_models import (TKF91TransitionLogprobs,
                                                                 TKF92TransitionLogprobs)
-from models.simple_site_class_predict.model_functions import (stable_tkf,
-                                                              MargTKF91TransitionLogprobs,
+from models.simple_site_class_predict.model_functions import (MargTKF91TransitionLogprobs,
                                                               MargTKF92TransitionLogprobs,
                                                               CondTransitionLogprobs)
 from models.simple_site_class_predict.IndpSites import IndpSites
@@ -93,33 +92,33 @@ class TestFullModelValidity(unittest.TestCase):
     def test_one_gtr(self):
         self._run_test({'num_mixtures': 1,
                         'indel_model_type': None,
-                        'num_tkf_site_classes': None})
+                        'num_tkf_fragment_classes': None})
         
     
     def test_multiple_gtrs(self):
         self._run_test({'num_mixtures': 3,
                         'indel_model_type': None,
-                        'num_tkf_site_classes': None})
+                        'num_tkf_fragment_classes': None})
         
     def test_one_tkf91(self):
         self._run_test({'num_mixtures': 1,
                         'indel_model_type': 'tkf91',
-                        'num_tkf_site_classes': 1})
+                        'num_tkf_fragment_classes': 1})
     
     def test_one_tkf92(self):
         self._run_test({'num_mixtures': 1,
                         'indel_model_type': 'tkf92',
-                        'num_tkf_site_classes': 1})
+                        'num_tkf_fragment_classes': 1})
     
     def test_one_tkf91_multiple_gtrs(self):
         self._run_test({'num_mixtures': 3,
                   'indel_model_type': 'tkf91',
-                  'num_tkf_site_classes': 1})
+                  'num_tkf_fragment_classes': 1})
     
     def test_one_tkf92_multiple_gtrs(self):
         self._run_test({'num_mixtures': 3,
                   'indel_model_type': 'tkf92',
-                  'num_tkf_site_classes': 1})
+                  'num_tkf_fragment_classes': 1})
     
 if __name__ == '__main__':
     unittest.main()

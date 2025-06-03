@@ -14,7 +14,9 @@ import numpy as np
 import numpy.testing as npt
 import unittest
 
-from models.simple_site_class_predict.model_functions import stable_tkf
+from models.simple_site_class_predict.model_functions import (switch_tkf,
+                                                              regular_tkf,
+                                                              approx_tkf)
 
 
 THRESHOLD = 1e-6
@@ -38,29 +40,21 @@ class TestOriginalTKFParamFns(unittest.TestCase):
         original function
     
     """
-    def test_tkf_param_no_approx(self):
-        # fake params
-        lam = jnp.array(0.3)
-        mu = jnp.array(0.5)
-        offset = 1 - (lam/mu)
-        t_array = jnp.array([0.3, 0.5, 0.9])
+    def setUp(self):
+        self.lam = jnp.array(0.3)
+        self.mu = jnp.array(0.5)
+        self.offset = 1 - (self.lam/self.mu)
         
-        # my function comes packaged in a flax module
-        my_tkf_params, _ = stable_tkf(mu = mu, 
-                                      offset = offset,
-                                      t_array = t_array)
-        
-        pred_alpha = jnp.exp(my_tkf_params['log_alpha'])
-        pred_beta = jnp.exp(my_tkf_params['log_beta'])
-        pred_gamma = jnp.exp(my_tkf_params['log_gamma'])
-        
+    def _run_test(self, 
+                  t_array,
+                  tkf_function):
         # get true values
         true_alpha = []
         true_beta = []
         true_gamma = []
 
         for t in t_array:
-            out = TKF_coeffs (lam, mu, t)
+            out = TKF_coeffs (self.lam, self.mu, t)
             true_alpha.append(out[0])
             true_beta.append(out[1])
             true_gamma.append(out[2])
@@ -69,9 +63,37 @@ class TestOriginalTKFParamFns(unittest.TestCase):
         true_beta = np.array(true_beta)
         true_gamma = np.array(true_gamma)
         
+        # my function comes packaged in a flax module
+        my_tkf_params, _ = tkf_function(mu = self.mu, 
+                                        offset = self.offset,
+                                        t_array = t_array)
+        
+        pred_alpha = jnp.exp(my_tkf_params['log_alpha'])
+        pred_beta = jnp.exp(my_tkf_params['log_beta'])
+        pred_gamma = jnp.exp(my_tkf_params['log_gamma'])
+        
         npt.assert_allclose(true_alpha, pred_alpha, atol=THRESHOLD)
         npt.assert_allclose(true_beta, pred_beta, atol=THRESHOLD)
         npt.assert_allclose(true_gamma, pred_gamma, atol=THRESHOLD)
+        
+    def test_switch_tkf(self):
+        self._run_test( tkf_function = switch_tkf,
+                        t_array = jnp.array([0.3, 0.5, 0.9,
+                                             0.0003, 0.0005, 0.0009]) )
+    
+    def test_regular_tkf(self):
+        self._run_test( tkf_function = regular_tkf,
+                        t_array = jnp.array([0.3, 0.5, 0.9,
+                                             0.0003, 0.0005, 0.0009]) )
+    
+    def test_approx_tkf(self):
+        """
+        run this at small times only
+        """
+        self._run_test( tkf_function = approx_tkf,
+                        t_array = jnp.array([0.0003, 0.0005, 0.0009]) )
+    
+    
 
 if __name__ == '__main__':
     unittest.main()

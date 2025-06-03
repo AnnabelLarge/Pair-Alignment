@@ -367,6 +367,9 @@ class TKF91TransitionLogprobs(ModuleBase):
         # add to these dictionaries before filling out matrix
         out_dict['log_offset'] = jnp.log(offset)
         out_dict['log_one_minus_offset'] = jnp.log1p(-offset)
+        
+        if approx_flags_dict is not None:
+            approx_flags_dict['t_array'] = t_array
 
         
         # record values
@@ -881,7 +884,9 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         # add to these dictionaries before filling out matrix
         out_dict['log_offset'] = jnp.log(offset)
         out_dict['log_one_minus_offset'] = jnp.log1p(-offset)
-        approx_flags_dict['t_array'] = t_array
+        
+        if approx_flags_dict is not None:
+            approx_flags_dict['t_array'] = t_array
         
         # record values
         if sow_intermediates:

@@ -38,7 +38,9 @@ functions:
 'scale_rate_matrix',
 'scale_rate_multipliers',
 'stable_log_one_minus_x',
-'stable_tkf',
+'switch_tkf',
+'regular_tkf',
+'approx_tkf',
 'true_beta',
 'upper_tri_vector_to_sym_matrix'
 
@@ -980,8 +982,8 @@ def marginalize_over_times(logprob_perSamp_perTime,
     
     ### add in log space, multiply in probability space; logsumexp
     logP_perSamp_perTime_withConst = ( logprob_perSamp_perTime +
-                                       logP_time[:,None] +
-                                       log_t_grid[:,None] ) #(T,B)
+                                        logP_time[:,None] +
+                                        log_t_grid[:,None] ) #(T,B)
     
     return logsumexp(logP_perSamp_perTime_withConst, axis=0) #(B,)
     
@@ -1596,6 +1598,7 @@ def joint_only_forward(aligned_inputs,
         classes C. This leaves you with the joint probability of the observed 
         alignment, at all branch lengths in T
     """
+    
     ######################################################
     ### initialize with <start> -> any (curr pos is 1)   #
     ######################################################
@@ -1643,7 +1646,6 @@ def joint_only_forward(aligned_inputs,
     init_alpha = e + tr # (T, C, B) or (C, B)
     del e, tr, start_any, curr_state, pos
     
-    
     ######################################################
     ### scan down length dimension to end of alignment   #
     ######################################################
@@ -1654,6 +1656,10 @@ def joint_only_forward(aligned_inputs,
 
         prev_state = aligned_inputs[:, pos-1, 2]
         curr_state = aligned_inputs[:,   pos, 2]
+        
+        # remove invalid indexing tokens; this doesn't affect the actual '
+        #   calculated loglike
+        prev_state = jnp.where( prev_state!=5, prev_state, 4 )
         curr_state = jnp.where( curr_state!=5, curr_state, 4 )
         
         
@@ -1665,58 +1671,71 @@ def joint_only_forward(aligned_inputs,
         
         
         ### transition probabilities
-        def main_body(in_carry):
+        def main_body(in_carry, ps, cs):
+            # replace padding idx with 1 to prevent NaN gradients; this doesn't
+            #   affect the actual calculated loglike
+            ps = jnp.maximum(ps, 1)
+            cs = jnp.maximum(cs, 1)
+            
             # like dot product with C_prev, C_curr
             if not unique_time_per_branch:
                 # joint_logprob_transit is (T, C_prev, C_curr, S_prev, S_curr)
-                tr_per_class = joint_logprob_transit[..., prev_state-1, curr_state-1] #(T, C_prev, C_curr, B)   
+                tr_per_class = joint_logprob_transit[..., ps-1, cs-1] #(T, C_prev, C_curr, B)   
                 to_add = logsumexp(in_carry[:, :, None, :] + tr_per_class, axis=1) #(T, C_curr, B)
             
             elif unique_time_per_branch:
                 # joint_logprob_transit is (B, C_prev, C_curr, S_prev, S_curr)
-                ps_idx = (prev_state - 1)[:, None, None, None, None] #(B, 1, 1, 1, 1)
-                cs_idx = (curr_state - 1)[:, None, None, None, None] #(B, 1, 1, 1, 1)
+                ps_idx = (ps-1)[:, None, None, None, None] #(B, 1, 1, 1, 1)
+                cs_idx = (cs-1)[:, None, None, None, None] #(B, 1, 1, 1, 1)
+                
                 transit_ps = jnp.take_along_axis(joint_logprob_transit, ps_idx, axis=3)  # (B, C_prev, C_curr, 1, S_curr)
                 transit_ps_cs = jnp.take_along_axis(transit_ps, cs_idx, axis=4)  # (B, C_prev, C_curr, 1, 1)
                 tr_per_class = jnp.squeeze(transit_ps_cs, axis=(3,4)).transpose(1, 2, 0) #(C_prev, C_curr, B) 
-                to_add = logsumexp(in_carry[:, None, :] + tr_per_class, axis=0) #(C_curr, B)
+                to_add = logsumexp(in_carry[:, None, :] + tr_per_class, axis=0) #(C_curr, B) # this line causes nan gradients
                 
             return e + to_add #(T, C_curr, B) or (C_curr, B)
         
-        def end(in_carry):
+        def end(in_carry, ps, cs_not_used):
+            # replace padding idx with 1 to prevent NaN gradients; this doesn't
+            #   affect the actual calculated loglike
+            ps = jnp.maximum(ps, 1)
+            
             # if end, then curr_state = -1 (<end>)
             if not unique_time_per_branch:
-                tr_per_class = joint_logprob_transit[..., -1, prev_state-1, -1] #(T, C_prev, B)    
+                tr_per_class = joint_logprob_transit[..., -1, ps-1, -1] #(T, C_prev, B)    
             
             elif unique_time_per_branch:
                 sliced = joint_logprob_transit[:, :, -1, :, -1]  # (B, C_prev, S_prev)
-                ps_idx = (prev_state - 1)[:, None]  # (B, 1)
-                gathered = jnp.take_along_axis(sliced, ps_idx[:, None, :], axis=2)  # (B, C_prev, 1)
+                ps_idx = (ps - 1)[:, None, None]  # (B, 1, 1)
+                gathered = jnp.take_along_axis(sliced, ps_idx, axis=2)  # (B, C_prev, 1)
                 tr_per_class = jnp.squeeze(gathered, axis=2).T  # (C_prev, B)
-                
+                 
             return tr_per_class + in_carry #(T, C, B) or (C, B)
         
         
         ### alpha update, in log space ONLY if curr_state is not pad
-        new_alpha = jnp.where(curr_state != 0,
+        new_alpha = jnp.where(curr_state != 0, 
                               jnp.where( curr_state != 4,
-                                          main_body(prev_alpha),
-                                          end(prev_alpha) ),
-                              prev_alpha ) #(T, C, B) or (C, B)
+                                          main_body(prev_alpha, prev_state, curr_state),
+                                          end(prev_alpha, prev_state, curr_state) ),
+                              prev_alpha) #(T, C, B) or (C, B)
+        
         return (new_alpha, new_alpha)
     
     ### end scan function definition, use scan
     idx_arr = jnp.array( [ i for i in range(2, L_align) ] ) #(L_align)
+    
     _, stacked_outputs = jax.lax.scan( f = scan_fn,
-                                       init = init_alpha,
-                                       xs = idx_arr,
-                                       length = idx_arr.shape[0] )  #(L_align-1, T, C, B)  or (L_align-1, C, B)
+                                        init = init_alpha,
+                                        xs = idx_arr,
+                                        length = idx_arr.shape[0] )  #(L_align-1, T, C, B)  or (L_align-1, C, B)
     
     # stacked_outputs is cumulative sum PER POSITION, PER TIME
     # append the first return value (from sentinel -> first alignment column)
     stacked_outputs = jnp.concatenate( [ init_alpha[None,...], #(1, T, C, B) or (1, C, B)
                                          stacked_outputs ], #(L_align-1, T, C, B) or (L_align-1, C, B)
                                       axis=0) #(L_align, T, C, B) or (L_align, C, B)
+    
     return stacked_outputs #(L_align, T, C, B) or or (L_align, C, B)
     
 
@@ -1739,6 +1758,9 @@ def all_loglikes_forward(aligned_inputs,
     """
     forward algo to find joint, conditional, and both single-sequence marginal 
         loglikeihoods
+    
+    IMPORANT: I never carry gradients through this!!!
+    
     
     L_align: length of pairwise alignment
     T: number of timepoints

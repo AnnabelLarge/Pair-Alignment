@@ -15,7 +15,9 @@ import numpy.testing as npt
 import unittest
 
 from models.simple_site_class_predict.transition_models import TKF92TransitionLogprobs
-from models.simple_site_class_predict.model_functions import (stable_tkf,
+from models.simple_site_class_predict.model_functions import (switch_tkf,
+                                                              regular_tkf,
+                                                              approx_tkf,
                                                               MargTKF92TransitionLogprobs,
                                                               CondTransitionLogprobs)
 
@@ -77,38 +79,38 @@ class TestTKF92AgainstIansFunc(unittest.TestCase):
     this tests the conditional formula, from internal documents
     
     """
-    def test_tkf92_cond(self):
-        # fake params
-        lam = jnp.array(0.3)
-        mu = jnp.array(0.5)
-        offset = 1 - (lam/mu)
-        r = jnp.array([0.1])
-        t_array = jnp.array([0.3, 0.5, 0.9])
+    def setUp(self):
+        self.lam = jnp.array(0.3)
+        self.mu = jnp.array(0.5)
+        self.offset = 1 - (self.lam/self.mu)
+        self.r = jnp.array([0.1])
         
+        config = {'num_tkf_fragment_classes': 1}
+        self.my_model = TKF92TransitionLogprobs(config=config, name='tkf92')
+        self.fake_params = self.my_model.init(rngs=jax.random.key(0),
+                                              t_array = jnp.zeros((1,)),
+                                              log_class_probs = jnp.array([0]),
+                                              sow_intermediates = False)
+    
+    def _run_test(self,
+                  tkf_function,
+                  t_array):
         ### my function comes packaged in a flax module
-        my_tkf_params, _ = stable_tkf(mu = mu, 
-                                      offset = offset,
-                                      t_array = t_array)
-        my_tkf_params['log_offset'] = jnp.log(offset)
-        my_tkf_params['log_one_minus_offset'] = jnp.log1p(-offset)
+        my_tkf_params, _ = tkf_function(mu = self.mu, 
+                                        offset = self.offset,
+                                        t_array = t_array)
+        my_tkf_params['log_offset'] = jnp.log(self.offset)
+        my_tkf_params['log_one_minus_offset'] = jnp.log1p(-self.offset)
         
-        config = {'num_tkf_site_classes': 1}
-        my_model = TKF92TransitionLogprobs(config=config, name='tkf92')
-        fake_params = my_model.init(rngs=jax.random.key(0),
-                                    t_array = t_array,
-                                    class_probs = jnp.array([1]),
-                                    sow_intermediates = False)
+        joint_tkf92 =  self.my_model.apply(variables = self.fake_params,
+                                           out_dict = my_tkf_params,
+                                           r_extend = self.r,
+                                           class_probs = jnp.array([1]),
+                                           method = 'fill_joint_tkf92') #(T, 1, 1, 4, 4)
         
-        joint_tkf92 =  my_model.apply(variables = fake_params,
-                                      out_dict = my_tkf_params,
-                                      r_extend = r,
-                                      class_probs = jnp.array([1]),
-                                      method = 'fill_joint_tkf92') #(T, 1, 1, 4, 4)
-        
-        
-        marg_tkf92 = MargTKF92TransitionLogprobs(offset = offset,
+        marg_tkf92 = MargTKF92TransitionLogprobs(offset = self.offset,
                                                  class_probs = jnp.array([1]),
-                                                 r_ext_prob = r)
+                                                 r_ext_prob = self.r)
         pred_cond_tkf92 = CondTransitionLogprobs( marg_tkf92, joint_tkf92 )
         
         
@@ -116,7 +118,10 @@ class TestTKF92AgainstIansFunc(unittest.TestCase):
         true_tkf92 = []
 
         for i,t in enumerate(t_array):
-            true_tkf92.append( TKF92_Ftransitions (lam[None], mu[None], r, t) ) #(T, 4, 4, 1)
+            true_tkf92.append( TKF92_Ftransitions (self.lam[None], 
+                                                   self.mu[None], 
+                                                   self.r, 
+                                                   t) ) #(T, 4, 4, 1)
         
         
         ### reshaping to (T, 4, 4)
@@ -125,6 +130,24 @@ class TestTKF92AgainstIansFunc(unittest.TestCase):
         
         
         npt.assert_allclose(true_tkf92, jnp.exp(pred_cond_tkf92), atol=THRESHOLD)
+        
+    
+    def test_switch_tkf(self):
+        self._run_test( tkf_function = switch_tkf,
+                        t_array = jnp.array([0.3, 0.5, 0.9,
+                                             0.0003, 0.0005, 0.0009]) )
+    
+    def test_regular_tkf(self):
+        self._run_test( tkf_function = regular_tkf,
+                        t_array = jnp.array([0.3, 0.5, 0.9,
+                                             0.0003, 0.0005, 0.0009]) )
+    
+    def test_approx_tkf(self):
+        """
+        run this at small times only
+        """
+        self._run_test( tkf_function = approx_tkf,
+                        t_array = jnp.array([0.0003, 0.0005, 0.0009]) )
 
 if __name__ == '__main__':
     unittest.main()

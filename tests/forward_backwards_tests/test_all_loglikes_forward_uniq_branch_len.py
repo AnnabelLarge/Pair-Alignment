@@ -25,7 +25,7 @@ from tests.data_processing import (str_aligns_to_tensor,
                                    summarize_alignment)
 
 from models.simple_site_class_predict.transition_models import TKF92TransitionLogprobs
-from models.simple_site_class_predict.model_functions import (stable_tkf,
+from models.simple_site_class_predict.model_functions import (switch_tkf,
                                                               MargTKF92TransitionLogprobs,
                                                               CondTransitionLogprobs,
                                                               joint_only_forward,
@@ -91,7 +91,7 @@ class TestAllLoglikesForwardUniqBranchLen(unittest.TestCase):
         self.logprob_emit_at_indel = generate_fake_scoring_mat( (self.C,self.A) )
         
         # be more careful about generating a fake transition matrix
-        my_tkf_params, _ = stable_tkf(mu = mu, 
+        my_tkf_params, _ = switch_tkf(mu = mu, 
                                       offset = offset,
                                       t_array = self.t_array)
         my_tkf_params['log_offset'] = jnp.log(offset)
@@ -100,7 +100,7 @@ class TestAllLoglikesForwardUniqBranchLen(unittest.TestCase):
                                            name='tkf92')
         fake_params = my_model.init(rngs=jax.random.key(0),
                                     t_array = self.t_array,
-                                    class_probs = class_probs,
+                                    log_class_probs = jnp.log(class_probs),
                                     sow_intermediates = False)
         
         self.joint_logprob_transit =  my_model.apply(variables = fake_params,
