@@ -203,14 +203,12 @@ class FragAndSiteClasses(ModuleBase):
         logprob_emit_at_indel = scoring_matrices_dict['logprob_emit_at_indel']
         joint_logprob_emit_at_match = scoring_matrices_dict['joint_logprob_emit_at_match']
         joint_logprob_transit =  scoring_matrices_dict['all_transit_matrices']['joint']
-        forward_intermeds = joint_only_forward(aligned_inputs = aligned_inputs,
+        joint_logprob_perSamp_maybePerTime = joint_only_forward(aligned_inputs = aligned_inputs,
                                                  joint_logprob_emit_at_match = joint_logprob_emit_at_match,
                                                  logprob_emit_at_indel = logprob_emit_at_indel,
                                                  joint_logprob_transit = joint_logprob_transit,
-                                                 unique_time_per_branch = unique_time_per_branch)
-        
-        joint_logprob_perSamp_maybePerTime = logsumexp(forward_intermeds[-1,...], 
-                                                       axis = 1 if not unique_time_per_branch else 0) #(T, B) or (B,)
+                                                 unique_time_per_branch = unique_time_per_branch,
+                                                 return_all_intermeds = False)  #(T, B)  or (B,)
         
         ### marginalize over times where needed
         if (not unique_time_per_branch) and (t_array.shape[0] > 1):

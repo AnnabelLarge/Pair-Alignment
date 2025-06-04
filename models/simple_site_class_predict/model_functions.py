@@ -1553,7 +1553,8 @@ def joint_only_forward(aligned_inputs,
                        joint_logprob_emit_at_match,
                        logprob_emit_at_indel,
                        joint_logprob_transit,
-                       unique_time_per_branch: bool):
+                       unique_time_per_branch: bool, 
+                       return_all_intermeds = False):
     """
     forward algo ONLY to find joint loglike
     
@@ -1723,20 +1724,35 @@ def joint_only_forward(aligned_inputs,
         return (new_alpha, new_alpha)
     
     ### end scan function definition, use scan
+    # stacked_outputs is cumulative sum PER POSITION, PER TIME
     idx_arr = jnp.array( [ i for i in range(2, L_align) ] ) #(L_align)
     
-    _, stacked_outputs = jax.lax.scan( f = scan_fn,
-                                        init = init_alpha,
-                                        xs = idx_arr,
-                                        length = idx_arr.shape[0] )  #(L_align-1, T, C, B)  or (L_align-1, C, B)
+    if not return_all_intermeds:
+        last_alpha, _ = jax.lax.scan( f = scan_fn,
+                                      init = init_alpha,
+                                      xs = idx_arr,
+                                      length = idx_arr.shape[0] )  #(T, C, B)  or (C, B)
+        
+        loglike = logsumexp(last_alpha,  # (T, C, B)  or (C, B)
+                            axis = 1 if not unique_time_per_branch else 0)
+        
+        return loglike #(T, B)  or (B,)
+
+        
+    elif return_all_intermeds:
+        _, stacked_outputs = jax.lax.scan( f = scan_fn,
+                                            init = init_alpha,
+                                            xs = idx_arr,
+                                            length = idx_arr.shape[0] )  #(L_align-1, T, C, B)  or (L_align-1, C, B)
+        
+        # append the first return value (from sentinel -> first alignment column)
+        stacked_outputs = jnp.concatenate( [ init_alpha[None,...], #(1, T, C, B) or (1, C, B)
+                                             stacked_outputs ], #(L_align-1, T, C, B) or (L_align-1, C, B)
+                                          axis=0) #(L_align, T, C, B) or (L_align, C, B)
+        
+        return stacked_outputs #(L_align, T, C, B) or or (L_align, C, B)
     
-    # stacked_outputs is cumulative sum PER POSITION, PER TIME
-    # append the first return value (from sentinel -> first alignment column)
-    stacked_outputs = jnp.concatenate( [ init_alpha[None,...], #(1, T, C, B) or (1, C, B)
-                                         stacked_outputs ], #(L_align-1, T, C, B) or (L_align-1, C, B)
-                                      axis=0) #(L_align, T, C, B) or (L_align, C, B)
-    
-    return stacked_outputs #(L_align, T, C, B) or or (L_align, C, B)
+        
     
 
 def _log_space_dot_prod_helper(alpha,
@@ -2082,7 +2098,7 @@ def all_loglikes_forward(aligned_inputs,
                                xs = idx_arr,
                                length = idx_arr.shape[0] )
     
-    final_joint_alpha = out_dict['joint_alpha'] #(L_align-1, T, C, B) or #(L_align-1, C, B)
+    final_joint_alpha = out_dict['joint_alpha'] #(T, C, B) or #(C, B)
     joint_neg_logP = -logsumexp(final_joint_alpha, 
                                 axis = 1 if not unique_time_per_branch else 0) #(T, B) or (B,)
     
