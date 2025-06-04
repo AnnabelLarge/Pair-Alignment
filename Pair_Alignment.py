@@ -153,7 +153,8 @@ def main():
                                           training_argparse = None,
                                           include_dataloader = True)
         elif top_level_args.load_dset_pkl:
-            dload_dict = load_dset_pkl(training_wkdir = args.training_wkdir)
+            dload_dict = load_dset_pkl(training_wkdir = args.training_wkdir,
+                                       collate_fn = collate_fn)
             
         # train model
         train_fn( args, dload_dict )
@@ -238,7 +239,8 @@ def main():
                                           training_argparse = None,
                                           include_dataloader = True )
         elif top_level_args.load_dset_pkl:
-            dload_dict = load_dset_pkl(training_wkdir = args_from_training_config.training_wkdir)
+            dload_dict = load_dset_pkl(training_wkdir = args_from_training_config.training_wkdir,
+                                       collate_fn = collate_fn)
             
         # train model
         cont_train_fn( args=args_from_training_config, 
@@ -287,7 +289,8 @@ def main():
                                         training_argparse,
                                         include_dataloader = True )
         elif top_level_args.load_dset_pkl:
-            dload_dict = load_dset_pkl(training_wkdir = args.training_wkdir)
+            dload_dict = load_dset_pkl(training_wkdir = args.training_wkdir,
+                                       collate_fn = collate_fn)
             
         # evaluate model
         eval_fn( args, 
@@ -397,7 +400,8 @@ def main():
                                           training_argparse,
                                           include_dataloader = True )
         elif top_level_args.load_dset_pkl:
-            dload_dict = load_dset_pkl(training_wkdir = args.training_wkdir)
+            dload_dict = load_dset_pkl(training_wkdir = args.training_wkdir,
+                                       collate_fn = collate_fn)
         
         # evaluate
         labeling_fn( args, 
