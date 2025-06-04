@@ -153,7 +153,7 @@ def main():
                                           training_argparse = None,
                                           include_dataloader = True)
         elif top_level_args.load_dset_pkl:
-            dload_dict = load_dset_pkl(training_wkdir = args.training_wkdir,
+            dload_dict = load_dset_pkl(args = args,
                                        collate_fn = collate_fn)
             
         # train model
@@ -239,7 +239,7 @@ def main():
                                           training_argparse = None,
                                           include_dataloader = True )
         elif top_level_args.load_dset_pkl:
-            dload_dict = load_dset_pkl(training_wkdir = args_from_training_config.training_wkdir,
+            dload_dict = load_dset_pkl(args = args_from_training_config,
                                        collate_fn = collate_fn)
             
         # train model
@@ -289,7 +289,7 @@ def main():
                                         training_argparse,
                                         include_dataloader = True )
         elif top_level_args.load_dset_pkl:
-            dload_dict = load_dset_pkl(training_wkdir = args.training_wkdir,
+            dload_dict = load_dset_pkl(args = args,
                                        collate_fn = collate_fn)
             
         # evaluate model
@@ -400,7 +400,7 @@ def main():
                                           training_argparse,
                                           include_dataloader = True )
         elif top_level_args.load_dset_pkl:
-            dload_dict = load_dset_pkl(training_wkdir = args.training_wkdir,
+            dload_dict = load_dset_pkl(args = args,
                                        collate_fn = collate_fn)
         
         # evaluate
