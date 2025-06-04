@@ -14,6 +14,8 @@ import pickle
 import shutil
 import gc
 
+from dloaders.init_dataloader import init_dataloader
+
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update("jax_debug_infs", True)
 # jax.config.update("jax_enable_x64", True)
@@ -93,25 +95,25 @@ def main():
     # load a pre-computed dataset; make a pytorch dataloader
     def load_dset_pkl(args, collate_fn):
         # partial dictionary with dataset objects; need dataloaders
-        file_to_load = f'TMP-dload-lst_' + args.training_wkdir.replace('.json','.pkl')
+        file_to_load = f'TMP-dload-lst_' + args.training_wkdir + '.pkl'
         with open(file_to_load,'rb') as f:
             dset_dict = pickle.load(f)
         
         # add dataloader objects
-        test_dset = init_dataloader(args = args, 
+        test_dl = init_dataloader(args = args, 
                                     shuffle = False,
                                     pytorch_custom_dset = dset_dict['test_dset'],
                                     collate_fn = collate_fn)
-        dset_dict['test_dset'] = test_dset
+        dset_dict['test_dl'] = test_dl
         
         if 'training_dset' in dset_dict.keys():
-            training_dset = init_dataloader(args = args, 
+            training_dl = init_dataloader(args = args, 
                                             shuffle = True,
                                             pytorch_custom_dset = dset_dict['training_dset'],
                                             collate_fn = collate_fn)
-            dset_dict['training_dset'] = training_dset
+            dset_dict['training_dl'] = training_dl
         
-        return dload_dict
+        return dset_dict
 
 
     ###########################################################################
@@ -454,7 +456,7 @@ def main():
                                           include_dataloader = False)
             
             # dump
-            new_file_name = f'TMP-dload-lst_' + file.replace('.json','.pkl')
+            new_file_name = f'TMP-dload-lst_' + this_run_args.training_wkdir + '.pkl'
             print(f'SAVING TO: {new_file_name}')
             with open(new_file_name, 'wb') as g:
                 pickle.dump(dload_dict, g)
