@@ -12,7 +12,6 @@ initialize dataloaders and pytorch datasets
 """
 import pickle
 import torch
-import random
 from torch.utils.data import DataLoader
 import numpy as np
 
@@ -72,10 +71,6 @@ def init_full_len_dset( args,
     #################################
     if task in ['train', 
                 'resume_train']:
-        torch.manual_seed(args.rng_seednum)
-        random.seed(args.rng_seednum)
-        np.random.seed(args.rng_seednum)    
-        
         only_test = False
         t_per_sample = args.pred_config['times_from'] == 't_per_sample'
         t_array_for_all_samples = init_time_array(args)

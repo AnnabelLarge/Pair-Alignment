@@ -95,7 +95,9 @@ def main():
     # load a pre-computed dataset; make a pytorch dataloader
     def load_dset_pkl(args, collate_fn):
         # partial dictionary with dataset objects; need dataloaders
-        file_to_load = f'TMP-dload-lst_' + args.training_wkdir + '.pkl'
+        cleaned = re.sub(r'[-_]?seed\d+[-_]?', '', args.training_wkdir)
+        cleaned = re.sub(r'[-_]+', '_', cleaned).strip('_-')
+        file_to_load = f'TMP-dload-lst_' + cleaned + '.pkl'
         with open(file_to_load,'rb') as f:
             dset_dict = pickle.load(f)
         
@@ -456,12 +458,15 @@ def main():
                                           include_dataloader = False)
             
             # dump
-            new_file_name = f'TMP-dload-lst_' + this_run_args.training_wkdir + '.pkl'
+            cleaned = re.sub(r'[-_]?seed\d+[-_]?', '', this_run_args.training_wkdir)
+            cleaned = re.sub(r'[-_]+', '_', cleaned).strip('_-')
+            new_file_name = f'TMP-dload-lst_' + cleaned + '.pkl'
             print(f'SAVING TO: {new_file_name}')
             with open(new_file_name, 'wb') as g:
                 pickle.dump(dload_dict, g)
 
             del this_run_args, checklist, train_flag, dload_dict, new_file_name
+            del cleaned
         
         print('done')
         
