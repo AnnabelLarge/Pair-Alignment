@@ -55,9 +55,10 @@ def main():
                         help='Load configs from file or folder of files, in json format.')
     
     # optional: might have pre-processed some dataloaders
-    parser.add_argument('-load_dset_pkl', 
-                        action='store_true', 
-                        help='If added, load dataloaders from a pickle object (it was already created and pre-processed beforehand)')
+    parser.add_argument('-load_dset_pkl',
+                        type = str,
+                        default=False,
+                        help='name of the pre-computed pytorch dataset pickle object')
     
     # only needed when continuing training
     parser.add_argument('-new_training_wkdir',
@@ -93,19 +94,17 @@ def main():
         return args
     
     # load a pre-computed dataset; make a pytorch dataloader
-    def load_dset_pkl(args, collate_fn):
-        # partial dictionary with dataset objects; need dataloaders
-        cleaned = re.sub(r'[-_]?seed\d+[-_]?', '', args.training_wkdir)
-        cleaned = re.sub(r'[-_]+', '_', cleaned).strip('_-')
-        file_to_load = f'TMP-dload-lst_' + cleaned + '.pkl'
+    def load_dset_pkl(file_to_load, 
+                      args,
+                      collate_fn):
         with open(file_to_load,'rb') as f:
             dset_dict = pickle.load(f)
         
         # add dataloader objects
         test_dl = init_dataloader(args = args, 
-                                    shuffle = False,
-                                    pytorch_custom_dset = dset_dict['test_dset'],
-                                    collate_fn = collate_fn)
+                                  shuffle = False,
+                                  pytorch_custom_dset = dset_dict['test_dset'],
+                                  collate_fn = collate_fn)
         dset_dict['test_dl'] = test_dl
         
         if 'training_dset' in dset_dict.keys():
@@ -158,6 +157,7 @@ def main():
                                           include_dataloader = True)
         elif top_level_args.load_dset_pkl:
             dload_dict = load_dset_pkl(args = args,
+                                       file_to_load = top_level_args.load_dset_pkl,
                                        collate_fn = collate_fn)
             
         # train model
@@ -244,6 +244,7 @@ def main():
                                           include_dataloader = True )
         elif top_level_args.load_dset_pkl:
             dload_dict = load_dset_pkl(args = args_from_training_config,
+                                       file_to_load = top_level_args.load_dset_pkl,
                                        collate_fn = collate_fn)
             
         # train model
@@ -294,6 +295,7 @@ def main():
                                         include_dataloader = True )
         elif top_level_args.load_dset_pkl:
             dload_dict = load_dset_pkl(args = args,
+                                       file_to_load = top_level_args.load_dset_pkl,
                                        collate_fn = collate_fn)
             
         # evaluate model
@@ -405,6 +407,7 @@ def main():
                                           include_dataloader = True )
         elif top_level_args.load_dset_pkl:
             dload_dict = load_dset_pkl(args = args,
+                                       file_to_load = top_level_args.load_dset_pkl,
                                        collate_fn = collate_fn)
         
         # evaluate
@@ -457,16 +460,13 @@ def main():
                                           training_argparse = None,
                                           include_dataloader = False)
             
-            # dump
-            cleaned = re.sub(r'[-_]?seed\d+[-_]?', '', this_run_args.training_wkdir)
-            cleaned = re.sub(r'[-_]+', '_', cleaned).strip('_-')
-            new_file_name = f'TMP-dload-lst_' + cleaned + '.pkl'
+            # dump; use the config name by default
+            new_file_name = f'TMP-dload-lst_' + file.replace('.json','.pkl')
             print(f'SAVING TO: {new_file_name}')
             with open(new_file_name, 'wb') as g:
                 pickle.dump(dload_dict, g)
 
             del this_run_args, checklist, train_flag, dload_dict, new_file_name
-            del cleaned
         
         print('done')
         
