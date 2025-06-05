@@ -241,6 +241,7 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
     all_eval_set_times = np.zeros( (args.num_epochs,2) )
     all_epoch_times = np.zeros( (args.num_epochs,2) )
     
+    epoch_idx = 0
     for epoch_idx in tqdm(range(args.num_epochs)):
         epoch_real_start = wall_clock_time()
         epoch_cpu_start = process_time()

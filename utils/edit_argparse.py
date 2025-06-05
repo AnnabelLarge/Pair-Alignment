@@ -74,9 +74,9 @@ def enforce_valid_defaults(args):
         args.interms_for_tboard['descendant_embeddings'] = False
         args.interms_for_tboard['decoder_sow_outputs'] = False
     
-    ### if you're not updating gradients, only run this for one epoch
+    ### if you're not updating gradients, don't run any training updates
     if not args.update_grads:
-        args.num_epochs = 1
+        args.num_epochs = 0
     
 
 def share_top_level_args(args):    

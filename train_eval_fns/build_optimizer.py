@@ -6,6 +6,7 @@ Created on Wed Jan 29 19:27:33 2025
 @author: annabel
 """
 import optax
+import numpy as np
 
 def build_optimizer(args):
     config = args.optimizer_config

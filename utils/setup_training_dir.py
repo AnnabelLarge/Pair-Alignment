@@ -17,7 +17,10 @@ import os
 import shutil
 
 
-def setup_training_dir(args, assert_no_overwrite=True):
+def setup_training_dir(args):
+    if 'assert_no_overwrite' not in dir(args):
+        args.assert_no_overwrite = True
+    
     ### create folder/file names
     tboard_dir = f'{os.getcwd()}/{args.training_wkdir}/tboard/{args.training_wkdir}'
     model_ckpts_dir = f'{os.getcwd()}/{args.training_wkdir}/model_ckpts'
@@ -30,12 +33,12 @@ def setup_training_dir(args, assert_no_overwrite=True):
     
     ### what to do if training directory exists
     # OPTION 1: IF TRAINING WKDIR ALREAD EXISTS, RAISE RUN TIME ERROR
-    if os.path.exists(f'{os.getcwd()}/{args.training_wkdir}') and assert_no_overwrite:
+    if os.path.exists(f'{os.getcwd()}/{args.training_wkdir}') and args.assert_no_overwrite:
         raise RuntimeError(f'{args.training_wkdir} ALREADY EXISTS; DOES IT HAVE DATA?')
     
-    # OPTION 2: IF TRAINING WKDIR ALREADY EXISTS, DELETE IT 
-    elif os.path.exists(f'{os.getcwd()}/{args.training_wkdir}') and not assert_no_overwrite:
-        shutil.rmtree(f'{os.getcwd()}/{args.training_wkdir}')
+    # # OPTION 2: IF TRAINING WKDIR ALREADY EXISTS, DELETE IT 
+    # elif os.path.exists(f'{os.getcwd()}/{args.training_wkdir}') and not args.assert_no_overwrite:
+    #     shutil.rmtree(f'{os.getcwd()}/{args.training_wkdir}')
     
     
     ### make training wkdir and subdirectories
