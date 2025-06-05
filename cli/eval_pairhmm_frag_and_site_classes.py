@@ -28,29 +28,28 @@ from torch.utils.data import DataLoader
 # custom function/classes imports (in order of appearance)
 from train_eval_fns.build_optimizer import build_optimizer
 from utils.sequence_length_helpers import determine_alignlen_bin
-from models.simple_site_class_predict.initializers import init_pairhmm_markov_sites as init_pairhmm
-from train_eval_fns.markovian_site_classes_training_fns import ( eval_one_batch,
-                                                                 final_eval_wrapper )
-
+from models.simple_site_class_predict.initializers import init_pairhmm_frag_and_site_classes as init_pairhmm
+from train_eval_fns.frag_and_site_classes_training_fns import ( eval_one_batch,
+                                                                final_eval_wrapper )
 from utils.edit_argparse import (enforce_valid_defaults,
                                  fill_with_default_values,
                                  share_top_level_args)
 
 
-def eval_pairhmm_markovian_sites( args, 
+def eval_pairhmm_frag_and_site_classes( args, 
                                   dataloader_dict: dict,
                                   training_argparse ):
     ###########################################################################
     ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES   #########################
     ###########################################################################
     # final where model pickles, previous argparses are
-    err = (f"{training_argparse.pred_model_type} is not pairhmm_markovian_sites; "+
+    err = (f"{training_argparse.pred_model_type} is not pairhmm_frag_and_site_classes; "+
            f"using the wrong eval script")
-    assert training_argparse.pred_model_type == 'pairhmm_markovian_sites', err
+    assert training_argparse.pred_model_type == 'pairhmm_frag_and_site_classes', err
     del err
         
     prev_model_ckpts_dir = f'{os.getcwd()}/{args.training_wkdir}/model_ckpts'
-    pairhmm_savemodel_filename = prev_model_ckpts_dir + '/'+ f'FINAL_PRED.pkl'
+    pairhmm_savemodel_filename = prev_model_ckpts_dir + '/'+ f'FINAL_PRED_BEST.pkl'
     
     fill_with_default_values(training_argparse)
     enforce_valid_defaults(training_argparse)
@@ -164,10 +163,29 @@ def eval_pairhmm_markovian_sites( args,
     
     
     ### write the parameters again
-    best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
-                                      t_array = t_array_for_all_samples,
-                                      out_folder = args.out_arrs_dir,
-                                      method = pairhmm_instance.write_params )
+    if t_array_for_all_samples is not None:
+        best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
+                                          t_array = t_array_for_all_samples,
+                                          prefix = '',
+                                          out_folder = args.out_arrs_dir,
+                                          write_time_static_objs = True,
+                                          method = pairhmm_instance.write_params )
+        
+    elif t_array_for_all_samples is None:
+        t_arr = test_dset.times
+        
+        pt_id = 0
+        for i in tqdm( range(0, t_arr.shape[0], args.batch_size) ):
+            batch_t = jnp.array( t_arr[i : (i + args.batch_size)] )
+            batch_prefix = f'test-set_pt{pt_id}'
+            best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
+                                              t_array = batch_t,
+                                              prefix = batch_prefix,
+                                              out_folder = args.out_arrs_dir,
+                                              write_time_static_objs = (pt_id==0),
+                                              method = pairhmm_instance.write_params )
+            
+            pt_id += 1
     
     
     ###########################################################################

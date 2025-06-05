@@ -630,7 +630,7 @@ class IndpSites(ModuleBase):
                     out_dict['r_extend'] = r_extend
                 
                 with open(f'{out_folder}/{self.indel_model_type}_indel_params.pkl','wb') as g:
-                    pickle.dump(out_dict)
+                    pickle.dump(out_dict, g)
                 del out_dict
 
         
