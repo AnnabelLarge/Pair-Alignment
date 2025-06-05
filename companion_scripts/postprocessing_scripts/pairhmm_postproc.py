@@ -73,21 +73,21 @@ if __name__ == '__main__':
                         choices = ['indp','frag'],
                         help='Independent sites, or Fragment-and-site classes?')
     
-    parser.add_argument('-t_per_samp', 
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('-t_per_samp', 
                         dest='t_per_samp_bool_flag', 
                         action='store_true', 
                         help='Have unique branch length per sample')
-    
-    parser.add_argument('-marg-over-grid', 
+    group.add_argument('-marg_over_grid', 
                         dest='t_per_samp_bool_flag', 
                         action='store_false', 
                         help='Marginalize over time grid')
-    
+
     args = parser.parse_args()
     
     main(folder = args.folder, 
          indp_or_frag = args.indp_or_frag, 
-         t_per_samp_bool_flag = args.t_per_sample_bool_flag)
+         t_per_samp_bool_flag = args.t_per_samp_bool_flag)
     
     
     
