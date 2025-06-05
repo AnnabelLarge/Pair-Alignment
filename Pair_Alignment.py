@@ -94,8 +94,7 @@ def main():
         return args
     
     # load a pre-computed dataset; make a pytorch dataloader
-    def load_dset_pkl(task,
-                      file_to_load, 
+    def load_dset_pkl(file_to_load, 
                       args,
                       collate_fn):
         with open(file_to_load,'rb') as f:
@@ -110,11 +109,10 @@ def main():
         
         if 'training_dset' in dset_dict.keys():
             training_dl = init_dataloader(args = args, 
-                                            shuffle = True if task=='train' else False,
+                                            shuffle = True,
                                             pytorch_custom_dset = dset_dict['training_dset'],
                                             collate_fn = collate_fn)
             dset_dict['training_dl'] = training_dl
-        
         return dset_dict
 
 
@@ -157,8 +155,7 @@ def main():
                                           training_argparse = None,
                                           include_dataloader = True)
         elif top_level_args.load_dset_pkl:
-            dload_dict = load_dset_pkl(task = 'train',
-                                       args = args,
+            dload_dict = load_dset_pkl(args = args,
                                        file_to_load = top_level_args.load_dset_pkl,
                                        collate_fn = collate_fn)
             
@@ -245,8 +242,7 @@ def main():
                                           training_argparse = None,
                                           include_dataloader = True )
         elif top_level_args.load_dset_pkl:
-            dload_dict = load_dset_pkl(task = 'train',
-                                       args = args_from_training_config,
+            dload_dict = load_dset_pkl(args = args_from_training_config,
                                        file_to_load = top_level_args.load_dset_pkl,
                                        collate_fn = collate_fn)
             
@@ -297,8 +293,7 @@ def main():
                                         training_argparse,
                                         include_dataloader = True )
         elif top_level_args.load_dset_pkl:
-            dload_dict = load_dset_pkl(task = 'eval',
-                                       args = args,
+            dload_dict = load_dset_pkl(args = args,
                                        file_to_load = top_level_args.load_dset_pkl,
                                        collate_fn = collate_fn)
             
@@ -410,8 +405,7 @@ def main():
                                           training_argparse,
                                           include_dataloader = True )
         elif top_level_args.load_dset_pkl:
-            dload_dict = load_dset_pkl(task = 'eval',
-                                       args = args,
+            dload_dict = load_dset_pkl(args = args,
                                        file_to_load = top_level_args.load_dset_pkl,
                                        collate_fn = collate_fn)
         
