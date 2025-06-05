@@ -73,12 +73,24 @@ if __name__ == '__main__':
                         choices = ['indp','frag'],
                         help='Independent sites, or Fragment-and-site classes?')
     
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('-t_per_samp', 
+    group1 = parser.add_mutually_exclusive_group(required=True)
+    group1.add_argument('-frag', 
+                        dest='indp_or_frag', 
+                        action='store_const', 
+                        const='frag',
+                        help='Using a fragment AND site class pairhmm')
+    group1.add_argument('-indp', 
+                        dest='indp_or_frag', 
+                        action='store_const', 
+                        const='indp',
+                        help='Using an indepented site class pairhmm')
+    
+    group2 = parser.add_mutually_exclusive_group(required=True)
+    group2.add_argument('-t_per_samp', 
                         dest='t_per_samp_bool_flag', 
                         action='store_true', 
                         help='Have unique branch length per sample')
-    group.add_argument('-marg_over_grid', 
+    group2.add_argument('-marg_over_grid', 
                         dest='t_per_samp_bool_flag', 
                         action='store_false', 
                         help='Marginalize over time grid')
