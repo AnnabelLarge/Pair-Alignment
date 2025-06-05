@@ -18,6 +18,7 @@ from functools import partial
 import platform
 import argparse
 import json
+from tqdm import tqdm
 
 # jax/flax stuff
 import jax
@@ -95,10 +96,10 @@ def eval_pairhmm_indp_sites(args,
     ###########################################################################
     ### 1: INITIALIZE MODEL PARTS, OPTIMIZER  #################################
     ###########################################################################
-    print('1: model init')
+    print('MODEL INIT')
     with open(args.logfile_name,'a') as g:
         g.write('\n')
-        g.write(f'1: model init\n')
+        g.write(f'MODEL INIT\n')
     
     
     # need to intialize an optimizer for compatibility when restoring the state, 
@@ -157,24 +158,44 @@ def eval_pairhmm_indp_sites(args,
     no_outputs = {k: False for k in training_argparse.interms_for_tboard.keys()}
     parted_eval_fn = partial( eval_one_batch,
                               t_array = t_array_for_all_samples,
+                              pairhmm_trainstate = best_pairhmm_trainstate,
                               pairhmm_instance = pairhmm_instance,
                               interms_for_tboard = no_outputs,
-                              return_all_loglikes = False )
+                              return_all_loglikes = True )
     eval_fn_jitted = jax.jit(parted_eval_fn)
     del parted_eval_fn
     
     
     ### write the parameters again
-    best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
-                                      t_array = t_array_for_all_samples,
-                                      out_folder = args.out_arrs_dir,
-                                      method = pairhmm_instance.write_params )
+    if t_array_for_all_samples is not None:
+        best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
+                                          t_array = t_array_for_all_samples,
+                                          prefix = '',
+                                          out_folder = args.out_arrs_dir,
+                                          write_time_static_objs = True,
+                                          method = pairhmm_instance.write_params )
+        
+    elif t_array_for_all_samples is None:
+        t_arr = test_dset.times
+        
+        pt_id = 0
+        for i in tqdm( range(0, t_arr.shape[0], args.batch_size) ):
+            batch_t = jnp.array( t_arr[i : (i + args.batch_size)] )
+            batch_prefix = f'test-set_pt{pt_id}'
+            best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
+                                              t_array = batch_t,
+                                              prefix = batch_prefix,
+                                              out_folder = args.out_arrs_dir,
+                                              write_time_static_objs = (pt_id==0),
+                                              method = pairhmm_instance.write_params )
+            
+            pt_id += 1
     
     
     ###########################################################################
     ### 2: EVAL   #############################################################
     ###########################################################################
-    print(f'2: eval')
+    print(f'BEGIN eval')
     # write to logfile
     with open(args.logfile_name,'a') as g:
         g.write('\n')

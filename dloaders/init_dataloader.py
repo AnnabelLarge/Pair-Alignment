@@ -14,9 +14,10 @@ def init_dataloader(args,
                     shuffle,
                     pytorch_custom_dset,
                     collate_fn):
-    torch.manual_seed(args.rng_seednum)
-    random.seed(args.rng_seednum)
-    np.random.seed(args.rng_seednum)
+    if shuffle:
+        torch.manual_seed(args.rng_seednum)
+        random.seed(args.rng_seednum)
+        np.random.seed(args.rng_seednum)
         
     dl = DataLoader( pytorch_custom_dset, 
                      batch_size = args.batch_size, 

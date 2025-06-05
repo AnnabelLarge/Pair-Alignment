@@ -16,6 +16,7 @@ from functools import partial
 import platform
 import argparse
 import json
+from tqdm import tqdm
 
 # jax/flax stuff
 import jax
@@ -92,7 +93,7 @@ def eval_pairhmm_frag_and_site_classes( args,
     ###########################################################################
     ### 1: INITIALIZE MODEL PARTS, OPTIMIZER  #################################
     ###########################################################################
-    print('1: model init')
+    print('MODEL INIT')
     with open(args.logfile_name,'a') as g:
         g.write('\n')
         g.write(f'1: model init\n')
@@ -154,9 +155,10 @@ def eval_pairhmm_frag_and_site_classes( args,
     no_outputs = {k: False for k in training_argparse.interms_for_tboard.keys()}
     parted_eval_fn = partial( eval_one_batch,
                               t_array = t_array_for_all_samples,
+                              pairhmm_trainstate = best_pairhmm_trainstate,
                               pairhmm_instance = pairhmm_instance,
                               interms_for_tboard = no_outputs,
-                              return_all_loglikes = False )
+                              return_all_loglikes = True )
     eval_fn_jitted = jax.jit(parted_eval_fn, 
                               static_argnames = ['max_align_len'])
     del parted_eval_fn
@@ -191,11 +193,11 @@ def eval_pairhmm_frag_and_site_classes( args,
     ###########################################################################
     ### 2: EVAL   #############################################################
     ###########################################################################
-    print(f'2: eval')
+    print(f'BEGIN EVAL')
     # write to logfile
     with open(args.logfile_name,'a') as g:
         g.write('\n')
-        g.write(f'BEGIN eval\n')
+        g.write(f'BEGIN EVAL\n')
 
     test_summary_stats = final_eval_wrapper(dataloader = test_dl, 
                                             dataset = test_dset, 

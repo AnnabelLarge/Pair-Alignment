@@ -107,12 +107,12 @@ def init_full_len_dset( args,
         
         # if using a feedforward prediction head, enforce this value
         if pred_model_type == 'feedforward':
-            training_argparse.times_from = None
+            args.times_from = None
         
         # if using markovian pairhmm, enforce this value
         elif pred_model_type in ['pairhmm_indp_sites',
                                  'pairhmm_frag_and_site_classes']:
-            training_argparse.use_scan_fns = False
+            args.use_scan_fns = False
             
             if training_argparse.pred_config['subst_model_type'].lower() == 'hky85':
                 emission_alphabet_size = 4
