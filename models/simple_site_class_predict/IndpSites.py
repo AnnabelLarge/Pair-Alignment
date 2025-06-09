@@ -331,7 +331,21 @@ class IndpSites(ModuleBase):
         ### build substitution log-probability matrix      #
         ### use this to score emissions from match sites   #
         ####################################################
+        # to get joint logprob:
+        # 1.) generate (C, K) different rate multipliers
+        # 2.) using all these rate multipliers, get (C, K, A, A) different 
+        #     rate matrices
+        # 3.) multiply be time, matrix exponential, then multiply by P(anc) 
+        #     to get P(x,y|c,k,t), a (T, C, K, A, A) matrix of substitution 
+        #     probabilities at every time, site class, and rate class
+        # 4.) generate P(k|c) matrix (C, K)
+        # 5.) multiply by raw P(x,y|c,k,t) rate matrices (T, )
+        # 6.) sum_k P(k|c) P(x,y|c,k,t) = P(x,y|c,t); this is now ready to be
+        #     multiplied by sites class P(c); continue with marginalizing over
+        #     site classes as usual
+        
         # rho * Q
+        # change rate_matrix_module class
         scaled_rate_mat_per_class = self.rate_matrix_module(logprob_equl = log_equl_dist_per_class,
                                                             log_class_probs = log_class_probs,
                                                             sow_intermediates = sow_intermediates) #(C, A, A)
@@ -347,6 +361,9 @@ class IndpSites(ModuleBase):
         # joint probability
         joint_logprob_emit_at_match_per_class = get_joint_logprob_emit_at_match_per_class( cond_logprob_emit_at_match_per_class = cond_logprob_emit_at_match_per_class,
                                                                         log_equl_dist_per_class = log_equl_dist_per_class) #(T, C, A, A)
+        
+        # add extra step to marginalize over k classes, where appropriate
+        
         joint_logprob_emit_at_match = lse_over_match_logprobs_per_class(log_class_probs = log_class_probs,
                                                joint_logprob_emit_at_match_per_class = joint_logprob_emit_at_match_per_class) #(T, A, A)
         
@@ -422,21 +439,6 @@ class IndpSites(ModuleBase):
         out = self._get_scoring_matrices(t_array=t_array,
                                         sow_intermediates=False)
         
-        ### these depend on time
-        # rho * Q * t
-        to_expm = np.squeeze( out['to_expm'] )
-        
-        with open(f'{out_folder}/{prefix}_to_expm.npy', 'wb') as g:
-            np.save(g, to_expm)
-        
-        if len(to_expm.shape) <= 2:
-            np.savetxt( f'{out_folder}/{prefix}_ASCII_to_expm.tsv', 
-                        to_expm, 
-                        fmt = '%.4f',
-                        delimiter= '\t' )
-        
-        del to_expm, g
-    
         # final joint prob of match (after LSE over classes)
         mat = np.exp(out['joint_logprob_emit_at_match'])
         new_key = 'joint_logprob_emit_at_match'.replace('logprob','prob')
@@ -453,23 +455,21 @@ class IndpSites(ModuleBase):
         
         del new_key, mat, g
     
-        # transition matrices, or P(emit) for geometrically distributed model
+        # joint transition matrix
         if self.indel_model_type is not None:
-            for key, mat in out['all_transit_matrices'].items():
-                mat = np.exp(mat)
-                new_key = key.replace('logprob','prob')
-                
-                with open(f'{out_folder}/{prefix}_{new_key}_transit_matrix.npy', 'wb') as g:
-                    np.save(g, mat)
-                
-                mat = np.squeeze(mat)
-                if len(mat.shape) <= 2:
-                    np.savetxt( f'{out_folder}/{prefix}_ASCII_{new_key}_transit_matrix.tsv', 
-                                np.array(mat), 
-                                fmt = '%.4f',
-                                delimiter= '\t' )
-                
-                del key, mat, g
+            mat = np.exp(out['all_transit_matrices']['joint'])
+            
+            with open(f'{out_folder}/{prefix}_joint_prob_transit_matrix.npy', 'wb') as g:
+                np.save(g, mat)
+            
+            mat = np.squeeze(mat)
+            if len(mat.shape) <= 2:
+                np.savetxt( f'{out_folder}/{prefix}_ASCII_joint_prob_transit_matrix.tsv', 
+                            np.array(mat), 
+                            fmt = '%.4f',
+                            delimiter= '\t' )
+            
+            del mat, g
         
         
         ### these do not; only write once 
