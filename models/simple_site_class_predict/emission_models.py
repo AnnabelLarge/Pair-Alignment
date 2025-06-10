@@ -945,10 +945,6 @@ class F81LogProbs(ModuleBase):
         ArrayLike, (T, C, A, A)
             log-probability of emission at match sites, according to F81
         """
-        T = t_array.shape[0]
-        C = log_class_probs.shape[0]
-        A = logprob_equl.shape[-1]
-        
         prob_equl = jnp.exp(logprob_equl) #(C, A)
         
         
@@ -1010,9 +1006,13 @@ class F81LogProbs(ModuleBase):
         """
         return logP(emission at match) directly
         """
+        T = t_array.shape[0]
+        C = rate_multiplier.shape[0]
+        A = equl.shape[-1]
+        
         oper = -rate_multiplier[None,:]*t_array[:,None] #(T, C)
         exp_oper = jnp.exp(oper)[...,None] #(T, C, 1)
-        equl = equl[None,None,:] #(1, 1, A)
+        equl = equl[None,:] #(1, C, A)
         
         # all off-diagonal entries 
         # pi_j * ( 1 - exp(-rate*t) )

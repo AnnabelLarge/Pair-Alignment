@@ -160,6 +160,7 @@ def upper_tri_vector_to_sym_matrix( vec: ArrayLike ):
     
     
     ### fill upper triangular part of matrix
+    # breakpoint()
     out_size = (emission_alphabet_size, emission_alphabet_size)
     upper_tri_exchang = jnp.zeros( out_size )
     idxes = jnp.triu_indices(emission_alphabet_size, k=1)  
