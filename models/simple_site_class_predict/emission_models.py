@@ -830,6 +830,302 @@ class HKY85RateMatFromFile(GTRRateMatFromFile):
  
     
 ###############################################################################
+### PROBABILITY MATRICES: F81   ###############################################
+###############################################################################
+class F81LogProbs(ModuleBase):
+    """
+    Get the conditional and joint logprobs for an F81 model
+    
+    If only one model (no mixtures), then the rate multiplier is automatically 
+        set to one
+    
+    
+    Initialize with
+    ----------------
+    config : dict
+        config['num_mixtures'] :  int
+            number of emission site classes
+        
+        config['rate_mult_activation'] : {'bound_sigmoid', 'softplus'}
+            what activation to use for logits of rate multiplier
+        
+        config['rate_mult_range'] : List[float, float], optional
+            only needed when using bound_sigmoid for rate multipliers
+            first value is min, second value is max
+            Default is (0.01, 10)
+        
+    name : str
+        class name, for flax
+    
+    Methods here
+    ------------
+    setup
+    __call__
+    
+    Methods inherited from models.model_utils.BaseClasses.ModuleBase
+    -----------------------------------------------------------------
+    sow_histograms_scalars
+        for tensorboard logging
+    
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        """
+        C: number of site classes
+        
+        
+        Flax Module Parameters
+        -----------------------
+        rate_mult_logits : ArrayLike, (C,)
+            rate multiplier per class; ONLY present if C > 1
+            initialized from unit normal
+        
+        """
+        # required
+        self.num_mixtures = self.config['num_mixtures']
+        
+        # have defaults; may or may not be used
+        self.rate_mult_min_val, self.rate_mult_max_val  = self.config.get( 'rate_mult_range', (0.01, 10) )
+        
+        # tested on GTR for proteins; decided that these defaults are best
+        self.rate_mult_activation = self.config.get('rate_mult_activation', 
+                                                    'bound_sigmoid')
+        self.norm_rate_mults = self.config.get('norm_rate_mults', True)
+        
+        # validate
+        if self.rate_mult_activation not in ['bound_sigmoid', 'softplus']:
+            raise ValueError('Pick either: bound_sigmoid, softplus')
+            
+            
+        ### RATE MULTIPLIERS
+        if self.num_mixtures > 1:
+            # activation
+            if self.rate_mult_activation == 'bound_sigmoid':
+                self.rate_multiplier_activation = partial(bound_sigmoid,
+                                                          min_val = self.rate_mult_min_val,
+                                                          max_val = self.rate_mult_max_val)
+            
+            elif self.rate_mult_activation == 'softplus':
+                self.rate_multiplier_activation = jax.nn.softplus
+        
+            # initializers
+            self.rate_mult_logits = self.param('rate_multipliers',
+                                               nn.initializers.normal(),
+                                               (self.num_mixtures,),
+                                               jnp.float32)
+        
+    def __call__(self,
+                 logprob_equl,
+                 log_class_probs,
+                 t_array,
+                 *args,
+                 **kwargs):
+        """
+        B = batch size
+        T = times
+        C = number of latent site classes
+        A = alphabet size
+        
+        Arguments
+        ----------
+        logprob_equl : ArrayLike, (C, A)
+            log-transformed equilibrium distribution
+        
+        log_class_probs : ArrayLike, (C,)
+            log-transformed class probabilties
+        
+        t_array : ArrayLike, (T,) or (B,)
+            times at which to calculate F81 probability matrix
+        
+        
+        Returns
+        -------
+        ArrayLike, (T, C, A, A)
+            log-probability of emission at match sites, according to F81
+        """
+        T = t_array.shape[0]
+        C = log_class_probs.shape[0]
+        A = logprob_equl.shape[-1]
+        
+        prob_equl = jnp.exp(logprob_equl) #(C, A)
+        
+        
+        ### rate multiplier
+        if self.num_mixtures > 1:
+            # apply activation of choice
+            if sow_intermediates:
+                for i in range(self.rate_mult_logits.shape[0]):
+                    val_to_write = self.rate_mult_logits[i]
+                    act = self.rate_mult_activation
+                    lab = (f'{self.name}/logit BEFORE {act} activation- '+
+                           f'rate multiplier for class {i}')
+                    self.sow_histograms_scalars(mat= val_to_write, 
+                                                label=lab, 
+                                                which='scalars')
+                    del lab
+                    
+            rate_multiplier = self.rate_multiplier_activation( self.rate_mult_logits ) #(C,)
+            
+            if sow_intermediates:
+                for i in range(rate_multiplier.shape[0]):
+                    val_to_write = rate_multiplier[i]
+                    act = self.rate_mult_activation
+                    lab = (f'{self.name}/rate AFTER {act} activation- '+
+                           f'rate multiplier for class {i}')
+                    self.sow_histograms_scalars(mat= val_to_write, 
+                                                label=lab, 
+                                                which='scalars')
+                    del lab
+            
+            # normalize
+            if self.norm_rate_mults:
+                rate_multiplier = scale_rate_multipliers( unnormed_rate_multipliers = rate_multiplier,
+                                        log_class_probs = log_class_probs )
+            
+                if sow_intermediates:
+                    for i in range(rate_multiplier.shape[0]):
+                        val_to_write = rate_multiplier[i]
+                        lab = (f'{self.name}/rate AFTER normalization- '+
+                               f'rate multiplier for class {i}')
+                        self.sow_histograms_scalars(mat= val_to_write, 
+                                                    label=lab, 
+                                                    which='scalars')
+                        del lab
+            
+            
+        elif self.num_mixtures == 1:
+            rate_multiplier = 1 / ( 1 - np.square(equl).sum(axis=(-1)) ) # (1,)
+        
+        return self._fill_f81(equl = equl, 
+                              rate_multiplier = rate_multiplier, 
+                              t_array = t_array)
+        
+    
+    def _fill_f81(self, 
+                  equl,
+                  rate_multiplier, 
+                  t_array):
+        """
+        return logP(emission at match) directly
+        """
+        oper = -rate_multiplier[None,:]*t_array[:,None] #(T, C)
+        exp_oper = jnp.exp(oper)[...,None] #(T, C, 1)
+        equl = equl[None,None,:] #(1, 1, A)
+        
+        # all off-diagonal entries 
+        # pi_j * ( 1 - exp(-rate*t) )
+        row = equl * ( 1 - exp_oper ) #(T, C, A)
+        cond_probs_raw = jnp.broadcast_to( row[:, :, None, :], 
+                                            (T, C, A, A) )  # (T, C, A, A)
+        
+        # diagonal entries
+        #   pi_j + (1-pi_j) * exp(-rate*t)
+        diags = equl + (1-equl) * exp_oper #(T, C, A)
+        diag_indices = jnp.arange(A)  # (A,)
+        cond_probs = cond_probs_raw.at[:, :, diag_indices, diag_indices].set(diags)
+        
+        return jnp.log( cond_probs )
+
+
+class F81LogProbsFromFile(F81LogProbs):
+    """
+    like F81LogProbs, but load rates from file as-is
+    
+    If only one model (no mixtures), then the rate multiplier is automatically 
+        set to one
+    
+    
+    Initialize with
+    ----------------
+    config : dict
+        config['num_mixtures'] :  int
+            number of emission site classes
+            
+        config['filenames']['rate_mult'] :  str
+            name of the rate multipliers to load
+            
+    name : str
+        class name, for flax
+    
+    Methods here
+    ------------
+    setup
+    __call__
+    
+    Inherited from F81LogProbs
+    --------------------------
+    _fill_f81
+    
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        """
+        Flax Module Parameters
+        -----------------------
+        None
+        
+        """
+        ### read config
+        self.num_mixtures = self.config['num_mixtures']
+        self.norm_rate_mults = self.config.get('norm_rate_mults',True)
+        rate_multiplier_file = self.config['filenames'].get('rate_mult', None)
+        
+        
+        ### RATE MULTIPLIERS
+        if self.num_mixtures > 1:
+            with open(rate_multiplier_file, 'rb') as f:
+                self.rate_multiplier = jnp.load(f)
+        else:
+            self.rate_multiplier = jnp.array([1])
+    
+    def __call__(self,
+                 logprob_equl,
+                 log_class_probs,
+                 t_array,
+                 *args,
+                 **kwargs):
+        """
+        B = batch size
+        T = times
+        C = number of latent site classes
+        A = alphabet size
+        
+        Arguments
+        ----------
+        logprob_equl : ArrayLike, (C, A)
+            log-transformed equilibrium distribution
+        
+        log_class_probs : ArrayLike, (C,)
+            log-transformed class probabilties
+        
+        t_array : ArrayLike, (T,) or (B,)
+            times at which to calculate F81 probability matrix
+        
+        
+        Returns
+        -------
+        ArrayLike, (T, C, A, A)
+            log-probability of emission at match sites, according to F81
+        """
+        equl = jnp.exp(logprob_equl) #(C, A)
+        
+        # possibly rescale rate multiplier
+        if (self.norm_rate_mults) and (self.num_mixtures > 1):
+            rate_multiplier = scale_rate_multipliers( unnormed_rate_multipliers = self.rate_multiplier,
+                                    log_class_probs = log_class_probs )
+        else:
+            rate_multiplier = self.rate_multiplier
+        
+        return self._fill_f81(equl = equl, 
+                              rate_multiplier = rate_multiplier, 
+                              t_array = t_array)
+
+    
+###############################################################################
 ### EQUILIBRIUM DISTRIBUTION MODELS   #########################################
 ###############################################################################
 class EqulDistLogprobsPerClass(ModuleBase):

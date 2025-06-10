@@ -26,7 +26,9 @@ from models.simple_site_class_predict.emission_models import (EqulDistLogprobsFr
                                                               SiteClassLogprobs,
                                                               SiteClassLogprobsFromFile,
                                                               HKY85RateMat,
-                                                              HKY85RateMatFromFile)
+                                                              HKY85RateMatFromFile,
+                                                              F81LogProbs,
+                                                              F81LogprobsFromFile)
 from models.simple_site_class_predict.transition_models import (TKF91TransitionLogprobs,
                                                                 TKF92TransitionLogprobs,
                                                                 TKF91TransitionLogprobsFromFile,
@@ -141,9 +143,9 @@ class IndpSites(ModuleBase):
                                                      name = f'get equilibrium')
         
         
-        ###########################################
-        ### module for substitution rate matrix   #
-        ###########################################
+        ######################################################################
+        ### module for substitution rate matrix, or just the logprob subst   #
+        ######################################################################
         if self.subst_model_type.lower() == 'gtr':
             self.rate_matrix_module = GTRRateMat( config = self.config,
                                                   name = f'get rate matrix' )
@@ -151,6 +153,12 @@ class IndpSites(ModuleBase):
         elif self.subst_model_type.lower() == 'hky85':
             self.rate_matrix_module = HKY85RateMat( config = self.config,
                                                     name = f'get rate matrix' )
+        
+        # this is slightly different; it returns the conditional log-probability
+        #   matrix directly
+        elif self.subst_model_type.lower() == 'f81':
+            self.cond_logprob_match_module = F81LogProbs( config = self.config,
+                                                          name = f'get cond logprob' )
         
         
         ##############################################################
@@ -344,26 +352,38 @@ class IndpSites(ModuleBase):
         #     multiplied by sites class P(c); continue with marginalizing over
         #     site classes as usual
         
-        # rho * Q
-        # change rate_matrix_module class
-        scaled_rate_mat_per_class = self.rate_matrix_module(logprob_equl = log_equl_dist_per_class,
-                                                            log_class_probs = log_class_probs,
-                                                            sow_intermediates = sow_intermediates) #(C, A, A)
+        if self.subst_model_type.lower() in ['gtr', 'hky85']:
+            # rho * Q
+            # change rate_matrix_module class
+            scaled_rate_mat_per_class = self.rate_matrix_module(logprob_equl = log_equl_dist_per_class,
+                                                                log_class_probs = log_class_probs,
+                                                                sow_intermediates = sow_intermediates) #(C, A, A)
+            
+            # conditional probability
+            # cond_logprob_emit_at_match_per_class is (T, C, A, A)
+            # to_expm is (T, C, A, A)
+            out = get_cond_logprob_emit_at_match_per_class(t_array = t_array,
+                                                            scaled_rate_mat_per_class = scaled_rate_mat_per_class)
+            cond_logprob_emit_at_match_per_class, to_expm = out 
+            del out
         
-        # conditional probability
-        # cond_logprob_emit_at_match_per_class is (T, C, A, A)
-        # to_expm is (T, C, A, A)
-        out = get_cond_logprob_emit_at_match_per_class(t_array = t_array,
-                                                        scaled_rate_mat_per_class = scaled_rate_mat_per_class)
-        cond_logprob_emit_at_match_per_class, to_expm = out 
-        del out
+        elif self.subst_model_type.lower() == 'f81':
+            # cond_logprob_emit_at_match_per_class is (T, C, A, A)
+            # to_exp is None
+            # scaled_rate_mat_per_class is None
+            cond_logprob_emit_at_match_per_class = self.cond_logprob_match_module( logprob_equl = log_equl_dist_per_class,
+                                                                                   log_class_probs = log_class_probs,
+                                                                                   t_array = t_array,
+                                                                                   sow_intermediates = sow_intermediates )
+            to_expm = None
+            scaled_rate_mat_per_class = None
+                                                                                   
         
         # joint probability
         joint_logprob_emit_at_match_per_class = get_joint_logprob_emit_at_match_per_class( cond_logprob_emit_at_match_per_class = cond_logprob_emit_at_match_per_class,
                                                                         log_equl_dist_per_class = log_equl_dist_per_class) #(T, C, A, A)
         
         # add extra step to marginalize over k classes, where appropriate
-        
         joint_logprob_emit_at_match = lse_over_match_logprobs_per_class(log_class_probs = log_class_probs,
                                                joint_logprob_emit_at_match_per_class = joint_logprob_emit_at_match_per_class) #(T, A, A)
         
@@ -403,8 +423,8 @@ class IndpSites(ModuleBase):
         out_dict = {'logprob_emit_at_indel': logprob_emit_at_indel, #(A,)
                     'joint_logprob_emit_at_match': joint_logprob_emit_at_match, #(T,A,A)
                     'all_transit_matrices': all_transit_matrices, #dict
-                    'rate_mat_times_rho': scaled_rate_mat_per_class, #(C,A,A)
-                    'to_expm': to_expm, #(T,C,A,A)
+                    'rate_mat_times_rho': scaled_rate_mat_per_class, #(C,A,A) or None
+                    'to_expm': to_expm, #(T,C,A,A) or None
                     'cond_logprob_emit_at_match': cond_logprob_emit_at_match_per_class, #(T,C,A,A)
                     'used_approx': used_approx} #dict
         
@@ -416,10 +436,17 @@ class IndpSites(ModuleBase):
                      out_folder: str,
                      prefix: str,
                      write_time_static_objs: bool):
+        ### declare which module you used for substitution model 
+        if self.subst_model_type.lower() in ['gtr', 'hky85']:
+            module_name = self.rate_matrix_module
+        
+        elif self.subst_model_type.lower() == 'f81':
+            module_name = self.cond_logprob_match_module
+        
         
         if write_time_static_objs:
             with open(f'{out_folder}/activations_and_times_used.tsv','w') as g:
-                act = self.rate_matrix_module.rate_mult_activation
+                act = module_name.rate_mult_activation
                 g.write(f'activation for rate multipliers: {act}\n')
                 g.write(f'activation for exchangeabiliites: bound_sigmoid\n')
                 
@@ -492,18 +519,19 @@ class IndpSites(ModuleBase):
             # emission from match sites
             # rho * Q
             scaled_rate_mat_per_class = out['rate_mat_times_rho']
-            for c in range(scaled_rate_mat_per_class.shape[0]):
-                mat_to_save = scaled_rate_mat_per_class[c,...]
-                
-                with open(f'{out_folder}/{prefix}_class-{c}_rate_matrix_times_rho.npy', 'wb') as g:
-                    np.save(g, mat_to_save)
-                
-                np.savetxt( f'{out_folder}/{prefix}_ASCII_class-{c}_rate_matrix_times_rho.tsv', 
-                            np.array(mat_to_save), 
-                            fmt = '%.4f',
-                            delimiter= '\t' )
-                
-                del mat_to_save, g
+            if scaled_rate_mat_per_class is not None:
+                for c in range(scaled_rate_mat_per_class.shape[0]):
+                    mat_to_save = scaled_rate_mat_per_class[c,...]
+                    
+                    with open(f'{out_folder}/{prefix}_class-{c}_rate_matrix_times_rho.npy', 'wb') as g:
+                        np.save(g, mat_to_save)
+                    
+                    np.savetxt( f'{out_folder}/{prefix}_ASCII_class-{c}_rate_matrix_times_rho.tsv', 
+                                np.array(mat_to_save), 
+                                fmt = '%.4f',
+                                delimiter= '\t' )
+                    
+                    del mat_to_save, g
         
         
             ###################################################
@@ -517,31 +545,31 @@ class IndpSites(ModuleBase):
                     [g.write(f'{elem.item()}\n') for elem in class_probs]
             
             
-            ### exchangeabilities
-            if 'exchangeabilities_logits_vec' in dir(self.rate_matrix_module):
-                exch_logits = self.rate_matrix_module.exchangeabilities_logits_vec
-                exchangeabilities = self.rate_matrix_module.exchange_activation( exch_logits )
-                
-                if self.subst_model_type.lower() == 'gtr':
-                    np.savetxt( f'{out_folder}/PARAMS_exchangeabilities.tsv', 
-                                np.array(exchangeabilities), 
-                                fmt = '%.4f',
-                                delimiter= '\t' )
+            ### exchangeabilities, if gtr or hky85
+            if self.subst_model_type.lower() in ['gtr', 'hky85']:
+                if 'exchangeabilities_logits_vec' in dir(module_name):
+                    exch_logits = module_name.exchangeabilities_logits_vec
+                    exchangeabilities = module_name.exchange_activation( exch_logits )
                     
-                    with open(f'{out_folder}/PARAMS_exchangeabilities.npy','wb') as g:
-                        jnp.save(g, exchangeabilities)
-                
-                elif self.subst_model_type.lower() == 'hky85':
-                    with open(f'{out_folder}/PARAMS_HKY85RateMat_model.txt','w') as g:
-                        g.write(f'transition rate, ti: {exchangeabilities[1]}\n')
-                        g.write(f'transition rate, tv: {exchangeabilities[0]}')
+                    if self.subst_model_type.lower() == 'gtr':
+                        np.savetxt( f'{out_folder}/PARAMS_exchangeabilities.tsv', 
+                                    np.array(exchangeabilities), 
+                                    fmt = '%.4f',
+                                    delimiter= '\t' )
+                        
+                        with open(f'{out_folder}/PARAMS_exchangeabilities.npy','wb') as g:
+                            jnp.save(g, exchangeabilities)
                     
+                    elif self.subst_model_type.lower() == 'hky85':
+                        with open(f'{out_folder}/PARAMS_HKY85RateMat_model.txt','w') as g:
+                            g.write(f'transition rate, ti: {exchangeabilities[1]}\n')
+                            g.write(f'transition rate, tv: {exchangeabilities[0]}')
                     
             ### rate multipliers
-            if 'rate_mult_logits' in dir(self.rate_matrix_module):
-                norm_rate_mults = self.rate_matrix_module.norm_rate_mults
-                rate_mult_logits = self.rate_matrix_module.rate_mult_logits
-                rate_mult = self.rate_matrix_module.rate_multiplier_activation( rate_mult_logits )
+            if 'rate_mult_logits' in dir(module_name):
+                norm_rate_mults = module_name.norm_rate_mults
+                rate_mult_logits = module_name.rate_mult_logits
+                rate_mult = module_name.rate_multiplier_activation( rate_mult_logits )
                 
                 if norm_rate_mults:
                     rate_mult = scale_rate_multipliers( unnormed_rate_multipliers = rate_mult,
@@ -563,7 +591,6 @@ class IndpSites(ModuleBase):
                 
                 with open(f'{out_folder}/PARAMS-ARR_equilibriums.npy','wb') as g:
                     jnp.save(g, equl_dist)
-                    
                     
                     
             ####################################################
@@ -635,21 +662,29 @@ class IndpSites(ModuleBase):
 
         
     def return_bound_sigmoid_limits(self):
-        ### rate_matrix_module
-        # exchangeabilities
-        exchange_min_val = self.rate_matrix_module.exchange_min_val
-        exchange_max_val = self.rate_matrix_module.exchange_max_val
-        params_range = { "exchange_min_val": exchange_min_val,
-                         "exchange_max_val": exchange_max_val}
+        params_range = {}
         
-        #rate multiplier
-        if self.rate_mult_activation == 'bound_sigmoid':
-            rate_mult_min_val = self.rate_matrix_module.rate_mult_min_val
-            rate_mult_max_val = self.rate_matrix_module.rate_mult_max_val
-            to_add = {"rate_mult_min_val": rate_mult_min_val,
-                      "rate_mult_max_val": rate_mult_max_val}
-            params_range = {**params_range, **to_add}
+        ### declare substitution model module, also optionally get exch
+        if self.subst_model_type.lower() in ['gtr', 'hky85']:
+            module_name = self.rate_matrix_module
+            
+            # exchangeabilities
+            exchange_min_val = module_name.exchange_min_val
+            exchange_max_val = module_name.exchange_max_val
+            params_range["exchange_min_val"] = exchange_min_val
+            params_range["exchange_max_val"] = exchange_max_val
         
+        elif self.subst_model_type.lower() == 'f81':
+            module_name = self.cond_logprob_match_module
+        
+        
+        ### rate multiplier
+        if self.config['rate_mult_activation'] == 'bound_sigmoid':
+            rate_mult_min_val = module_name.rate_mult_min_val
+            rate_mult_max_val = module_name.rate_mult_max_val
+            params_range["rate_mult_min_val"] = rate_mult_min_val
+            params_range["rate_mult_max_val"] = rate_mult_max_val
+    
         
         ### transitions_module
         if self.indel_model_type is not None:
@@ -784,6 +819,12 @@ class IndpSitesLoadAll(IndpSites):
             self.rate_matrix_module = HKY85RateMatFromFile( config = self.config,
                                                     name = f'get rate matrix' )
         
+        # this is slightly different; it returns the conditional log-probability
+        #   matrix directly
+        elif self.subst_model_type.lower() == 'f81':
+            self.cond_logprob_match_module = F81LogProbsFromFile( config = self.config,
+                                                                  name = f'get cond logprob' )
+        
         
         ##############################################################
         ### module for probability of being in latent site classes   #
@@ -812,10 +853,18 @@ class IndpSitesLoadAll(IndpSites):
                      out_folder: str,
                      prefix: str,
                      write_time_static_objs: bool):
+        ### declare which module you used for substitution model 
+        if self.subst_model_type.lower() in ['gtr', 'hky85']:
+            module_name = self.rate_matrix_module
+        
+        elif self.subst_model_type.lower() == 'f81':
+            module_name = self.cond_logprob_match_module
+        
+        
         if write_time_static_objs:
             with open(f'{out_folder}/activations_and_times_used.tsv','w') as g:
-                if 'rate_mult_activation' in dir(self.rate_matrix_module):
-                    act = self.rate_matrix_module.rate_mult_activation
+                if 'rate_mult_activation' in dir(module_name):
+                    act = module_name.rate_mult_activation
                 else:
                     act = 'N/A'
                 
@@ -838,21 +887,7 @@ class IndpSitesLoadAll(IndpSites):
         out = self._get_scoring_matrices(t_array=t_array,
                                         sow_intermediates=False)
         
-        ### these depend on time
-        # rho * Q * t
-        to_expm = np.squeeze( out['to_expm'] )
-        
-        with open(f'{out_folder}/{prefix}_to_expm.npy', 'wb') as g:
-            np.save(g, to_expm)
-        
-        if len(to_expm.shape) <= 2:
-            np.savetxt( f'{out_folder}/{prefix}_ASCII_to_expm.tsv', 
-                        to_expm, 
-                        fmt = '%.4f',
-                        delimiter= '\t' )
-        
-        del to_expm, g
-    
+        ### these depend on time`
         # final joint prob of match (after LSE over classes)
         mat = np.exp(out['joint_logprob_emit_at_match'])
         new_key = 'joint_logprob_emit_at_match'.replace('logprob','prob')

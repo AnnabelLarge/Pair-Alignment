@@ -174,7 +174,7 @@ def upper_tri_vector_to_sym_matrix( vec: ArrayLike ):
 
 def rate_matrix_from_exch_equl(exchangeabilities: ArrayLike,
                                 equilibrium_distributions: ArrayLike,
-                                norm: bool=True):
+                                norm: bool):
     """
     computes rate matrix Q = \chi * \pi_c; normalizes to substution 
       rate of one if desired
