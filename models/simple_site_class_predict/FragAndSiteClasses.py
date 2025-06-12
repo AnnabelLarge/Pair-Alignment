@@ -187,11 +187,11 @@ class FragAndSiteClasses(ModuleBase):
         # which times to use for scoring matrices
         if self.times_from =='t_per_sample':
             times_for_matrices = batch[1] #(B,)
-            unique_time_per_branch = True
+            unique_time_per_sample = True
         
         elif self.times_from in ['geometric','t_array_from_file']:
             times_for_matrices = t_array #(T,)
-            unique_time_per_branch = False
+            unique_time_per_sample = False
         
         # scoring matrices
         scoring_matrices_dict = self._get_scoring_matrices(t_array=times_for_matrices,
@@ -207,19 +207,19 @@ class FragAndSiteClasses(ModuleBase):
                                                  joint_logprob_emit_at_match = joint_logprob_emit_at_match,
                                                  logprob_emit_at_indel = logprob_emit_at_indel,
                                                  joint_logprob_transit = joint_logprob_transit,
-                                                 unique_time_per_branch = unique_time_per_branch,
+                                                 unique_time_per_sample = unique_time_per_sample,
                                                  return_all_intermeds = False)  #(T, B)  or (B,)
         
         ### marginalize over times where needed
-        if (not unique_time_per_branch) and (t_array.shape[0] > 1):
+        if (not unique_time_per_sample) and (t_array.shape[0] > 1):
             joint_neg_logP = -marginalize_over_times(logprob_perSamp_perTime = joint_logprob_perSamp_maybePerTime,
                                                       exponential_dist_param = self.exponential_dist_param,
                                                       t_array = times_for_matrices) #(B,)
              
-        elif (not unique_time_per_branch) and (t_array.shape[0] == 1):
+        elif (not unique_time_per_sample) and (t_array.shape[0] == 1):
             joint_neg_logP = -joint_logprob_perSamp_maybePerTime[0,:] #(B,)
         
-        elif unique_time_per_branch:
+        elif unique_time_per_sample:
             joint_neg_logP = -joint_logprob_perSamp_maybePerTime #(B,)
             
             
@@ -282,11 +282,11 @@ class FragAndSiteClasses(ModuleBase):
         # which times to use for scoring matrices
         if self.times_from =='t_per_sample':
             times_for_matrices = batch[1] #(B,)
-            unique_time_per_branch = True
+            unique_time_per_sample = True
         
         elif self.times_from in ['geometric','t_array_from_file']:
             times_for_matrices = t_array #(T,)
-            unique_time_per_branch = False
+            unique_time_per_sample = False
             
         # get lengths, not including <bos> and <eos>
         align_len = ~jnp.isin( aligned_inputs[...,0], jnp.array([0,1,2]) )
@@ -309,17 +309,17 @@ class FragAndSiteClasses(ModuleBase):
                                     joint_logprob_emit_at_match = joint_logprob_emit_at_match,
                                     logprob_emit_at_indel = logprob_emit_at_indel,
                                     all_transit_matrices = all_transit_matrices,
-                                    unique_time_per_branch = unique_time_per_branch)
+                                    unique_time_per_sample = unique_time_per_sample)
         
         # for joint loglike: marginalize over times where needed
-        if (not unique_time_per_branch) and (t_array.shape[0] > 1):
+        if (not unique_time_per_sample) and (t_array.shape[0] > 1):
             joint_logprob_perSamp_maybePerTime = out['joint_neg_logP']  #(T,B)
             overwrite_joint_neg_logP = -marginalize_over_times(logprob_perSamp_perTime = -joint_logprob_perSamp_maybePerTime,
                                                      exponential_dist_param = self.exponential_dist_param,
                                                      t_array = times_for_matrices) #(B,)
             out['joint_neg_logP'] = overwrite_joint_neg_logP #(B,)
              
-        elif (not unique_time_per_branch) and (t_array.shape[0] == 1):
+        elif (not unique_time_per_sample) and (t_array.shape[0] == 1):
             out['joint_neg_logP'] = out['joint_neg_logP'][0,:] #(B,)
         
         

@@ -194,7 +194,7 @@ def rate_matrix_from_exch_equl(exchangeabilities: ArrayLike,
     equilibrium_distributions : ArrayLike, (C, A)
         amino acid equilibriums per site
     
-    norm : bool, optional; default is True
+    norm : bool
 
     Returns
     -------
@@ -1554,7 +1554,7 @@ def joint_only_forward(aligned_inputs,
                        joint_logprob_emit_at_match,
                        logprob_emit_at_indel,
                        joint_logprob_transit,
-                       unique_time_per_branch: bool, 
+                       unique_time_per_sample: bool, 
                        return_all_intermeds = False):
     """
     forward algo ONLY to find joint loglike
@@ -1583,7 +1583,7 @@ def joint_only_forward(aligned_inputs,
         logP(new state, new class | prev state, prev class, t); the joint 
         transition matrix for finding logP(anc, desc, align | c, t)
     
-    unique_time_per_branch : Bool 
+    unique_time_per_sample : Bool 
         whether or not you have unqiue times per sample; affects indexing
     
     
@@ -1608,11 +1608,11 @@ def joint_only_forward(aligned_inputs,
     L_align = aligned_inputs.shape[1]
     
     # decide which version of the functions you're going to use
-    if not unique_time_per_branch:
+    if not unique_time_per_sample:
         # output from this is (T, C, B)
         get_joint_loglike_emission = get_joint_loglike_emission_time_grid
         
-    elif unique_time_per_branch:
+    elif unique_time_per_sample:
         # output from this is (C, B)
         get_joint_loglike_emission = get_joint_loglike_emission_branch_len_per_samp
     
@@ -1631,10 +1631,10 @@ def joint_only_forward(aligned_inputs,
     curr_state_idx = curr_state - 1         # (B,)
     start_any = joint_logprob_transit[:, 0, :, -1, :] #(T, C_curr, S_curr) or (B, C_curr, S_curr)
     
-    if not unique_time_per_branch:
+    if not unique_time_per_sample:
         tr = start_any[...,curr_state-1] #(T, C_curr, B)
     
-    elif unique_time_per_branch:
+    elif unique_time_per_sample:
         # joint_logprob_transit: (B, C_curr, S_curr)
         # goal: (C_curr, B)
         tr = jnp.take_along_axis(
@@ -1680,12 +1680,12 @@ def joint_only_forward(aligned_inputs,
             cs = jnp.maximum(cs, 1)
             
             # like dot product with C_prev, C_curr
-            if not unique_time_per_branch:
+            if not unique_time_per_sample:
                 # joint_logprob_transit is (T, C_prev, C_curr, S_prev, S_curr)
                 tr_per_class = joint_logprob_transit[..., ps-1, cs-1] #(T, C_prev, C_curr, B)   
                 to_add = logsumexp(in_carry[:, :, None, :] + tr_per_class, axis=1) #(T, C_curr, B)
             
-            elif unique_time_per_branch:
+            elif unique_time_per_sample:
                 # joint_logprob_transit is (B, C_prev, C_curr, S_prev, S_curr)
                 ps_idx = (ps-1)[:, None, None, None, None] #(B, 1, 1, 1, 1)
                 cs_idx = (cs-1)[:, None, None, None, None] #(B, 1, 1, 1, 1)
@@ -1703,10 +1703,10 @@ def joint_only_forward(aligned_inputs,
             ps = jnp.maximum(ps, 1)
             
             # if end, then curr_state = -1 (<end>)
-            if not unique_time_per_branch:
+            if not unique_time_per_sample:
                 tr_per_class = joint_logprob_transit[..., -1, ps-1, -1] #(T, C_prev, B)    
             
-            elif unique_time_per_branch:
+            elif unique_time_per_sample:
                 sliced = joint_logprob_transit[:, :, -1, :, -1]  # (B, C_prev, S_prev)
                 ps_idx = (ps - 1)[:, None, None]  # (B, 1, 1)
                 gathered = jnp.take_along_axis(sliced, ps_idx, axis=2)  # (B, C_prev, 1)
@@ -1735,7 +1735,7 @@ def joint_only_forward(aligned_inputs,
                                       length = idx_arr.shape[0] )  #(T, C, B)  or (C, B)
         
         loglike = logsumexp(last_alpha,  # (T, C, B)  or (C, B)
-                            axis = 1 if not unique_time_per_branch else 0)
+                            axis = 1 if not unique_time_per_sample else 0)
         
         return loglike #(T, B)  or (B,)
 
@@ -1771,7 +1771,7 @@ def all_loglikes_forward(aligned_inputs,
                          logprob_emit_at_indel,
                          joint_logprob_emit_at_match,
                          all_transit_matrices,
-                         unique_time_per_branch: bool):
+                         unique_time_per_sample: bool):
     """
     forward algo to find joint, conditional, and both single-sequence marginal 
         loglikeihoods
@@ -1808,7 +1808,7 @@ def all_loglikes_forward(aligned_inputs,
             logP(new state, new class | prev state, prev class, t); the marginal 
             transition matrix for finding logP(anc | c, t) or logP(desc | c, t)
     
-    unique_time_per_branch : Bool 
+    unique_time_per_sample : Bool 
         whether or not you have unqiue times per sample; affects indexing
         
     Returns:
@@ -1819,11 +1819,11 @@ def all_loglikes_forward(aligned_inputs,
     marginal_logprob_transit = all_transit_matrices['marginal'] 
     
     # decide which version of the functions you're going to use
-    if not unique_time_per_branch:
+    if not unique_time_per_sample:
         # output from this is (T, C, B)
         get_joint_loglike_emission = get_joint_loglike_emission_time_grid
         
-    elif unique_time_per_branch:
+    elif unique_time_per_sample:
         # output from this is (C, B)
         get_joint_loglike_emission = get_joint_loglike_emission_branch_len_per_samp
     
@@ -1861,10 +1861,10 @@ def all_loglikes_forward(aligned_inputs,
     curr_state_idx = curr_state - 1         # (B,)
     start_any = joint_logprob_transit[:, 0, :, -1, :] #(T, C_curr, S_curr) or (B, C_curr, S_curr)
     
-    if not unique_time_per_branch:
+    if not unique_time_per_sample:
         joint_tr = start_any[...,curr_state-1] #(T, C_curr, B)
     
-    elif unique_time_per_branch:
+    elif unique_time_per_sample:
         # joint_logprob_transit: (B, C_curr, S_curr)
         # goal: (C_curr, B)
         joint_tr = jnp.take_along_axis(
@@ -1990,12 +1990,12 @@ def all_loglikes_forward(aligned_inputs,
         ### transition probabilities
         def main_body(joint_carry, anc_carry, desc_carry):
             # logP(anc, desc, align)
-            if not unique_time_per_branch:
+            if not unique_time_per_sample:
                 # joint_logprob_transit is (T, C_prev, C_curr, S_prev, S_curr)
                 joint_tr_per_class = joint_logprob_transit[..., prev_state-1, curr_state-1] #(T, C_prev, C_curr, B)   
                 to_add = logsumexp(joint_carry[:, :, None, :] + joint_tr_per_class, axis=1) #(T, C_curr, B)
             
-            elif unique_time_per_branch:
+            elif unique_time_per_sample:
                 # joint_logprob_transit is (B, C_prev, C_curr, S_prev, S_curr)
                 ps_idx = (prev_state - 1)[:, None, None, None, None] #(B, 1, 1, 1, 1)
                 cs_idx = (curr_state - 1)[:, None, None, None, None] #(B, 1, 1, 1, 1)
@@ -2029,10 +2029,10 @@ def all_loglikes_forward(aligned_inputs,
         def end(joint_carry, anc_carry, desc_carry):
             # note for all: if end, then curr_state = -1 (<end>)
             # logP(anc, desc, align)
-            if not unique_time_per_branch:
+            if not unique_time_per_sample:
                 joint_tr_per_class = joint_logprob_transit[..., -1, prev_state-1, -1] #(T, C_prev, B)    
             
-            elif unique_time_per_branch:
+            elif unique_time_per_sample:
                 sliced = joint_logprob_transit[:, :, -1, :, -1]  # (B, C_prev, S_prev)
                 ps_idx = (prev_state - 1)[:, None]  # (B, 1)
                 gathered = jnp.take_along_axis(sliced, ps_idx[:, None, :], axis=2)  # (B, C_prev, 1)
@@ -2101,7 +2101,7 @@ def all_loglikes_forward(aligned_inputs,
     
     final_joint_alpha = out_dict['joint_alpha'] #(T, C, B) or #(C, B)
     joint_neg_logP = -logsumexp(final_joint_alpha, 
-                                axis = 1 if not unique_time_per_branch else 0) #(T, B) or (B,)
+                                axis = 1 if not unique_time_per_sample else 0) #(T, B) or (B,)
     
     final_anc_alpha = out_dict['anc_alpha'] #(C, B)
     anc_neg_logP = -logsumexp(final_anc_alpha, axis=0) # (B,)

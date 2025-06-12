@@ -12,6 +12,9 @@ about:
 ModuleBase: gives each model the sow_histograms_scalars and summary_stats 
             helpers, for tensorboard writing
 
+neuralTKFModuleBase: adds functions for automatically applying key 
+                     activations: bound_sigmoid and log_softmax
+
 SeqEmbBase: inherits ModuleBase and adds extra helpers for sequence embedding
             applying encoder and decoder in training/eval; the following 
             models will need newer versions (and why):
@@ -21,14 +24,14 @@ SeqEmbBase: inherits ModuleBase and adds extra helpers for sequence embedding
                   migrate to flax.NNX
 
 """
-# general python
 from typing import Callable
 
-# flaxy and jaxy
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
 import optax
+
+from models.neural_hmm_predict.model_functions import bound_sigmoid
 
 
 class ModuleBase(nn.Module):
@@ -69,6 +72,57 @@ class ModuleBase(nn.Module):
         
         return out_dict
     
+
+class neuralTKFModuleBase(ModuleBase):
+    def _maybe_sow(self,
+                   vals,
+                   lab,
+                   sow_intermediates):
+        if sow_intermediates:
+            self.sow_histograms_scalars(mat= vals, 
+                                        label=lab, 
+                                        which='scalars')
+            del lab
+    
+    def apply_bound_sigmoid_activation(self,
+                                       logits,
+                                       min_val,
+                                       max_val,
+                                       param_name,
+                                       sow_intermediates):
+        # record 
+        self._maybe_sow( vals=logits,
+                         lab=f'{self.name}/logits for {param_name}',
+                         sow_intermediates = sow_intermediates )
+        
+        # get parameters
+        out = bound_sigmoid(logits, min_val, max_val) 
+        
+        # record again
+        self._maybe_sow( vals=out,
+                         lab=f'{self.name}/{param_name}',
+                         sow_intermediates = sow_intermediates )
+        
+        return out 
+    
+    def apply_log_softmax_activation(self,
+                                     logits,
+                                     param_name,
+                                     sow_intermediates: bool):
+        # record
+        self._maybe_sow( vals=logits,
+                         lab=f'{self.name}/logits for {param_name}',
+                         sow_intermediates = sow_intermediates )
+                        
+        # get params
+        out = nn.log_softmax( logits, axis = -1 )
+
+        # record again
+        self._maybe_sow( vals=out,
+                         lab=f'{self.name}/{param_name}',
+                         sow_intermediates = sow_intermediates )
+        
+        return out
 
 
 class SeqEmbBase(ModuleBase):
