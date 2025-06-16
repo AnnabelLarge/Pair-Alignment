@@ -5,9 +5,6 @@ Created on Wed Jun 11 13:46:56 2025
 
 @author: annabel
 
-TODO: 
-    - add FromFile versions, for unit testing
-    - for anything with local params, could add postprocessing network here? 
 """
 from flax import linen as nn
 import jax
@@ -20,6 +17,151 @@ from models.neural_hmm_predict.model_functions import (bound_sigmoid,
                                                        logprob_f81,
                                                        logprob_gtr)
 
+
+
+###############################################################################
+### Equilibrium distribution models   #########################################
+###############################################################################
+class GlobalEqul(neuralTKFModuleBase):
+    """
+    Set of logits for equilibrium distribution for all positions
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        """
+        A = alphabet size
+        
+        Flax Module Parameters
+        -----------------------
+        logits : ArrayLike (A,)
+            initialize logits from unit normal
+        
+        """
+        emission_alphabet_size = self.config['emission_alphabet_size']
+        
+        self.logits = self.param('Equilibrium distr.',
+                                  nn.initializers.normal(),
+                                  (emission_alphabet_size,),
+                                  jnp.float32)
+        
+    def __call__(self,
+                 sow_intermediates: bool,
+                 *args,
+                 **kwargs): 
+        """
+        Arguments
+        ----------
+        sow_intermediates : bool
+            switch for tensorboard logging
+         
+        Returns
+        --------
+        ArrayLike, (1, 1, A) 
+            scoring matrix for emissions from indels, which includes 
+            placeholder dimensions for B and L
+        """
+        out = self.apply_log_softmax_activation(logits = self.logits,
+                                                sow_intermediates = sow_intermediates)
+        return out[None, None, :] #(1, 1, A)
+    
+    
+class LocalEqul(GlobalEqul):
+    """
+    Set of logits for equilibrium distribution for each sample, each position
+      like GlobalEqul, but you do a linear projection first
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        """
+        H = number of features of input matrix
+        A = alphabet size
+        
+        Flax Module Parameters
+        -----------------------
+        self.final_project : Flax module
+          > kernel : ArrayLike, (H, A)
+          > bias : ArrayLike, (A)  
+        """
+        emission_alphabet_size = self.config['emission_alphabet_size']
+        
+        name = f'{self.name}/Project to equilibriums'
+        self.final_project = nn.Dense(features = emission_alphabet_size,
+                                      use_bias = True,
+                                      name = name)
+    
+    def _call__(self,
+                datamat,
+                sow_intermediates: bool):
+        """
+        apply final linear projection and log_softmax to get final 
+          equilibrium distribution
+        
+        B: batch size
+        L_align: length of alignment
+        H: input hidden dim
+        A: final alphabet size
+        
+        Arguments
+        ----------
+        datamat : ArrayLike, (B, L_align, H)
+        
+        sow_intermediates : bool
+            switch for tensorboard logging
+          
+        Returns
+        --------
+        ArrayLike, (B, L_align, A) 
+            scoring matrix for emissions from indels
+        """
+        # (B, L_align, H) -> (B, L_align, A)
+        logits = self.final_project(datamat)
+        
+        return self.apply_log_softmax_activation(logits = logits,
+                                                 sow_intermediates = sow_intermediates) # (B, L_align, A)
+
+
+class EqulFromFile(neuralTKFModuleBase):
+    """
+    read one equilibrium distribution from numpy array file
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        """
+        Flax Module Parameters
+        -----------------------
+        None
+        """
+        equl_file = self.config['filenames']['equl_dist']
+        
+        with open(equl_file,'rb') as f:
+            prob_equilibr = jnp.load(f, allow_pickle=True) #(A,) or (1,A) or (1,1,A)
+        
+        # if only one equlibrium distribution loaded, and it doesn't have
+        #   the correct number of dimensions, fix that to (1,1,A)
+        if len(prob_equilibr.shape) < 3:
+            prob_equilibr = jnp.reshape(prob_equilibr,
+                                        (1, 1, prob_equilibr.shape[-1])) #(1,1,A)
+        
+        self.logprob_equilibr = safe_log(prob_equilibr)
+        
+    def __call__(self,
+                  *args,
+                  **kwargs): 
+        """
+        Returns
+        --------
+        ArrayLike, (1, 1, A) 
+            log-probability matrix for emissions from indels, which includes 
+            placeholder dimensions for B and L_align
+        """
+        return self.logprob_equilibr #(1, 1, A) 
+    
 
 ###############################################################################
 ### Substitution models: F81   ################################################
@@ -91,26 +233,24 @@ class GlobalF81(neuralTKFModuleBase):
                            t_array = t_array,
                            unique_time_per_sample = unique_time_per_sample)
     
+    
 class LocalF81(neuralTKFModuleBase):
     """
     Decide F81 model for each sample, each position; normalize then scale by
       rate multiplier for the site
      
-    inherited from GlobalF81:
-    --------------------------
-    get_scoring_matrix
     """
     config: dict
     name: str
     
     def setup(self):
         """
-        in_feats = number of features of input matrix
+        H = number of features of input matrix
         
         Flax Module Parameters
         -----------------------
         self.final_project : Flax module
-          > kernel : ArrayLike, (in_feats, 1)
+          > kernel : ArrayLike, (H, 1)
           > bias : ArrayLike, (1)  
         """
         self.rate_mult_min_val, self.rate_mult_max_val  = self.config.get( 'rate_mult_range', 
@@ -126,9 +266,7 @@ class LocalF81(neuralTKFModuleBase):
                  log_equl,
                  t_array,
                  unique_time_per_sample,
-                 sow_intermediates: bool,
-                 *args,
-                 **kwargs):
+                 sow_intermediates: bool):
         """
         apply final linear projection and bound_sigmoid activation to get final 
           log-probability at match sites
@@ -141,7 +279,7 @@ class LocalF81(neuralTKFModuleBase):
         
         Arguments
         ----------
-        datamat : ArrayLike, (B, L_align, in_feats)
+        datamat : ArrayLike, (B, L_align, H)
         
         log_equl : ArrayLike
             > if global: (1, 1, A)
@@ -185,6 +323,10 @@ class LocalF81(neuralTKFModuleBase):
                            t_array = t_array,
                            unique_time_per_sample = unique_time_per_sample)
 
+# alias for GlobalF81; never loading local parameters, so whenever this is 
+#   invoked, just use GlobalF81 instead
+F81FromFile = GlobalF81
+
 
 ###############################################################################
 ### Substitution models: GTR   ################################################
@@ -220,7 +362,6 @@ class GTRGlobalExchGlobalRateMult(neuralTKFModuleBase):
         self.global_rate_multiplier = jnp.ones( (1,1) ) #(1,1)
     
     def __call__(self, 
-                 datamat,
                  log_equl,
                  t_array,
                  unique_time_per_sample,
@@ -228,17 +369,17 @@ class GTRGlobalExchGlobalRateMult(neuralTKFModuleBase):
                  *args,
                  **kwargs):
     
-    exch_upper_triag_values = self.apply_bound_sigmoid_activation( logits = self.exch_logits,
-                                               min_val = self.exchange_min_val,
-                                               max_val = self.exchange_max_val,
-                                               param_name = 'exchangeabilities',
-                                               sow_intermediates = sow_intermediates)
-        
-    return logprob_gtr( exch_upper_triag_values = exch_upper_triag_values,
-                        equilibrium_distributions = jnp.exp(log_equl),
-                        rate_multiplier = self.global_rate_multiplier,
-                        t_array = t_array,
-                        unique_time_per_sample = unique_time_per_sample )
+        exch_upper_triag_values = self.apply_bound_sigmoid_activation( logits = self.exch_logits,
+                                                   min_val = self.exchange_min_val,
+                                                   max_val = self.exchange_max_val,
+                                                   param_name = 'exchangeabilities',
+                                                   sow_intermediates = sow_intermediates)
+            
+        return logprob_gtr( exch_upper_triag_values = exch_upper_triag_values,
+                            equilibrium_distributions = jnp.exp(log_equl),
+                            rate_multiplier = self.global_rate_multiplier,
+                            t_array = t_array,
+                            unique_time_per_sample = unique_time_per_sample )
     
 
 class GTRGlobalExchLocalRateMult(neuralTKFModuleBase):
@@ -278,9 +419,7 @@ class GTRGlobalExchLocalRateMult(neuralTKFModuleBase):
                  log_equl,
                  t_array,
                  unique_time_per_sample,
-                 sow_intermediates: bool,
-                 *args,
-                 **kwargs):
+                 sow_intermediates: bool):
         ### rate multipliers come from input
         # (B, L_align, H) -> (B, L_align, 1) -> (B, L_align)
         rate_mult_logits = self.rate_mult_final_project(datamat)[...,0] # (B, L_align)
@@ -343,9 +482,7 @@ class GTRLocalExchLocalRateMult(neuralTKFModuleBase):
                  log_equl,
                  t_array,
                  unique_time_per_sample,
-                 sow_intermediates: bool,
-                 *args,
-                 **kwargs):
+                 sow_intermediates: bool):
         ### rate multipliers come from input
         # (B, L_align, H) -> (B, L_align, 1) -> (B, L_align)
         rate_mult_logits = self.rate_mult_final_project(datamat)[...,0] # (B, L_align)
@@ -370,113 +507,64 @@ class GTRLocalExchLocalRateMult(neuralTKFModuleBase):
                             rate_multiplier = rate_multiplier,
                             t_array = t_array,
                             unique_time_per_sample = unique_time_per_sample )
-        
-    
-###############################################################################
-### Equilibrium distribution models   #########################################
-###############################################################################
-class GlobalEqul(neuralTKFModuleBase):
+
+
+class GTRFromFile(neuralTKFModuleBase):
     """
-    Set of logits for equilibrium distribution for all positions
+    GTR, but load exchangeabilities from file
+    
+    Rate multiplier is automatically one (i.e. global)
     """
     config: dict
     name: str
     
     def setup(self):
-        """
-        A = alphabet size
+        ### exchangeabilities
+        exchangeabilities_file = self.config['filenames']['exch']
+        with open(exchangeabilities_file,'rb') as f:
+            exch_from_file = jnp.load(f)
         
-        Flax Module Parameters
-        -----------------------
-        logits : ArrayLike (A,)
-            initialize logits from unit normal
+        shape = exch_from_file.shape
+        correct = (
+            shape == (shape[0],) or
+            shape == (1, shape[1]) or
+            shape == (1, 1, shape[2])
+        )
+
+        # if exch_from_file is (n,), (1,n), or (1,1,n), then it's the upper 
+        #   triangular values
+        if correct:
+            self.exch_upper_triag_values = exch_from_file
+            if len(exch_upper_triag_values.shape) < 3:
+                final_shape = (1, 1, self.exch_upper_triag_values.shape[-1])
+                self.exch_upper_triag_values = jnp.reshape( self.exch_upper_triag_values, 
+                                                            final_shape ) #(1,1,n)
+                del final_shape
         
-        """
-        emission_alphabet_size = self.config['emission_alphabet_size']
+        # if final two dims of exch_from_file are the same, then it's the 
+        #   symmetric exchangeabilities matrix as-is
+        elif not correct:
+            exch_mat = jnp.squeeze(exch_from_file) #(A,A)
+            exch_upper_triag_values = exch_mat[jnp.triu_indices_from(exch_mat, k=1)] #(n,)
+            self.exch_upper_triag_values = exch_upper_triag_values[None,None,:] #(1,1,n)
+            
         
-        self.logits = self.param('Equilibrium distr.',
-                                  nn.initializers.normal(),
-                                  (emission_alphabet_size,),
-                                  jnp.float32)
-        
-    def __call__(self,
+        ### rate multiplier: automatically set to one
+        self.rate_multiplier = jnp.ones((1,1)) #(1,1)
+    
+    def __call__(self, 
+                 log_equl,
+                 t_array,
+                 unique_time_per_sample,
                  sow_intermediates: bool,
                  *args,
-                 **kwargs): 
-        """
-        Arguments
-        ----------
-        sow_intermediates : bool
-            switch for tensorboard logging
-         
-        Returns
-        --------
-        ArrayLike, (1, 1, A) 
-            scoring matrix for emissions from indels, which includes 
-            placeholder dimensions for B and L
-        """
-        out = self.get_scoring_matrix(logits = self.logits,
-                                      sow_intermediates = sow_intermediates)
-        return out[None, None, :] #(1, 1, A)
+                 **kwargs):
+        pass
+        
+        return logprob_gtr( exch_upper_triag_values = self.exch_upper_triag_values,
+                            equilibrium_distributions = jnp.exp(log_equl),
+                            rate_multiplier = self.global_rate_multiplier,
+                            t_array = t_array,
+                            unique_time_per_sample = unique_time_per_sample )
     
     
-    
-
-class LocalEqul(GlobalEqul):
-    """
-    Set of logits for equilibrium distribution for each sample, each position
-      like GlobalEqul, but you do a linear projection first
-    """
-    config: dict
-    name: str
-    
-    def setup(self):
-        """
-        in_feats = number of features of input matrix
-        A = alphabet size
-        
-        Flax Module Parameters
-        -----------------------
-        self.final_project : Flax module
-          > kernel : ArrayLike, (in_feats, A)
-          > bias : ArrayLike, (A)  
-        """
-        emission_alphabet_size = self.config['emission_alphabet_size']
-        
-        name = f'{self.name}/Project to equilibriums'
-        self.final_project = nn.Dense(features = emission_alphabet_size,
-                                      use_bias = True,
-                                      name = name)
-    
-    def _call__(self,
-                datamat,
-                sow_intermediates: bool, 
-                *args,
-                **kwargs):
-        """
-        apply final linear projection and log_softmax to get final 
-          equilibrium distribution
-        
-        B: batch size
-        L_align: length of alignment
-        H: input hidden dim
-        A: final alphabet size
-        
-        Arguments
-        ----------
-        datamat : ArrayLike, (B, L_align, in_feats)
-        
-        sow_intermediates : bool
-            switch for tensorboard logging
-          
-        Returns
-        --------
-        ArrayLike, (B, L_align, A) 
-            scoring matrix for emissions from indels
-        """
-        # (B, L_align, H) -> (B, L_align, A)
-        logits = self.final_project(datamat)
-        
-        return self.apply_log_softmax_activation(logits = logits,
-                                                 sow_intermediates = sow_intermediates) # (B, L_align, A)
-        

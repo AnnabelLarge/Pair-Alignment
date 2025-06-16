@@ -76,6 +76,8 @@ def logprob_f81(equl,
                 t_array,
                 unique_time_per_sample):
     """
+    this is the CONDITIONAL LOG-PROBABILITY P(desc|anc,t,align=Match)
+    
     B: batch size
     L_align: length of alignment
     T: number of times in the grid
@@ -92,7 +94,7 @@ def logprob_f81(equl,
         > if per-site: (B, L_align)
         > if global: (1, 1)
     
-    t_array : ArrayLike, (T,) or (B,)
+    t_array : ArrayLike, 
     
     unique_time_per_sample : Bool
         whether there's one time per sample, or a grid of times you'll 
@@ -236,9 +238,9 @@ def rate_matrix_from_exch_equl(exchangeabilities: ArrayLike,
     """
     # reshape for einsum
     B = max( [exch_upper_triag_values.shape[0],
-              equilibrium_distributions.shape[0] )
+              equilibrium_distributions.shape[0]] )
     L_align = max( [exch_upper_triag_values.shape[1],
-                    equilibrium_distributions.shape[1] )
+                    equilibrium_distributions.shape[1] ] )
     A = exchangeabilities.shape[-1]
 
     # Q = chi * diag(pi); q_ij = chi_ij * pi_j
@@ -266,6 +268,8 @@ def logprob_gtr( exch_upper_triag_values,
                  t_array,
                  unique_time_per_sample ):
     """
+    this is the CONDITIONAL LOG-PROBABILITY P(desc|anc,t,align=Match)
+    
     from exchangeabilities and equililbrium distributions, use matrix
       exponential to get log-probability of emissions at match sites
     
@@ -289,7 +293,7 @@ def logprob_gtr( exch_upper_triag_values,
         > if per-site: (B, L_align)
         > if global: (1, 1)
     
-    t_array : ArrayLike, (T,) or (B,)
+    t_array : ArrayLike, 
     
     unique_time_per_sample : Bool
         whether there's one time per sample, or a grid of times you'll 
@@ -347,3 +351,687 @@ def logprob_gtr( exch_upper_triag_values,
     cond_prob = jnp.reshape( cond_prob_raw, after_reshape )
     
     return jnp.log(cond_prob) # (T, B, L_align, A, A) or (B, L_align, A, A)
+
+
+###############################################################################
+### for tkf91, tkf92: tkf parameters and their approximations   ###############
+###############################################################################
+def true_beta(oper):
+    """
+    the true formula for beta, assuming mu = lambda * (1 - offset)
+    """
+    mu, offset, t = oper
+    
+    # log( (1 - offset) * (exp(mu*offset*t) - 1) )
+    log_num = jnp.log1p(-offset) + log_x_minus_one( mu*offset*t )
+    
+    # x = mu*offset*t
+    # y = jnp.log( 1 - offset )
+    # logsumexp with coeffs does: 
+    #   log( exp(x) - exp(y) ) = log( exp(mu*offset*t) - (1-offset) )
+    log_one_minus_offset = jnp.broadcast_to( jnp.log1p(-offset), t.shape )
+    log_denom = logsumexp_with_arr_lst( [mu*offset*t, log_one_minus_offset],
+                                    coeffs = jnp.array([1.0, -1.0]) )
+    
+    return log_num - log_denom
+
+def approx_beta(oper):
+    """
+    as lambda approaches mu (or as time shrinks to small values), use 
+      first-order taylor approximation
+    """
+    mu, offset, t = oper
+    
+    # log(  (1 - offset) * mu * t  )
+    log_num = jnp.log1p(-offset) + jnp.log(mu) + jnp.log(t)
+    
+    # log( mu*t + 1 )
+    log_denom = jnp.log1p( mu * t )
+    
+    return log_num - log_denom
+
+def approx_one_minus_gamma(oper):
+    """
+    where 1 - gamma is unstable, use this second-order taylor approximation
+        instead
+    """
+    mu, offset, t = oper
+    
+    # log( 1 + 0.5*mu*offset*t )
+    log_num = jnp.log1p( 0.5 * mu * offset * t )
+    
+    # log( (1 - 0.5*mu*t) (mu*t + 1) )
+    # there's another squared term here:
+    #   0.5 * offset * (mu*t)**2
+    # but it's so small that it's negligible
+    log_denom = jnp.log1p( -0.5*mu*t ) + jnp.log1p( mu*t )
+    
+    return log_num - log_denom
+
+def switch_tkf( mu, 
+                offset, 
+                t_array, 
+                unique_time_per_sample ):
+    """
+    return alpha, beta, gamma for TKF models
+
+    use real formulas where you can, and taylor-approximations where you can't
+    
+    T: number of branch lengths in t_array
+    
+    returns:
+    --------
+    out_dict: the tkf values
+        out_dict['log_alpha']: ArrayLike[float32], 
+        out_dict['log_one_minus_alpha']: ArrayLike[float32], 
+        out_dict['log_beta']: ArrayLike[float32], 
+        out_dict['log_one_minus_beta']: ArrayLike[float32], 
+        out_dict['log_gamma']: ArrayLike[float32], 
+        out_dict['log_one_minus_gamma']: ArrayLike[float32], 
+    
+    approx_flags_dict: where you used approx formulas
+        out_dict['log_one_minus_alpha']: ArrayLike[bool], 
+        out_dict['log_beta']: ArrayLike[bool], 
+        out_dict['log_one_minus_gamma']: ArrayLike[bool], 
+        out_dict['log_gamma']: ArrayLike[bool], 
+    
+    """
+    B = mu.shape[0]
+    L_align = mu.shape[1]
+    
+    # mu: (B, L_align)
+    # offset: (B, L_align)
+    # t_array: either (B,) or (T,)
+    if not unique_time_per_sample:
+        T = t_array.shape[0]
+        
+        mu = mu[None,...] #(1, B, L_align)
+        offset = offset[None,...] #(1, B, L_align)
+        t_array = t_array[:,None,None] #(T, 1, 1)
+        final_shape = (T, B, L_align)
+    
+    elif unique_time_per_sample:
+        t_array = t_array[:,None] #(B, 1)
+        final_shape = (B, L_align)
+    
+    
+    ######################################################
+    ### Some operations can be done with entire arrays   #
+    ######################################################
+    ### alpha = exp(-mu*t)
+    ### log(alpha) = -mu*t
+    log_alpha = -mu*t_array #(B, L_align) or (T, B, L_align)
+    
+    
+    ### start of calculation for 1 - gamma
+    # numerator:
+    # log( exp(mu*offset*t) - 1 )
+    gamm_full_log_num = log_x_minus_one( log_x = mu*offset*t_array ) #(B, L_align) or (T, B, L_align)
+    
+    # denominator, term 1
+    # x = mu*offset*t
+    # y = jnp.log( 1 - offset )
+    # logsumexp with coeffs does: 
+    #   log( exp(x) - exp(y) ) = log( exp(mu*offset*t) - (1-offset) )
+    constant = jnp.broadcast_to(jnp.log1p(-offset), final_shape)
+    gamma_full_log_denom_term1 = logsumexp_with_arr_lst( [mu*offset*t_array, constant],
+                                              coeffs = jnp.array([1.0, -1.0]) )
+    
+    
+    ###############################################################
+    ### Most have to be done one-at-a-time, due to jax.lax.cond   #
+    ###############################################################
+    def tkf_params_indv(log_alpha_indv, 
+                        gamma_log_numerator_indv,
+                        gamma_log_denom_term1_indv,
+                        t):
+        ### 1 - alpha
+        log_one_minus_alpha = stable_log_one_minus_x(log_x = log_alpha_indv)
+        
+        
+        ### beta, 1 - beta
+        # beta
+        log_beta = jax.lax.cond( mu*offset*t > SMALL_POSITIVE_NUM ,
+                                  true_beta,
+                                  approx_beta,
+                                  (mu, offset, t) )  
+        
+        # regardless of approx or not, 1-beta calculated from beta
+        log_one_minus_beta = log_one_minus_x(log_x = log_beta)
+        
+        
+        ### 1 - gamma, gamma
+        # need log(1 - alpha) to finish calculating denominator for log(1 - gamma)
+        gamma_log_denom = gamma_log_denom_term1_indv + log_one_minus_alpha
+        
+        # ad hoc series of conditionals to determine if you approx
+        #   1-gamma or not (meh)
+        valid_frac = gamma_log_numerator_indv < gamma_log_denom
+        large_product = mu * offset * t > 1e-3
+        log_diff_large = jnp.abs(gamma_log_numerator_indv - gamma_log_denom) > 0.1
+        approx_formula_will_fail = (0.5*mu*t) > 1.0
+        
+        cond1 = large_product
+        cond2 = ~large_product & log_diff_large
+        cond3 = ~large_product & ~log_diff_large & approx_formula_will_fail
+        use_real_function = valid_frac & ( cond1 | cond2 | cond3 )
+        
+        # the final value
+        log_one_minus_gamma = jax.lax.cond( use_real_function,
+                                            lambda _: gamma_log_numerator_indv - gamma_log_denom,
+                                            approx_one_minus_gamma,
+                                            (mu, offset, t) )
+        
+        # gamma
+        log_gamma = stable_log_one_minus_x(log_x = log_one_minus_gamma)
+        
+        
+        ### output everything
+        out_dict = {'log_one_minus_alpha': log_one_minus_alpha,
+                    'log_beta': log_beta,
+                    'log_one_minus_beta': log_one_minus_beta,
+                    'log_gamma': log_gamma,
+                    'log_one_minus_gamma': log_one_minus_gamma}
+        
+        used_one_minus_alpha_approx = ~(log_alpha_indv < -SMALL_POSITIVE_NUM)
+        used_beta_approx = ~(mu*offset*t > SMALL_POSITIVE_NUM)
+        used_log_one_minus_gamma_approx = ~use_real_function
+        used_log_gamma_approx = ~(log_one_minus_gamma < -SMALL_POSITIVE_NUM)
+        
+        # if you used an approx anywhere, save the time
+        flag = used_one_minus_alpha_approx | used_beta_approx | used_log_one_minus_gamma_approx | used_log_gamma_approx
+        t_to_add = jnp.where( flag,
+                              t,
+        
+                              -1. )
+        # all outputs will be: (T*B*L_align) or (B*L_align)
+        approx_flags_dict = {'log_one_minus_alpha': used_one_minus_alpha_approx,
+                              'log_beta': used_beta_approx,
+                              'log_one_minus_gamma': used_log_one_minus_gamma_approx,
+                              'log_gamma': used_log_gamma_approx} 
+        
+        return out_dict, approx_flags_dict
+    
+    # vmap over B*L*T dim, instead of just T dim
+    log_alpha_reshaped = log_alpha.flatten() #(T*B*L_align) or (B*L_align)
+    gamma_full_log_num_reshaped = gamm_full_log_num.flatten() #(T*B*L_align) or (B*L_align)
+    gamma_full_log_denom_term1_reshaped = gamma_full_log_denom_term1.flatten() #(T*B*L_align) or (B*L_align)
+    t_array_reshaped = jnp.broadcast_to( t_array, log_alpha.shape ) #(T, B, L_align) or (B, L_align)
+    t_array_reshaped = t_array_reshaped.flatten() #(T*B*L_align) or (B*L_align)
+    
+    # vmap the function
+    vmapped_tkf_params_indv = jax.vmap(tkf_params_indv)
+    out = vmapped_tkf_params_indv(log_alpha_reshaped,
+                                  gamm_full_log_num_reshaped,
+                                  gamma_full_log_denom_term1_reshaped,
+                                  t_array_reshaped)
+    tkf_params_dict, approx_flags_dict = out
+    del out
+    
+    # reshape all
+    def my_reshape(m):
+        return jnp.reshape(m, final_shape)
+    
+    tkf_params_dict['log_one_minus_alpha'] = my_reshape( tkf_params_dict['log_one_minus_alpha'] )
+    tkf_params_dict['log_beta'] = my_reshape( tkf_params_dict['log_beta'] )
+    tkf_params_dict['log_one_minus_beta'] = my_reshape( tkf_params_dict['log_one_minus_beta'] )
+    tkf_params_dict['log_gamma'] = my_reshape( tkf_params_dict['log_gamma'] )
+    tkf_params_dict['log_one_minus_gamma'] = my_reshape( tkf_params_dict['log_one_minus_gamma'] )
+    tkf_params_dict['log_alpha'] = log_alpha
+    
+    # just aggregate counts from this one
+    approx_flags_dict['log_one_minus_alpha'] = approx_flags_dict['log_one_minus_alpha'].sum()
+    approx_flags_dict['log_beta'] = approx_flags_dict['log_beta'].sum()
+    approx_flags_dict['log_one_minus_gamma'] = approx_flags_dict['log_one_minus_gamma'].sum()
+    approx_flags_dict['log_gamma'] = approx_flags_dict['log_gamma'].sum()
+    
+    return tkf_params_dict, approx_flags_dict
+
+
+def regular_tkf( mu, 
+                 offset, 
+                 t_array,
+                 unique_time_per_sample ):
+    """
+    return alpha, beta, gamma for TKF models; no approximations made, 
+        except still allow use of switch between approx and real for 
+        log(1-x) function
+
+    T: number of branch lengths in t_array
+    
+    returns:
+    --------
+    out_dict: the tkf values
+        out_dict['log_alpha']: ArrayLike[float32], 
+        out_dict['log_one_minus_alpha']: ArrayLike[float32], 
+        out_dict['log_beta']: ArrayLike[float32], 
+        out_dict['log_one_minus_beta']: ArrayLike[float32], 
+        out_dict['log_gamma']: ArrayLike[float32], 
+        out_dict['log_one_minus_gamma']: ArrayLike[float32], 
+    
+    approx_flags_dict: None (placeholder)
+    
+    """
+    B = mu.shape[0]
+    L_align = mu.shape[1]
+    
+    # mu: (B, L_align)
+    # offset: (B, L_align)
+    # t_array: either (B,) or (T,)
+    if not unique_time_per_sample:
+        T = t_array.shape[0]
+        
+        mu = mu[None,...] #(1, B, L_align)
+        offset = offset[None,...] #(1, B, L_align)
+        t_array = t_array[:,None,None] #(T, 1, 1)
+        final_shape = (T, B, L_align)
+    
+    elif unique_time_per_sample:
+        t_array = t_array[:,None] #(B, 1)
+        final_shape = (B, L_align)
+        
+    ### alpha
+    # alpha = exp(-mu*t)
+    # log(alpha) = -mu*t
+    log_alpha = -mu*t_array
+    
+    
+    ### beta
+    # log( (1 - offset) * (exp(mu*offset*t) - 1) )
+    # x = mu*offset*t
+    # y = jnp.log( 1 - offset )
+    # logsumexp with coeffs does: 
+    #   log( exp(x) - exp(y) ) = log( exp(mu*offset*t) - (1-offset) )
+    log_beta = true_beta( (mu, offset, t_array) )
+    
+    # 1 - beta; never use stable log one minus x for this
+    log_one_minus_beta = log_one_minus_x(log_x = log_beta)
+    
+    
+    ### vmap + jax.lax.cond solely for stable_log_one_minus_x function
+    def tkf_params_indv(log_alpha_indv,
+                        log_beta_indv,
+                        offset_indv):
+        # 1 - alpha
+        log_one_minus_alpha = stable_log_one_minus_x(log_x = log_alpha_indv)
+        
+        # 1 - gamma
+        log_one_minus_gamma = (log_beta_indv - 
+                               ( jnp.log( 1-offset_indv) + log_one_minus_alpha )
+                               )
+        
+        # gamma
+        log_gamma = stable_log_one_minus_x(log_x = log_one_minus_gamma)
+        
+        return {'log_one_minus_alpha': log_one_minus_alpha,
+                'log_gamma': log_gamma,
+                'log_one_minus_gamma': log_one_minus_gamma}
+    
+    log_alpha_reshaped = log_alpha.flatten() #(T*B*L_align) or (B*L_align)
+    log_beta_reshaped = log_beta.flatten() #(T*B*L_align) or (B*L_align)
+    offset_reshaped = jnp.broadcast_to( offset, log_alpha.shape ) #(T, B, L_align) or (B, L_align)
+    offset_reshaped = offset_reshaped.flatten() #(T*B*L_align) or (B*L_align)
+    
+    vmapped_tkf_params_indv = jax.vmap(tkf_params_indv)
+    tkf_params_dict = vmapped_tkf_params_indv( log_alpha_reshaped,
+                                               log_beta_reshaped, 
+                                               offset_reshaped )
+    
+    # reshape all
+    def my_reshape(m):
+        return jnp.reshape(m, final_shape)
+    
+    tkf_params_dict['log_one_minus_alpha'] = my_reshape( tkf_params_dict['log_one_minus_alpha'] )
+    tkf_params_dict['log_gamma'] = my_reshape( tkf_params_dict['log_gamma'] )
+    tkf_params_dict['log_one_minus_gamma'] = my_reshape( tkf_params_dict['log_one_minus_gamma'] )
+    tkf_params_dict['log_alpha'] = log_alpha
+    tkf_params_dict['log_beta'] = log_beta
+    tkf_params_dict['log_one_minus_beta'] = log_one_minus_beta
+    
+    return tkf_params_dict, None
+
+
+def approx_tkf( mu, 
+                offset, 
+                t_array,
+                unique_time_per_sample ):
+    """
+    return alpha, beta, gamma for TKF models; only use approx formulas, 
+        except still allow use of switch between approx and real for 
+        log(1-x) function
+
+    T: number of branch lengths in t_array
+    
+    returns:
+    --------
+    out_dict: the tkf values
+        out_dict['log_alpha']: ArrayLike[float32], 
+        out_dict['log_one_minus_alpha']: ArrayLike[float32], 
+        out_dict['log_beta']: ArrayLike[float32], 
+        out_dict['log_one_minus_beta']: ArrayLike[float32], 
+        out_dict['log_gamma']: ArrayLike[float32], 
+        out_dict['log_one_minus_gamma']: ArrayLike[float32], 
+    
+    approx_flags_dict: None (placeholder)
+    
+    """
+    B = mu.shape[0]
+    L_align = mu.shape[1]
+    
+    # mu: (B, L_align)
+    # offset: (B, L_align)
+    # t_array: either (B,) or (T,)
+    if not unique_time_per_sample:
+        T = t_array.shape[0]
+        
+        mu = mu[None,...] #(1, B, L_align)
+        offset = offset[None,...] #(1, B, L_align)
+        t_array = t_array[:,None,None] #(T, 1, 1)
+        final_shape = (T, B, L_align)
+    
+    elif unique_time_per_sample:
+        t_array = t_array[:,None] #(B, 1)
+        final_shape = (B, L_align)
+        
+    ### alpha
+    # alpha = exp(-mu*t)
+    # log(alpha) = -mu*t
+    log_alpha = -mu*t_array
+    
+    
+    ### beta
+    # log( (1 - offset) * (exp(mu*offset*t) - 1) )
+    # x = mu*offset*t
+    # y = jnp.log( 1 - offset )
+    # logsumexp with coeffs does: 
+    #   log( exp(x) - exp(y) ) = log( exp(mu*offset*t) - (1-offset) )
+    log_beta = approx_beta( (mu, offset, t_array) )
+    
+    # 1 - beta; never use stable log one minus x for this
+    log_one_minus_beta = log_one_minus_x(log_x = log_beta)
+    
+    
+    ### 1-gamma
+    log_one_minus_gamma = approx_one_minus_gamma( (mu, offset, t_array) )
+    
+    
+    ### vmap + jax.lax.cond for stable_log_one_minus_x
+    def tkf_params_indv(log_alpha_indv,
+                        log_one_minus_gamma_indv):
+        # 1 - alpha
+        log_one_minus_alpha = stable_log_one_minus_x(log_x = log_alpha_indv)
+        
+        # gamma
+        log_gamma = stable_log_one_minus_x(log_x = log_one_minus_gamma_indv)
+        
+        return {'log_one_minus_alpha': log_one_minus_alpha,
+                'log_gamma': log_gamma}
+    
+    # vmap over B*L*T dim, instead of just T dim
+    log_alpha_reshaped = log_alpha.flatten() #(T*B*L_align) or (B*L_align)
+    log_one_minus_gamma_reshaped = log_one_minus_gamma.flatten() #(T*B*L_align) or (B*L_align)
+    
+    vmapped_tkf_params_indv = jax.vmap(tkf_params_indv)
+    to_add = vmapped_tkf_params_indv( log_alpha,
+                                      log_one_minus_gamma )
+    
+    # reshape all
+    def my_reshape(m):
+        return jnp.reshape(m, final_shape)
+    
+    tkf_params_dict['log_one_minus_alpha'] = my_reshape( tkf_params_dict['log_one_minus_alpha'] )
+    tkf_params_dict['log_gamma'] = my_reshape( tkf_params_dict['log_gamma'] )
+    tkf_params_dict['log_alpha'] = log_alpha
+    tkf_params_dict['log_beta'] = log_beta
+    tkf_params_dict['log_one_minus_beta'] = log_one_minus_beta
+    tkf_params_dict['log_one_minus_gamma'] = log_one_minus_gamma
+    
+    return tkf_params_dict, None
+
+
+###############################################################################
+### transition models   #######################################################
+###############################################################################
+def concat_transition_matrix(m_m, m_i, m_d, m_e,
+                             i_m, i_i, i_d, i_e,
+                             d_m, d_i, d_d, d_e,
+                             s_m, s_i, s_d, s_e):
+    """
+    stacks along axis to (....,4,4)
+    """
+    return jnp.stack([ jnp.stack([m_m, m_i, m_d, m_e], axis=-1),
+                       jnp.stack([i_m, i_i, i_d, i_e], axis=-1),
+                       jnp.stack([d_m, d_i, d_d, d_e], axis=-1),
+                       jnp.stack([s_m, s_i, s_d, s_e], axis=-1)
+                      ], axis=-2)
+
+def logprob_tkf91(tkf_params_dict,
+                  *args,
+                  **kwargs ):
+    """
+    T = times
+    B = batch size
+    L_align = length of alignment
+    S = number of regular transitions, 4 here: M, I, D, START/END
+    
+    Arguments
+    ----------
+    tkf_params_dict : dict
+        > (B, L_align) if unique_time_per_sample
+        > (T, B, L_align) if not unique_time_per_sample
+        contains values for calculating matrix terms: 
+        alpha, beta, gamma, 1 - alpha, 1 - beta, 1 - gamma
+        (all in log space)
+    
+    unique_time_per_sample : Bool
+        whether there's one time per sample, or a grid of times you'll 
+        marginalize over
+      
+    Returns
+    -------
+    out : ArrayLike
+        > (B, L, S_from=4, S_to=4) if unique time per sample
+        > (T, B, L, S_from=4, S_to=4) if not unique time per sample
+        conditional loglike of transitions
+    """
+    # a_f = (1-beta)*alpha;     log(a_f) = log(1-beta) + log(alpha)
+    # b_g = beta;               log(b_g) = log(beta)
+    # c_h = (1-beta)*(1-alpha); log(c_h) = log(1-beta) + log(1-alpha)
+    log_a_f = out_dict['log_one_minus_beta'] + out_dict['log_alpha']
+    log_b_g = out_dict['log_beta']
+    log_c_h = out_dict['log_one_minus_beta'] + out_dict['log_one_minus_alpha']
+    log_mis_e = out_dict['log_one_minus_beta']
+
+    # p = (1-gamma)*alpha;     log(p) = log(1-gamma) + log(alpha)
+    # q = gamma;               log(q) = log(gamma)
+    # r = (1-gamma)*(1-alpha); log(r) = log(1-gamma) + log(1-alpha)
+    log_p = out_dict['log_one_minus_gamma'] + out_dict['log_alpha']
+    log_q = out_dict['log_gamma']
+    log_r = out_dict['log_one_minus_gamma'] + out_dict['log_one_minus_alpha']
+    log_d_e = out_dict['log_one_minus_gamma']
+    
+    # logprob_trans is (T, B, L, 4, 4) or (B, L, 4, 4)
+    logprob_trans = concat_transition_matrix(m_m = log_a_f, 
+                                             m_i = log_b_g,
+                                             m_d = log_c_h, 
+                                             m_e = log_mis_e,
+                                            
+                                             i_m = log_a_f, 
+                                             i_i = log_b_g, 
+                                             i_d = log_c_h, 
+                                             i_e = log_mis_e,
+                                            
+                                             d_m = log_p, 
+                                             d_i = log_q, 
+                                             d_d = log_r, 
+                                             d_e = log_d_e,
+                                            
+                                             s_m = log_a_f, 
+                                             s_i = log_b_g, 
+                                             s_d = log_c_h, 
+                                             s_e = log_mis_e)
+    return logprob_trans
+
+
+def logprob_tkf92(tkf_params_dict,
+                  r_extend,
+                  unique_time_per_sample ):
+    """
+    T = times
+    B = batch size
+    L_align = length of alignment
+    S = number of regular transitions, 4 here: M, I, D, START/END
+    
+    Arguments
+    ----------
+    tkf_params_dict : dict
+        > (B, L_align) if unique_time_per_sample
+        > (T, B, L_align) if not unique_time_per_sample
+        contains values for calculating matrix terms: 
+        alpha, beta, gamma, 1 - alpha, 1 - beta, 1 - gamma
+        (all in log space)
+    
+    r_extend : ArrayLike, (B, L_align)
+        fragment extension probabilities
+    
+    unique_time_per_sample : Bool
+        whether there's one time per sample, or a grid of times you'll 
+        marginalize over
+      
+    Returns
+    -------
+    out : ArrayLike
+        > (B, L, S_from=4, S_to=4) if unique time per sample
+        > (T, B, L, S_from=4, S_to=4) if not unique time per sample
+        conditional loglike of transitions
+    """
+    ### get dims  
+    ref_shape =  tkf_params_dict['log_alpha']
+    
+    if not unique_time_per_sample:
+        final_shape = (T, B, L_align)
+        
+        T = ref_shape.shape[0]
+        B = max( [ ref_shape.shape[1], r_extend.shape[0] ] )
+        L_align = max( [ ref_shape.shape[2], r_extend.shape[1] ] )  
+        
+        r_extend = r_extend[None,...] #(1, B, L_align)
+    
+    elif unique_time_per_sample:
+        final_shape = (B, L_align)
+        
+        B = max( [ ref_shape.shape[0], r_extend.shape[0] ] )
+        L_align = max( [ ref_shape.shape[1], r_extend.shape[1] ] )  
+    
+    # reshape tensors with broadcasting, where needed
+    def my_reshape(m):
+        return jnp.broadcast_to(m, final_shape)
+    
+    tkf_params_dict['log_alpha'] = my_reshape( tkf_params_dict['log_alpha'] ) #(T, B, L_align) or  #(B, L_align)
+    tkf_params_dict['log_beta'] = my_reshape( tkf_params_dict['log_beta'] ) #(T, B, L_align) or  #(B, L_align)
+    tkf_params_dict['log_gamma'] = my_reshape( tkf_params_dict['log_gamma'] ) #(T, B, L_align) or  #(B, L_align)
+    tkf_params_dict['log_one_minus_alpha'] = my_reshape( tkf_params_dict['log_one_minus_alpha'] ) #(T, B, L_align) or  #(B, L_align)
+    tkf_params_dict['log_one_minus_beta'] = my_reshape( tkf_params_dict['log_one_minus_beta'] ) #(T, B, L_align) or  #(B, L_align)
+    tkf_params_dict['log_one_minus_gamma'] = my_reshape( tkf_params_dict['log_one_minus_gamma'] ) #(T, B, L_align) or  #(B, L_align)
+    r_extend = my_reshape( r_extend )
+    
+            
+    ### start filling in matrix
+    # need log(r_extend) and log(1 - r_extend) for this
+    log_r_extend = safe_log(r_extend)
+    log_one_minus_r_extend = jnp.log1p(-r_extend)
+    
+    # a = r_extend + (1-r_extend)*(1-beta)*alpha
+    # log(a) = logsumexp([r_extend, 
+    #                     log(1-r_extend) + log(1-beta) + log(alpha)
+    #                     ]
+    #                    )
+    log_a_second_half = ( log_one_minus_r_extend + 
+                          out_dict['log_one_minus_beta'] +
+                          out_dict['log_alpha'] )
+    log_a = logsumexp_with_arr_lst([log_r_extend, log_a_second_half])
+    
+    # b = (1-r_extend)*beta
+    # log(b) = log(1-r_extend) + log(beta)
+    log_b = log_one_minus_r_extend + out_dict['log_beta']
+    
+    # c_h = (1-r_extend)*(1-beta)*(1-alpha)
+    # log(c_h) = log(1-r_extend) + log(1-beta) + log(1-alpha)
+    log_c_h = ( log_one_minus_r_extend +
+                out_dict['log_one_minus_beta'] +
+                out_dict['log_one_minus_alpha'] )
+    
+    # m_e = (1-r_extend) * (1-beta)
+    # log(mi_e) = log(1-r_extend) + log(1-beta)
+    log_mi_e = log_one_minus_r_extend + out_dict['log_one_minus_beta']
+
+    # f = (1-r_extend)*(1-beta)*alpha
+    # log(f) = log(1-r_extend) +log(1-beta) +log(alpha)
+    log_f = ( log_one_minus_r_extend +
+              out_dict['log_one_minus_beta'] +
+              out_dict['log_alpha'] )
+    
+    # g = r_extend + (1-r_extend)*beta
+    # log(g) = logsumexp([r_extend, 
+    #                     log(1-r_extend) + log(beta)
+    #                     ]
+    #                    )
+    log_g_second_half = log_one_minus_r_extend + out_dict['log_beta']
+    log_g = logsumexp_with_arr_lst([log_r_extend, log_g_second_half])
+    
+    # h and log(h) are the same as c and log(c) 
+
+    # p = (1-r_extend)*(1-gamma)*alpha
+    # log(p) = log(1-r_extend) + log(1-gamma) +log(alpha)
+    log_p = ( log_one_minus_r_extend +
+              out_dict['log_one_minus_gamma'] +
+              out_dict['log_alpha'] )
+
+    # q = (1-r_extend)*gamma
+    # log(q) = log(1-r_extend) + log(gamma)
+    log_q = log_one_minus_r_extend + out_dict['log_gamma']
+
+    # r = r_extend + (1-r_extend)*(1-gamma)*(1-alpha)
+    # log(r) = logsumexp([r_extend, 
+    #                     log(1-r_extend) + log(1-gamma) + log(1-alpha)
+    #                     ]
+    #                    )
+    log_r_second_half = ( log_one_minus_r_extend +
+                          out_dict['log_one_minus_gamma'] +
+                          out_dict['log_one_minus_alpha'] )
+    log_r = logsumexp_with_arr_lst([log_r_extend, log_r_second_half])
+    
+    # d_e = (1-r_extend) * (1-gamma)
+    # log(d_e) = log(1-r_extend) + log(1-gamma)
+    log_d_e = log_one_minus_r_extend + out_dict['log_one_minus_gamma']
+    
+    # final row: start -> any
+    log_s_m = out_dict['log_one_minus_beta'] + out_dict['log_alpha']
+    log_s_i = out_dict['log_beta']
+    log_s_d = out_dict['log_one_minus_beta'] + out_dict['log_one_minus_alpha']
+    log_s_e = out_dict['log_one_minus_beta']
+    
+    # final mat is (T, B, L, 4, 4) or (B, L, 4, 4)
+    logprob_trans = concat_transition_matrix(m_m = log_a, 
+                                             m_i = log_b,
+                                             m_d = log_c_h, 
+                                             m_e = log_mi_e,
+                                                  
+                                             i_m = log_f, 
+                                             i_i = log_g, 
+                                             i_d = log_c_h, 
+                                             i_e = log_mi_e,
+                                                  
+                                             d_m = log_p, 
+                                             d_i = log_q, 
+                                             d_d = log_r, 
+                                             d_e = log_d_e,
+                                                  
+                                             s_m = log_s_m, 
+                                             s_i = log_s_i, 
+                                             s_d = log_s_d, 
+                                             s_e = log_s_e)
+    return logprob_trans
+
+
+
