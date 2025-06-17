@@ -4,6 +4,29 @@
 Created on Wed Jun 11 18:54:38 2025
 
 @author: annabel
+
+functions here:
+===============
+'approx_beta',
+'approx_one_minus_gamma',
+'approx_tkf',
+'bound_sigmoid',
+'bound_sigmoid_inverse',
+'concat_transition_matrix',
+'log_one_minus_x',
+'log_x_minus_one',
+'logprob_f81',
+'logprob_gtr',
+'logprob_tkf91',
+'logprob_tkf92',
+'logsumexp_with_arr_lst',
+'rate_matrix_from_exch_equl',
+'regular_tkf',
+'safe_log',
+'stable_log_one_minus_x',
+'switch_tkf',
+'true_beta',
+'upper_tri_vector_to_sym_matrix'
 """
 import jax
 from jax import numpy as jnp
@@ -1035,3 +1058,62 @@ def logprob_tkf92(tkf_params_dict,
 
 
 
+###############################################################################
+### neural helpers   ##########################################################
+###############################################################################
+def process_datamat_lst(datamat_lst: list,
+                        padding_mask: jnp.array,
+                        use_anc_emb: bool,
+                        use_desc_emb: bool):
+    """
+    select which embedding, then mask out padding tokens
+    
+    B: batch size
+    L_align: length of alignment
+    
+    
+    Arguments
+    ----------
+    datamat_lst : list[ArrayLike, ArrayLike]
+        > ancestor embedding, descendant embedding (in that order)
+        > each are (B, L_align, H)
+    
+    padding_mask : ArrayLike, (B, L_align)
+    
+    use_anc_emb : bool
+        > use ancestor embedding information to generate evolutionary 
+          model parameters?
+        
+    use_desc_emb : bool
+        > use descendant embedding information to generate evolutionary 
+          model parameters?
+    
+    Returns
+    --------
+    datamat : ArrayLike, (B, L_align, n*H)
+        concatenated and padding-masked features
+        > n=1, if only using ancestor embedding OR descendant embedding
+        > n=2, if using both embeddings
+        
+    masking_mat: ArrayLike, (B, L_align, n*H)
+        location of padding in alignment
+        > n=1, if only using ancestor embedding OR descendant embedding
+        > n=2, if using both embeddings
+    """
+    if (use_anc_emb) and (use_desc_emb):
+        datamat = jnp.concatenate( datamat_lst, axis = -1 ) #(B, L_align, 2*H)
+    
+    elif (use_anc_emb) and (not use_desc_emb):
+        datamat = datamat_lst[0] #(B, L_align, H)
+    
+    elif (not use_anc_emb) and (use_desc_emb):
+        datamat = datamat_lst[1] #(B, L_align, H)
+    
+    new_shape = (padding_mask.shape[0],
+                 padding_mask.shape[1],
+                 datamat.shape[2])  
+    masking_mat = jnp.broadcast_to(padding_mask[..,None], new_shape) #(B, L_align, H) or (B, L_align, 2*H)
+    del new_shape
+    
+    datamat = jnp.multiply(datamat, masking_mat) #(B, L_align, H) or (B, L_align, 2*H)
+    return datamat, masking_mat

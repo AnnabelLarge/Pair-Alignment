@@ -4,6 +4,42 @@
 Created on Thu Jun 12 13:43:50 2025
 
 @author: annabel
+
+tkf91 models, pred_config entries:
+-----------------------------------
+'GlobalTKF91',
+- (OPTIONAL) pred_config['init_mu_offset_logits'] 
+- (OPTIONAL) pred_config['mu_range']
+- (OPTIONAL) pred_config['offset_range']
+- (OPTIONAL) pred_config['tkf_function']
+
+ 'LocalTKF91',
+- (OPTIONAL) pred_config['mu_range']
+- (OPTIONAL) pred_config['offset_range']
+
+
+tkf92, pred_config entries:
+----------------------------
+ 'TKF92GlobalRateGlobalFragSize',
+- (OPTIONAL) pred_config['init_mu_offset_logits'] 
+- (OPTIONAL) pred_config['mu_range']
+- (OPTIONAL) pred_config['offset_range']
+- (OPTIONAL) pred_config['init_r_extend_logits']
+- (OPTIONAL) pred_config['r_range']
+- (OPTIONAL) pred_config['tkf_function']
+
+ 'TKF92GlobalRateLocalFragSize',
+- (OPTIONAL) pred_config['init_mu_offset_logits'] 
+- (OPTIONAL) pred_config['mu_range']
+- (OPTIONAL) pred_config['offset_range']
+- (OPTIONAL) pred_config['r_range']
+- (OPTIONAL) pred_config['tkf_function']
+
+ 'TKF92LocalRateLocalFragSize',
+- (OPTIONAL) pred_config['mu_range']
+- (OPTIONAL) pred_config['offset_range']
+- (OPTIONAL) pred_config['r_range']
+- (OPTIONAL) pred_config['tkf_function']
 """
 from flax import linen as nn
 import jax

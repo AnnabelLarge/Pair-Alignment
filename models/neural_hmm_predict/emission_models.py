@@ -5,6 +5,49 @@ Created on Wed Jun 11 13:46:56 2025
 
 @author: annabel
 
+equilibrium dist, pred_config entries:
+----------------------------------------
+'GlobalEqul',
+- pred_config['emission_alphabet_size']
+
+'LocalEqul',
+- pred_config['emission_alphabet_size']
+
+'EqulFromFile',
+- pred_config['filenames']['equl_dist']
+
+
+F81, pred_config entries:
+--------------------------
+'GlobalF81', 
+(no config entries)
+
+'LocalF81',
+- (OPTIONAL) pred_config['rate_mult_range']
+
+'F81FromFile',
+(no config entries)
+
+
+GTR, pred_config entries:
+-------------------------
+'GTRGlobalExchGlobalRateMult',
+- pred_config['emission_alphabet_size']
+- (OPTIONAL) pred_config['exchange_range']
+
+'GTRGlobalExchLocalRateMult',
+- pred_config['emission_alphabet_size']
+- (OPTIONAL) pred_config['exchange_range']
+- (OPTIONAL) pred_config['rate_mult_range']
+
+'GTRLocalExchLocalRateMult',
+- pred_config['emission_alphabet_size']
+- (OPTIONAL) pred_config['exchange_range']
+- (OPTIONAL) pred_config['rate_mult_range']
+
+'GTRFromFile',
+- pred_config['filenames']['exch']
+
 """
 from flax import linen as nn
 import jax
