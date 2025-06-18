@@ -14,15 +14,18 @@ Flax Modules needed for scoring emissions; may have their own parameters, and
 
 modules:
 =========
-'EqulDistLogprobsFromCounts',
-'EqulDistLogprobsFromFile',
-'EqulDistLogprobsPerClass',
-'GTRRateMat',
-'GTRRateMatFromFile',
-'HKY85RateMat',
-'HKY85RateMatFromFile',
-'SiteClassLogprobs',
-'SiteClassLogprobsFromFile',
+ 'EqulDistLogprobsFromCounts',
+ 'EqulDistLogprobsFromFile',
+ 'EqulDistLogprobsPerClass',
+ 'F81LogProbs',
+ 'F81LogProbsFromFile',
+ 'GTRRateMat',
+ 'GTRRateMatFromFile',
+ 'HKY85RateMat',
+ 'HKY85RateMatFromFile',
+ 'ModuleBase',
+ 'SiteClassLogprobs',
+ 'SiteClassLogprobsFromFile',
 """
 from flax import linen as nn
 import jax
@@ -992,19 +995,24 @@ class F81LogProbs(ModuleBase):
             
             
         elif self.num_mixtures == 1:
-            rate_multiplier = 1 / ( 1 - np.square(equl).sum(axis=(-1)) ) # (1,)
+            rate_multiplier = 1 / ( 1 - jnp.square(prob_equl).sum(axis=(-1)) ) # (1,)
         
-        return self._fill_f81(equl = equl, 
-                              rate_multiplier = rate_multiplier, 
-                              t_array = t_array)
+        joint_logprob = self._fill_f81(equl = prob_equl, 
+                                      rate_multiplier = rate_multiplier, 
+                                      t_array = t_array) #(T,C,A,A)
+        return joint_logprob
         
     
     def _fill_f81(self, 
                   equl,
                   rate_multiplier, 
-                  t_array):
+                  t_array, 
+                  return_cond = False):
         """
         return logP(emission at match) directly
+    
+        return_cond is only used in debugging and unit tests; most of the time,
+          return the joint
         """
         T = t_array.shape[0]
         C = rate_multiplier.shape[0]
@@ -1024,10 +1032,17 @@ class F81LogProbs(ModuleBase):
         #   pi_j + (1-pi_j) * exp(-rate*t)
         diags = equl + (1-equl) * exp_oper #(T, C, A)
         diag_indices = jnp.arange(A)  # (A,)
-        cond_probs = cond_probs_raw.at[:, :, diag_indices, diag_indices].set(diags)
+        cond_probs = cond_probs_raw.at[:, :, diag_indices, diag_indices].set(diags) # (T, C, A, A)
         
-        return jnp.log( cond_probs )
-
+        if not return_cond:
+            # P(x) P(y|x,t) for all T, C
+            equl_reshaped = equl[..., None] #(1, C, A, 1)
+            joint_probs = cond_probs * equl_reshaped # (T, C, A, A)
+            return jnp.log( joint_probs ) # (T, C, A, A)
+        
+        elif return_cond:
+            return jnp.log( cond_probs ) # (T, C, A, A)
+        
 
 class F81LogProbsFromFile(F81LogProbs):
     """

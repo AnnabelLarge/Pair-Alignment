@@ -220,7 +220,7 @@ def upper_tri_vector_to_sym_matrix(vec: ArrayLike):
     i_idx, j_idx = jnp.triu_indices(A, k=1) #(A,) and (A,)
 
     # Initialize zero matrix (B, L, A, A)
-    mat = jnp.zeros((B, L, A, A), dtype=vec.dtype)
+    mat = jnp.zeros((B, L, A, A))
 
     # Fill upper triangle
     mat = mat.at[:, :, i_idx, j_idx].set(vec)
@@ -260,9 +260,9 @@ def rate_matrix_from_exch_equl(exchangeabilities: ArrayLike,
 
     """
     # reshape for einsum
-    B = max( [exch_upper_triag_values.shape[0],
+    B = max( [exchangeabilities.shape[0],
               equilibrium_distributions.shape[0]] )
-    L_align = max( [exch_upper_triag_values.shape[1],
+    L_align = max( [exchangeabilities.shape[1],
                     equilibrium_distributions.shape[1] ] )
     A = exchangeabilities.shape[-1]
 
@@ -344,7 +344,6 @@ def logprob_gtr( exch_upper_triag_values,
     exchangeabilities = upper_tri_vector_to_sym_matrix(vec = exch_upper_triag_values) # (B, L_align, A, A) 
     
     # generate rate matrix, and normalize it 
-    equilibrium_distributions = jnp.exp(log_equl) #(B, L_align, A) 
     normed_rate_mat = rate_matrix_from_exch_equl(exchangeabilities = exchangeabilities,
                                                  equilibrium_distributions = equilibrium_distributions,
                                                  norm = True) #(B, L_align, A, A) 
@@ -368,8 +367,8 @@ def logprob_gtr( exch_upper_triag_values,
     oper = rate_mat * t_array # (T, B, L_align, A, A) or (B, L_align, A, A)
     
     # apply matrix exponential with vmap
-    reshaped_oper = oper.reshape( oper, before_reshape ) #(T*B*L, A, A) or (B*L, A, A)
-    vmapped_expm = jax.vmap(expm, axis=0)
+    reshaped_oper = jnp.reshape( oper, before_reshape ) #(T*B*L, A, A) or (B*L, A, A)
+    vmapped_expm = jax.vmap(expm, in_axes=0)
     cond_prob_raw = vmapped_expm( reshaped_oper ) #(T*B*L, A, A) or (B*L, A, A)
     cond_prob = jnp.reshape( cond_prob_raw, after_reshape )
     
@@ -1112,7 +1111,7 @@ def process_datamat_lst(datamat_lst: list,
     new_shape = (padding_mask.shape[0],
                  padding_mask.shape[1],
                  datamat.shape[2])  
-    masking_mat = jnp.broadcast_to(padding_mask[..,None], new_shape) #(B, L_align, H) or (B, L_align, 2*H)
+    masking_mat = jnp.broadcast_to(padding_mask[...,None], new_shape) #(B, L_align, H) or (B, L_align, 2*H)
     del new_shape
     
     datamat = jnp.multiply(datamat, masking_mat) #(B, L_align, H) or (B, L_align, 2*H)

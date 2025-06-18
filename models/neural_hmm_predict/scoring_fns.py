@@ -4,218 +4,287 @@
 Created on Tue Oct  8 15:18:44 2024
 
 @author: annabel
+
+functions:
+-----------
+'score_f81_substitutions_marg_over_times',
+'score_f81_substitutions_t_per_samp',
+'score_gtr_substitutions',
+'score_indels',
+'score_transitions'
+
 """
 import jax
 from jax import numpy as jnp
 
-
-
 ###############################################################################
-### functions for marginalizing over time grid   ##############################
+### helpers   #################################################################
 ###############################################################################
-def score_transitions_marg_over_times(alignment_state, 
-                                      logprob_trans_mat,
-                                      padding_idx = 0):
+def index_square_scoring_matrix_marg_over_time(scoring_matrix,
+                                               samples):
     """
+    helper to index a 2D scoring matrix (used for transitions and substitution 
+        logprobs)
+    
     T: number of times
     B: batch size
     L_align: length of alignment
-    S: number of transition states, here, it's 4
-    
+    N: last two dimensions of scoring_matrix; this is the square part
     
     Arguments
-    ----------
-    alignment_state : ArrayLike, (B, L_align-1, 2)
-      > dim2=0: prev position's state
-      > dim2=1: curr position's state (the position you're trying to predict)
-      > <pad>: 0
-      > Match, M: 1
-      > Insert, I: 2
-      > Delete, D: 3
-      > Start, S: 4
-      > End, E: 5
-      
-    logprob_trans_mat : ArrayLike, (T, B, L_align-1, 4, 4) OR (T, 1, 1, 4, 4)
-      > order of rows and columns: M, I, D, S/E
+    ---------
+    scoring_matrix : ArrayLike, (T, B, L_align-1, N, N) OR (T, 1, 1, N, N)
+        scoring matrix of log-probabilities
     
-    padding_idx: int
-      > default = 0
+    samples : ArrayLike, (B, L-align-1, 2)
+        dim2=0 are the row indices
+        dim2=1 are the col indices
     
-    
-    Returns:
-    ----------
-    final_logprobs : ArrayLike(T, B, L_align-1)
+    Returns
+    -------
+    raw_logprobs : ArrayLike, (T, B, L_align)
+        elements of scoring_matrix, extracted according to samples 
+        (still needs to be masked, selected, whatever)
     """
-    # dims
-    T = logprob_trans_mat.shape[0]
-    B = alignment_state.shape[0]
-    L = alignment_state.shape[1]  #this is L_align-1
-    S = logprob_trans_mat.shape[-1] #should be equal to 4
+    T = scoring_matrix.shape[0]
+    B = samples.shape[0]
+    L = samples.shape[1]
+    N = scoring_matrix.shape[-1] 
     
-    
-    ### preprocess
-    # get padding mask, do this BEFORE adjusting the encoding!!!
-    padding_mask =  ( (alignment_state[...,0] != padding_idx) &
-                      (alignment_state[...,1] != padding_idx) ) #(B, L_align-1)
-    
-    # adjust encoding
-    # end: write as combined start/end token (5 -> 4)
-    # pad: write as delete, so that indexing invalid positions doesn't cause 
-    #      jax gradients to be NaN (0 -> 3)
-    alignment_state_adj = jnp.where(alignment_state != 5, alignment_state, 4) # (B, L_align-1, 2)
-    alignment_state_adj = jnp.where(alignment_state_adj != 0, alignment_state_adj, 3) # (B, L_align-1, 2)
-    
-    # by how much do you offset tokens for indexing the transition matrix? 
-    # default offset is 1, which remaps tokens to:
-    # > Match, M: 0
-    # > Insert, I: 1
-    # > Delete, D, and pad: 2
-    # > Start, S, and End, E: 3
-    token_offset = 1
-    
-    # move all positions down
-    alignment_state_adj = alignment_state_adj - token_offset
-    
-    
-    ### Scoring
-    # global: one transition matrix for all samples, all positions
-    if logprob_trans_mat.shape == (T, 1, 1, S, S):
-        logprob_trans_mat = logprob_trans_mat[:,0,0,...] #(T, S, S)
+    # global: one matrix for all samples, all positions
+    if scoring_matrix.shape == (T, 1, 1, N, N):
+        scoring_matrix = scoring_matrix[:,0,0,...] #(T, N, N)
 
-        prev_state = alignment_state_adj[..., 0][None,...] #(1, B, L_align-1)
-        prev_state = jnp.broadcast_to(prev_state, (T, B, L))
+        row_idx = samples[..., 0][None,...] #(1, B, L_align-1)
+        row_idx = jnp.broadcast_to(row_idx, (T, B, L)) #(T, B, L_align-1)
 
-        curr_state = alignment_state_adj[..., 1][None,...] #(1, B, L_align-1)        
-        curr_state = jnp.broadcast_to(curr_state, (T, B, L))
+        col_idx = samples[..., 1][None,...] #(1, B, L_align-1)        
+        col_idx = jnp.broadcast_to(col_idx, (T, B, L)) #(T, B, L_align-1)
         
-        raw_logprobs = logprob_trans_mat[:, prev_state, curr_state]  # (T, B, L_align-1)
+        raw_logprobs = scoring_matrix[jnp.arange(T)[:, None, None], row_idx, col_idx]  # (T, B, L_align-1)
                 
     
     # local: unique transition matrix for each sample, each position
-    else:
-        # get rows: T, B, L_align-1, 1, S
-        prev_state = alignment_state_adj[..., 0][None, ..., None,None]
-        interm = jnp.take_along_axis(logprob_trans_mat, 
-                                     prev_state,
-                                     axis=-2)  
+    elif scoring_matrix.shape == (T, B, L, N, N):
+        row_idx = samples[..., 0][None, ..., None,None] #(1, B, L_align-1, 1, 1)
+        interm = jnp.take_along_axis(scoring_matrix, 
+                                     row_idx,
+                                     axis=-2)  #(T, B, L_align-1, 1, N)
         
-        # get columns: T, B, L_align-1, 1, 1
-        curr_state = alignment_state_adj[..., 1][None, ..., None,None]
+        col_idx = samples[..., 1][None, ..., None,None] #(1, B, L_align-1, 1, 1)
         raw_logprobs = jnp.take_along_axis(interm, 
-                                           curr_state, 
-                                           axis=-1)  
+                                           col_idx, 
+                                           axis=-1)  #(T, B, L_align-1, 1, 1)
         
-        # squash to (T, B, L_align-1); mask and return
+        # squash to (T, B, L_align-1)
         raw_logprobs = raw_logprobs[...,0,0] 
     
-    
-    ### mask and return
-    final_logprobs = raw_logprobs * padding_mask[None, ...]
-    return final_logprobs # (T, B, L_align-1)
+    return raw_logprobs
 
 
-def score_transitions_t_per_samp(alignment_state, 
-                                 logprob_trans_mat,
-                                 padding_idx = 0):
+def index_square_scoring_matrix_t_per_samp(scoring_matrix,
+                                           samples):
     """
-    T: number of times
+    helper to index a 2D scoring matrix (used for transitions and substitution 
+        logprobs)
+    
     B: batch size
     L_align: length of alignment
-    S: number of transition states, here, it's 4
-    
+    N: last two dimensions of scoring_matrix; this is the square part
     
     Arguments
-    ----------
-    alignment_state : ArrayLike, (B, L_align-1, 2)
-      > dim2=0: prev position's state
-      > dim2=1: curr position's state (the position you're trying to predict)
-      > <pad>: 0
-      > Match, M: 1
-      > Insert, I: 2
-      > Delete, D: 3
-      > Start, S: 4
-      > End, E: 5
-      
-    logprob_trans_mat : ArrayLike, (B, L_align-1, 4, 4) OR (B, 1, 4, 4)
-      > order of rows and columns: M, I, D, S/E
+    ---------
+    scoring_matrix : ArrayLike, (B, L_align-1, N, N) OR (1, 1, N, N)
+        scoring matrix of log-probabilities
     
-    padding_idx: int
-      > default = 0
+    samples : ArrayLike, (B, L-align-1, 2)
+        dim2=0 are the row indices
+        dim2=1 are the col indices
     
-    
-    Returns:
-    ----------
-    final_logprobs : ArrayLike(B, L_align-1)
+    Returns
+    -------
+    raw_logprobs : ArrayLike, (B, L_align)
+        elements of scoring_matrix, extracted according to samples 
+        (still needs to be masked, selected, whatever)
     """
-    # dims
-    B = alignment_state.shape[0]
-    L = alignment_state.shape[1]  #this is L_align-1
-    S = logprob_trans_mat.shape[-1] #should be equal to 4
+    B = samples.shape[0]
+    L = samples.shape[1]
+    N = scoring_matrix.shape[-1] 
     
-    
-    ### preprocess
-    # get padding mask, do this BEFORE adjusting the encoding!!!
-    padding_mask =  ( (alignment_state[...,0] != padding_idx) &
-                      (alignment_state[...,1] != padding_idx) ) #(B, L_align-1)
-    
-    # adjust encoding
-    # end: write as combined start/end token (5 -> 4)
-    # pad: write as delete, so that indexing invalid positions doesn't cause 
-    #      jax gradients to be NaN (0 -> 3)
-    alignment_state_adj = jnp.where(alignment_state != 5, alignment_state, 4) # (B, L_align-1, 2)
-    alignment_state_adj = jnp.where(alignment_state_adj != 0, alignment_state_adj, 3) # (B, L_align-1, 2)
-    
-    # by how much do you offset tokens for indexing the transition matrix? 
-    # default offset is 1, which remaps tokens to:
-    # > Match, M: 0
-    # > Insert, I: 1
-    # > Delete, D, and pad: 2
-    # > Start, S, and End, E: 3
-    token_offset = 1
-    
-    # move all positions down
-    alignment_state_adj = alignment_state_adj - token_offset
-    
-    
-    ### Scoring
     # global: one transition matrix for all samples, all positions
-    if logprob_trans_mat.shape == (B, 1, S, S):
-        logprob_trans_mat = logprob_trans_mat[:,0,...] # (B, S, S)
+    if scoring_matrix.shape == (B, 1, N, N):
+        scoring_matrix = scoring_matrix[:,0,...] # (B, N, N)
 
-        prev_state = alignment_state_adj[..., 0] # (B, L_align-1)
-        curr_state = alignment_state_adj[..., 1] # (B, L_align-1) 
-        
+        row_idx = samples[..., 0] # (B, L_align-1)
+        col_idx = samples[..., 1] # (B, L_align-1) 
         batch_idx = jnp.arange(B)[:, None]  # (B, 1)
-        raw_logprobs = logprob_trans_mat[batch_idx, prev_state, curr_state]  # (B, L_align-1)
+        
+        raw_logprobs = scoring_matrix[batch_idx, row_idx, col_idx]  # (B, L_align-1)
                 
     
     # local: unique transition matrix for each sample, each position
-    else:
+    elif scoring_matrix.shape == (B, L, N, N):
         # get rows: B, L_align-1, 1, S
-        prev_state = alignment_state_adj[..., 0][..., None,None] # (B, L_align-1, 1, 1)
-        interm = jnp.take_along_axis(logprob_trans_mat, 
-                                     prev_state,
+        row_idx = samples[..., 0][..., None,None] # (B, L_align-1, 1, 1)
+        interm = jnp.take_along_axis(scoring_matrix, 
+                                     row_idx,
                                      axis=-2)  # (B, L_align-1, 1, S)
         
         # get columns: B, L_align-1, 1, 1
-        curr_state = alignment_state_adj[..., 1][..., None,None] # (B, L_align-1, 1, 1)
+        col_idx = samples[..., 1][..., None,None] # (B, L_align-1, 1, 1)
         raw_logprobs = jnp.take_along_axis(interm, 
-                                           curr_state, 
+                                           col_idx, 
                                            axis=-1)  # (B, L_align-1, 1, 1) 
         
-        # squash to (B, L_align-1); mask and return
+        # squash to (B, L_align-1)
         raw_logprobs = raw_logprobs[...,0,0] 
     
+    return raw_logprobs
+
+
+def preproc_emissions( samples: jnp.array,
+                       alphabet_size: int,
+                       gap_idx: int=43,
+                       padding_idx: int=0,
+                       start_idx: int=1,
+                       end_idx: int=2 ):
+    """
+    B: batch size
+    L_align: length of alignment
     
-    ### mask and return
-    final_logprobs = raw_logprobs * padding_mask
-    return final_logprobs # (B, L_align-1)
+    Arguments
+    ----------
+    samples : ArrayLike, (B, L_align-1, ...)
+        inputs to remap
+    
+    alphabet_size : int
+        replace all the special tokens with this value
+    
+    gap_idx, padding_idx, start_idx, end_idx : int
+        special tokens, encoded as:
+        <pad>: 0
+        <start>: 1
+        <end>: 2
+        <gap>: 43
+    
+    
+    Returns:
+    ----------
+    samples_adj : ArrayLike, (B, L_align-1, ...)
+        after replacing special tokens, and shifting values down by three
+    """
+    # map <pad>, <bos>, <eos>, and <gap> to last token, so that jax doesn't
+    # have invalid indexing and NaN gradients
+    specials = ( (samples == padding_idx) | 
+                 (samples == start_idx) | 
+                 (samples == end_idx) | 
+                 (samples == gap_idx) )
+    samples_adj = jnp.where(specials, alphabet_size, samples)
+    
+    # remap tokens, to account for the <pad>, <bos>, <eos> tokens in the 
+    # beginning of the alphabet; for example, for proteins:
+    # A: 0
+    # C: 1
+    # D: 2
+    # (etc.)
+    samples_adj = samples_adj - 3 
+    return samples_adj
+    
 
 
-def score_indels(true_out: jnp.array, 
+
+###############################################################################
+### score transitions   #######################################################
+###############################################################################
+def score_transitions(staggered_alignment_state, 
+                      logprob_trans_mat,
+                      unique_time_per_sample: bool,
+                      padding_idx = 0):
+    """
+    T: number of times (only a valid dimension if unique_time_per_sample)
+    B: batch size
+    L_align: length of alignment
+    S: number of transition states, here, it's 4
+    
+    
+    Arguments
+    ----------
+    staggered_alignment_state : ArrayLike, (B, L_align-1, 2)
+      > dim2=0: prev position's state
+      > dim2=1: curr position's state (the position you're trying to predict)
+      > <pad>: 0
+      > Match, M: 1
+      > Insert, I: 2
+      > Delete, D: 3
+      > Start, S: 4
+      > End, E: 5
+     
+    unique_time_per_sample : bool
+      > True if using a unique branch length per sample
+      
+    logprob_trans_mat : ArrayLike
+      > if unique_time_per_sample: (B, L_align-1, 4, 4) OR (B, 1, 4, 4)
+      > if not unique_time_per_sample: (T, B, L_align-1, 4, 4) OR (T, 1, 1, 4, 4)
+      > order of rows and columns: M, I, D, S/E
+    
+    padding_idx: int
+      > default = 0
+    
+    
+    Returns:
+    ----------
+    final_logprobs : ArrayLike
+      > if unique_time_per_sample: (B, L_align-1)
+      > if not unique_time_per_sample: (T, B, L_align-1)
+    """
+    ### preprocess
+    # get padding mask, do this BEFORE adjusting the encoding!!!
+    padding_mask =  ( (staggered_alignment_state[...,0] != padding_idx) &
+                      (staggered_alignment_state[...,1] != padding_idx) ) #(B, L_align-1)
+    
+    # adjust encoding
+    # end: write as combined start/end token (5 -> 4)
+    # pad: write as delete, so that indexing invalid positions doesn't cause 
+    #      jax gradients to be NaN (0 -> 3)
+    alignment_state_adj = jnp.where(staggered_alignment_state != 5, staggered_alignment_state, 4) # (B, L_align-1, 2)
+    alignment_state_adj = jnp.where(alignment_state_adj != 0, alignment_state_adj, 3) # (B, L_align-1, 2)
+    
+    # by how much do you offset tokens for indexing the transition matrix? 
+    # default offset is 1, which remaps tokens to:
+    # > Match, M: 0
+    # > Insert, I: 1
+    # > Delete, D, and pad: 2
+    # > Start, S, and End, E: 3
+    token_offset = 1
+    
+    # move all positions down
+    alignment_state_adj = alignment_state_adj - token_offset
+    
+    
+    ### Score, mask, return
+    if unique_time_per_sample:
+        indexing_fn = index_square_scoring_matrix_t_per_samp
+    
+    elif not unique_time_per_sample:
+        indexing_fn = index_square_scoring_matrix_marg_over_time
+        padding_mask = padding_mask[None, ...] #(1, B, L_align-1)
+        
+    raw_logprobs = indexing_fn( scoring_matrix = logprob_trans_mat,
+                                samples = alignment_state_adj ) #(T, B, L_align-1) or (B, L_align-1)
+    final_logprobs = raw_logprobs * padding_mask #(T, B, L_align-1) or (B, L_align-1)
+    return final_logprobs  #(T, B, L_align-1) or (B, L_align-1)
+
+
+###############################################################################
+### score emissions from indel sites   ########################################
+###############################################################################
+def score_indels(true_alignment_without_start: jnp.array, 
                  logprob_scoring_vec: jnp.array, 
                  which_seq: str,
-                 padding_idx: int=0):
+                 gap_idx: int=43,
+                 padding_idx: int=0,
+                 start_idx: int=1,
+                 end_idx: int=2):
     """
     T: number of times
     B: batch size
@@ -225,14 +294,23 @@ def score_indels(true_out: jnp.array,
     
     Arguments
     ----------
-    true_out: (B, L_align - 1, 2)
-      > dim2=0: gapped ancestor
-      > dim2=1: gapped descendant
+    true_alignment_without_start : ArrayLike, (B, L_align - 1, 3)
+        given alignment, not including start
+        > dim2=0: gapped ancestor
+        > dim2=1: gapped descendant
       
-    logprob_scoring_vec: (B, L_align - 1, A) OR (1, 1, A)
+    logprob_scoring_vec : ArrayLike (B, L_align - 1, A) OR (1, 1, A)
+        equilibrium distribution
     
-    which_seq: 'anc' to score ancestor, 'desc' to score descendant
-    
+    gap_idx, padding_idx, start_idx, end_idx : int
+        special tokens, encoded as:
+        <pad>: 0
+        <start>: 1
+        <end>: 2
+        <gap>: 43
+
+    which_seq : ['anc','desc'] 
+        'anc' to score ancestor, 'desc' to score descendant
     
     Returns:
     ---------
@@ -241,34 +319,30 @@ def score_indels(true_out: jnp.array,
     """
     ### preprocess
     # dims
-    B = true_out.shape[0]
-    L = true_out.shape[1] #this is L_align-1
+    B = true_alignment_without_start.shape[0]
+    L = true_alignment_without_start.shape[1] #this is L_align-1
     A = logprob_scoring_vec.shape[-1]
     
     # determine which to index
     if which_seq == 'anc':
-        residue_tokens = true_out[...,0] #(B, L-align-1)
+        residue_tokens = true_alignment_without_start[...,0] #(B, L-align-1)
     
     elif which_seq == 'desc':
-        residue_tokens = true_out[...,1] #(B, L-align-1)
+        residue_tokens = true_alignment_without_start[...,1] #(B, L-align-1)
     
-    # create padding mask BEFORE rempping tokens
-    padding_mask = (residue_tokens != padding_idx) #(B, L-align-1)
+    # create mask BEFORE remapping tokens
+    padding_mask = ~( (residue_tokens == padding_idx) | 
+                      (residue_tokens == gap_idx) |
+                      (residue_tokens == start_idx) |
+                      (residue_tokens == end_idx) )  #(B, L-align-1)
     
-    # map <pad>, <bos>, and <eos> to last token, so that jax doesn't
-    # have invalid indexing and NaN gradients
-    residue_tokens_adj = jnp.where(residue_tokens != 0, residue_tokens, A)
-    residue_tokens_adj = jnp.where(residue_tokens_adj != 1, residue_tokens_adj, A)
-    residue_tokens_adj = jnp.where(residue_tokens_adj != 2, residue_tokens_adj, A)
-    
-    # remap tokens, to account for the <pad>, <bos>, <eos> tokens in the 
-    # alphabet; for example, for proteins:
-    # A: 0
-    # C: 1
-    # D: 2
-    # (etc.)
-    token_offset = 3
-    residue_tokens_adj = residue_tokens_adj - token_offset #(B, L_align-1)
+    # remap
+    residue_tokens_adj = preproc_emissions( samples = residue_tokens,
+                                            alphabet_size = A,
+                                            gap_idx = gap_idx,
+                                            padding_idx = padding_idx,
+                                            start_idx = start_idx,
+                                            end_idx = end_idx ) #(B, L_align-1)
     
     
     ### score
@@ -287,125 +361,262 @@ def score_indels(true_out: jnp.array,
 
 
 
-
-
-"""
-TODO: different substitution scoring function, depending on if you're using 
-  full GTR or abbreviated F81
-
-Check the size of these matrices
-"""
-
-
-
-#%%
-def score_substitutions(true_out,
-                        logprob_subs_mat,
-                        token_offset = 3,
-                        padding_idx = -1):
+###############################################################################
+### score emissions from match sites   ########################################
+###############################################################################
+### F81: two separate implementations
+def score_f81_substitutions_marg_over_times(true_alignment_without_start: jnp.array, 
+                                            logprob_scoring_mat: jnp.array, 
+                                            gap_idx: int=43,
+                                            padding_idx: int=0,
+                                            start_idx: int=1,
+                                            end_idx: int=2,
+                                            *args,
+                                            **kwargs):
     """
-    inputs:
-    -------
-    true_out: (B, L_align-1, 2)
-      > (dim0=0): gapped ancestor seq
-      > (dim0=1): gapped descendant seq
-    
-    logprob_subs_mat: (T, B, L_align-1, A, A)
-      > this was already broadcasted to full (T, B, L_align-1, A, A)
-     
-    token_offset: int; used to map
-        A: n -> 0
-        B: n+1 -> 1
-        C: n+2 -> 2
-    and so on, for rest of alphabet; usually this is 3
+    T: number of times
+    B: batch size
+    L_align: length of alignment
+    A: alphabet size
     
     
-    output sizes:
-    --------------
-    final_logprobs: (T, B, L_align-1)
+    Arguments
+    ----------
+    true_alignment_without_start : ArrayLike, (B, L_align - 1, 3)
+        given alignment, not including start
+        > dim2=0: gapped ancestor
+        > dim2=1: gapped descendant
       
+    logprob_scoring_mat : ArrayLike (T, B, L_align, A, 2) OR (T, 1, 1, A, 2)
+        logprob of match/mismatch
+        > dim3 corresponds with EMITTED residue (i.e. identity of descendant token)
+        > dim4=0: logprob of descendant token if site is a MATCH (anc==desc)
+        > dim4=1: logprob of descendant token if site is a SUBSTITUTION (anc!=desc)
+    
+    gap_idx, padding_idx, start_idx, end_idx : int
+        special tokens, encoded as:
+        <pad>: 0
+        <start>: 1
+        <end>: 2
+        <gap>: 43
+        
+    Returns:
+    ---------
+    final_logprobs : ArrayLike, (T, B, L_align-1)
+        log-probability of match or mismatch at each site
     """
-    # get rows: T, B, L, 1, S
-    anc_idx = true_out[..., 0][None, ..., None,None] - token_offset
-    interm = jnp.take_along_axis(logprob_subs_mat, 
-                                 anc_idx,
-                                 axis=-2)  
+    ### preprocess
+    # dims
+    T = logprob_scoring_mat.shape[0]
+    B = true_alignment_without_start.shape[0]
+    L = true_alignment_without_start.shape[1] #this is L_align-1
+    A = logprob_scoring_mat.shape[-2]
     
-    # get columns: T, B, L, 1, 1
-    desc_idx = true_out[..., 1][None, ..., None,None] - token_offset
-    raw_logprobs = jnp.take_along_axis(interm, 
-                                       desc_idx, 
-                                       axis=-1)  
+    # create masks BEFORE remapping tokens
+    match_pos = true_alignment_without_start[...,0] == true_alignment_without_start[...,1] #(B, L_align-1)
+    desc_toks = true_alignment_without_start[...,1] #(B, L_align-1)
+    padding_mask = ~( (desc_toks == padding_idx) | 
+                      (desc_toks == gap_idx) |
+                      (desc_toks == start_idx) |
+                      (desc_toks == end_idx) )  #(B, L-align-1)
     
-    # squash to (T, B, L); mask
-    raw_logprobs = raw_logprobs[...,0,0] 
+    # remap
+    desc_toks_adj = preproc_emissions( samples = desc_toks,
+                                       alphabet_size = A,
+                                       gap_idx = gap_idx,
+                                       padding_idx = padding_idx,
+                                       start_idx = start_idx,
+                                       end_idx = end_idx ) #(B, L_align-1)
     
     
-    ### mask and return
-    padding_mask =  ( (true_out[...,0] != padding_idx) &
-                      (true_out[...,1] != padding_idx) )
+    ### score
+    # split scoring matrix
+    logprob_matrix_match = logprob_scoring_mat[...,0] #(T,B,L_align-1,A) or (T, 1, 1, A)
+    logprob_matrix_subs = logprob_scoring_mat[...,1] #(T,B,L_align-1,A) or (T, 1, 1, A)
+    del logprob_scoring_mat
     
-    final_logprobs = raw_logprobs * padding_mask[None, ...]
+    if logprob_matrix_match.shape == (T,1,1,A):
+        logprob_matrix_match = jnp.broadcast_to(logprob_matrix_match, (T,B,L,A)) #(T,B,L_align-1,A)
+        logprob_matrix_subs = jnp.broadcast_to(logprob_matrix_subs, (T,B,L,A)) #(T,B,L_align-1,A)
     
-    return final_logprobs
+    
+    # score both
+    desc_toks_adj = desc_toks_adj[None,...,None] # (1, B, L_align-1, 1)
+    score_if_match = jnp.take_along_axis(logprob_matrix_match, desc_toks_adj, axis=3)[...,0]  # (T, B, L_align-1)
+    score_if_subs = jnp.take_along_axis(logprob_matrix_subs, desc_toks_adj, axis=3)[...,0]  # (T, B, L_align-1)
+    
+    # use previous masking to select
+    raw_logprob = jnp.where( match_pos,
+                             score_if_match,
+                             score_if_subs )  # (T, B, L_align-1)
+    
+    final_logprob = raw_logprob * padding_mask[None,...]
+    return final_logprob # (T, B, L_align-1)
+        
+
+def score_f81_substitutions_t_per_samp(true_alignment_without_start: jnp.array, 
+                                       logprob_scoring_mat: jnp.array, 
+                                       gap_idx: int=43,
+                                       padding_idx: int=0,
+                                       start_idx: int=1,
+                                       end_idx: int=2,
+                                       *args,
+                                       **kwargs):
+    """
+    B: batch size
+    L_align: length of alignment
+    A: alphabet size
+    
+    
+    Arguments
+    ----------
+    true_alignment_without_start : ArrayLike, (B, L_align - 1, 3)
+        given alignment, not including start
+        > dim2=0: gapped ancestor
+        > dim2=1: gapped descendant
+      
+    logprob_scoring_mat : ArrayLike (B, L_align, A, 2) OR (B, 1, A, 2)
+        logprob of match/mismatch
+        > dim2 corresponds with EMITTED residue (i.e. identity of descendant token)
+        > dim3=0: logprob of descendant token if site is a MATCH (anc==desc)
+        > dim3=1: logprob of descendant token if site is a SUBSTITUTION (anc!=desc)
+    
+    gap_idx, padding_idx, start_idx, end_idx : int
+        special tokens, encoded as:
+        <pad>: 0
+        <start>: 1
+        <end>: 2
+        <gap>: 43
+        
+    Returns:
+    ---------
+    final_logprobs : ArrayLike, (B, L_align-1)
+        log-probability of match or mismatch at each site
+    """
+    ### preprocess
+    # dims
+    B = true_alignment_without_start.shape[0]
+    L = true_alignment_without_start.shape[1] #this is L_align-1
+    A = logprob_scoring_mat.shape[-2]
+    
+    # create masks BEFORE remapping tokens
+    match_pos = true_alignment_without_start[...,0] == true_alignment_without_start[...,1] #(B, L_align-1)
+    desc_toks = true_alignment_without_start[...,1] #(B, L_align-1)
+    padding_mask = (desc_toks != padding_idx) #(B, L_align-1)
+    
+    # remap
+    desc_toks_adj = preproc_emissions( samples = desc_toks,
+                                       alphabet_size = A,
+                                       gap_idx = gap_idx,
+                                       padding_idx = padding_idx,
+                                       start_idx = start_idx,
+                                       end_idx = end_idx ) #(B, L_align-1)
+    
+    
+    ### score
+    # split scoring matrix
+    logprob_matrix_match = logprob_scoring_mat[...,0] #(B,L_align-1,A) or (B,1,A)
+    logprob_matrix_subs = logprob_scoring_mat[...,1] #(B,L_align-1,A) or (B,1,A)
+    del logprob_scoring_mat
+    
+    if logprob_matrix_match.shape == (B,1,A):
+        logprob_matrix_match = jnp.broadcast_to(logprob_matrix_match, (B,L,A)) #(B,L_align-1,A)
+        logprob_matrix_subs = jnp.broadcast_to(logprob_matrix_subs, (B,L,A)) #(B,L_align-1,A)
+    
+    
+    batch_idx = jnp.arange(B)[:, None]  # (B, 1)
+    pos_idx = jnp.arange(L)[None, :]  # (1, L)
+    
+    score_if_match = logprob_matrix_match[batch_idx, pos_idx, desc_toks_adj] #(B,L_align-1)
+    score_if_subs = logprob_matrix_subs[batch_idx, pos_idx, desc_toks_adj] #(B,L_align-1)
+    
+    # use previous masking to select
+    raw_logprob = jnp.where( match_pos,
+                             score_if_match,
+                             score_if_subs )  # (B, L_align-1)
+    
+    final_logprob = raw_logprob * padding_mask  # (B, L_align-1)
+    return final_logprob # (B, L_align-1)
 
 
-
-
-
-
-
-
-
-if __name__ == '__main__':
-    import jax
-    from jax import numpy as jnp
-    import numpy as np
+### GTR
+def score_gtr_substitutions(true_alignment_without_start: jnp.array, 
+                            logprob_scoring_mat: jnp.array, 
+                            unique_time_per_sample: bool,
+                            gap_idx: int=43,
+                            padding_idx: int=0,
+                            start_idx: int=1,
+                            end_idx: int=2):
+    """
+    T: time (only seen if unique_time_per_sample)
+    B: batch size
+    L_align: length of alignment
+    A: alphabet size
     
     
-    T = 6
-    B = 3
-    L = 5
-    A = 4
+    Arguments
+    ----------
+    true_alignment_without_start : ArrayLike, (B, L_align - 1, 3)
+        given alignment, not including start
+        > dim2=0: gapped ancestor
+        > dim2=1: gapped descendant
+        
+    unique_time_per_sample : bool
+      > True if using a unique branch length per sample
+      
+    logprob_scoring_mat : ArrayLike, 
+        logprob of match/mismatch 
+        > if unique_time_per_sample: (B, L_align, A, A) OR (1, 1, A, A)
+        > if not unique_time_per_sample: (T, B, L_align, A, A) OR (T, 1, 1, A, A)
+        > dim2 corresponds with EMITTED residue (i.e. identity of descendant token)
+        > dim3=0: logprob of descendant token if site is a MATCH (anc==desc)
+        > dim3=1: logprob of descendant token if site is a SUBSTITUTION (anc!=desc)
     
-    rngkey = jax.random.key(42)
+    gap_idx, padding_idx, start_idx, end_idx : int
+        special tokens, encoded as:
+        <pad>: 0
+        <start>: 1
+        <end>: 2
+        <gap>: 43
+        
+    Returns:
+    ---------
+    final_logprobs : ArrayLike
+        log-probability of match or mismatch at each site
+        > if unique_time_per_sample: (B, L_align-1)
+        > if not unique_time_per_sample: (T, B, L_align-1)
+    """
+    ### preprocess
+    # dims
+    T = logprob_scoring_mat.shape[0]
+    B = true_alignment_without_start.shape[0]
+    L = true_alignment_without_start.shape[1] #this is L_align-1
+    A = logprob_scoring_mat.shape[-2]
     
-    mat = jax.random.randint( key=rngkey,
-                              shape=(T,B,L,A,A),
-                              minval = 1,
-                              maxval = 1000 )
-    
-    indices = jnp.array([ [[1,2,3,4,1],
-                           [4,3,2,1,4]] ,
-                         
-                          [[2,3,4,1,0],
-                           [3,2,1,4,0]] ,
-                         
-                          [[1,0,0,0,0],
-                           [4,0,0,0,0]] ]     
-                         )
-    indices = jnp.transpose( indices,
-                             (0,2,1) )
-    
-    mask = (indices != 0)[...,0]
-    
-    
-    ### true answer by loop
-    true = np.zeros( (T,B,L) )
-    for t in range(T):
-        for b in range(B):
-            for l in range(L):
-                one_mat = mat[t,b,l,...]
-                anc_idx, desc_idx = indices[b,l,...]
-                to_fill = one_mat[anc_idx-1, desc_idx-1]
-                true[t,b,l,...] = to_fill
-    true = true * mask[None, :, :]
+    # padding mask, before transforming input, remap
+    padding_mask = ~( (true_alignment_without_start[...,0] == padding_idx) | 
+                      (true_alignment_without_start[...,0] == gap_idx) |
+                      (true_alignment_without_start[...,0] == start_idx) |
+                      (true_alignment_without_start[...,0] == end_idx) )  #(B, L-align-1)
     
     
-    ### answer as-is, with existing function
-    by_func = score_substitutions(true_out = indices,
-                                  logprob_subs_mat = mat,
-                                  token_offset = 1)
-    by_func = by_func * mask[None, :, :]
+    true_alignment_without_start_adj = preproc_emissions( samples = true_alignment_without_start,
+                                      alphabet_size = A,
+                                      gap_idx = gap_idx,
+                                      padding_idx = padding_idx,
+                                      start_idx = start_idx,
+                                      end_idx = end_idx ) #(B, L_align-1, 2)
     
-    assert jnp.allclose(by_func, true) 
+    
+    ### Score, mask, return
+    if unique_time_per_sample:
+        indexing_fn = index_square_scoring_matrix_t_per_samp
+    
+    elif not unique_time_per_sample:
+        indexing_fn = index_square_scoring_matrix_marg_over_time
+        padding_mask = padding_mask[None, ...] #(1, B, L_align-1)
+        
+    raw_logprobs = indexing_fn( scoring_matrix = logprob_scoring_mat,
+                                samples = true_alignment_without_start_adj ) #(T, B, L_align-1) or (B, L_align-1)
+    final_logprobs = raw_logprobs * padding_mask #(T, B, L_align-1) or (B, L_align-1)
+    return final_logprobs  #(T, B, L_align-1) or (B, L_align-1)
