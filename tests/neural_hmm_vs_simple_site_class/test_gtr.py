@@ -12,7 +12,6 @@ import numpy as np
 import numpy.testing as npt
 import unittest
 
-
 from models.simple_site_class_predict.model_functions import (upper_tri_vector_to_sym_matrix,
                                                               rate_matrix_from_exch_equl,
                                                               get_cond_logprob_emit_at_match_per_class)

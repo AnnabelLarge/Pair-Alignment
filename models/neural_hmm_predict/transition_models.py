@@ -16,6 +16,11 @@ tkf91 models, pred_config entries:
  'LocalTKF91',
 - (OPTIONAL) pred_config['mu_range']
 - (OPTIONAL) pred_config['offset_range']
+- (OPTIONAL) pred_config['tkf_function']
+
+'GlobalTKF91FromFile'
+- pred_config['filenames']['tkf_params_file']
+- (OPTIONAL) pred_config['tkf_function']
 
 
 tkf92, pred_config entries:
@@ -40,6 +45,11 @@ tkf92, pred_config entries:
 - (OPTIONAL) pred_config['offset_range']
 - (OPTIONAL) pred_config['r_range']
 - (OPTIONAL) pred_config['tkf_function']
+
+'GlobalTKF92FromFile'
+- pred_config['filenames']['tkf_params_file']
+- (OPTIONAL) pred_config['tkf_function']
+
 """
 from flax import linen as nn
 import jax
@@ -177,15 +187,11 @@ class GlobalTKF91(transitionModuleBase):
         
         ### decide tkf function
         tkf_function_name = self.config.get('tkf_function', 'switch_tkf')
+        tkf_fn_registry = {'regular_tkf': regular_tkf,
+                           'approx_tkf': approx_tkf,
+                           'switch_tkf': switch_tkf}
+        self.tkf_function = tkf_fn_registry[tkf_function_name]
 
-        if tkf_function_name == 'regular_tkf':
-            self.tkf_function = regular_tkf
-        elif tkf_function_name == 'approx_tkf':
-            self.tkf_function = approx_tkf
-        elif tkf_function_name == 'switch_tkf':
-            self.tkf_function = switch_tkf
-        
-        
         ### declare the logprob function
         self.cond_logprob_fn = logprob_tkf91
         
@@ -276,7 +282,11 @@ class GlobalTKF91(transitionModuleBase):
                                               r_extend = r_extend,
                                               unique_time_per_sample = unique_time_per_sample ) 
         
-        return cond_logprob, approx_flags_dict
+        intermed_params_dict = {'lambda': mu * (1-offset),
+                                'mu': mu,
+                                'r_extend': r_extend}
+        
+        return cond_logprob, approx_flags_dict, intermed_params_dict
         
     
     def get_r_ext_prob(self):
@@ -315,7 +325,6 @@ class TKF92GlobalRateGlobalFragSize(GlobalTKF91):
         config["init_r_extend_logits"] : Tuple, (1,1)
             initial values for logits that determine mu, offset
             DEFAULT: -1/10
-            (set this to zero for tkf91)
         
         config["r_range"]
             range for bound sigmoid activation that determines TKF r
@@ -548,8 +557,200 @@ class TKF92GlobalRateLocalFragSize(GlobalTKF91):
                                               r_extend = r_extend,
                                               unique_time_per_sample = unique_time_per_sample ) 
         
-        return cond_logprob, approx_flags_dict
+        intermed_params_dict = {'lambda': mu * (1-offset),
+                                'mu': mu,
+                                'r_extend': r_extend}
+        
+        return cond_logprob, approx_flags_dict, intermed_params_dict
 
+
+###############################################################################
+### GLOBAL indel rates, parameters read from a file   #########################
+###############################################################################
+class GlobalTKF91FromFile(neuralTKFModuleBase):
+    """
+    same as GlobalTKF91, but load params from file
+    
+    CONDITIONAL LOG-PROBABILITY!!! calculating logP(align_i|align_{i-1},Anc,Desc_{...i-1},t)
+    
+    B = batch size; number of samples
+    T = number of branch lengths; this could be: 
+        > an array of times for all samples (T; marginalize over these later)
+        > an array of time per sample (T=B)
+        
+    Initialize with
+    ----------------
+    config : dict tkf_params_file
+        config["filenames"]["tkf_params_file"] : dict
+            
+    name : str
+        class name, for flax
+    
+    
+    Methods here
+    ------------
+    setup
+    __call__
+    get_r_ext_prob
+        placeholder; returns None
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        """
+        
+        Flax Module Parameters
+        -----------------------
+        None
+        
+        """
+        ### unpack config
+        in_file = self.config['filenames']['tkf_params_file']
+        tkf_function_name = self.config.get('tkf_function', 'switch_tkf')
+        
+        
+        ### read file
+        if in_file.endswith('.pkl'):
+            with open(in_file,'rb') as f:
+                self.param_dict = pickle.load(f)
+                
+        elif in_file.endswith('.txt') or in_file.endswith('.tsv'):
+            param_dict = {}
+            with open(in_file,'r') as f:
+                for line in f:
+                    if not line.startswith('#'):
+                        param_name, value = line.strip().split('\t')
+                        param_dict[param_name] = jnp.array( float(value) )
+            self.param_dict = param_dict
+        
+        err = f'KEYS SEEN: {self.param_dict.keys()}'
+        assert 'lambda' in self.param_dict.keys(), err
+        assert 'mu' in self.param_dict.keys(), err
+        
+        
+        ### declare the logprob function
+        self.cond_logprob_fn = logprob_tkf91
+    
+    
+    def __call__(self,
+                 t_array,
+                 unique_time_per_sample: bool,
+                 *args,
+                 **kwargs):
+        """
+        T: number of times
+        B: batch size
+        L_align: length of alignment
+        
+        
+        Arguments
+        ----------
+        t_array : ArrayLike, (T,)
+            branch lengths, times for marginalizing over
+        
+        unique_time_per_sample : Bool
+            whether there's one time per sample, or a grid of times you'll 
+            marginalize over
+            
+        Returns
+        -------
+        cond_logprob : ArrayLike
+            > if unique time per sample: (B, 1, 4, 4) 
+            > if not unique time per sample: (T, 1, 1, 4, 4) 
+            log-probability matrix for transitions
+        
+        use_approx : Tuple( ArrayLike, ArrayLike ), ( (T,), (T,) ) or ( (B,), (B,) )
+            where tkf approximation formulas were used
+            
+        """
+        # get mu and offset
+        lam = self.param_dict['lambda']
+        mu = self.param_dict['mu']
+        offset = 1 - (lam /mu)
+        
+        # get r_extend
+        r_extend = self.get_r_ext_prob() #placeholder
+        
+        ### get tkf alpha, beta, gamma
+        # contents of out_dict ( all ArrayLike[float32], (T,B,L_align) or (B,L_align) ):
+        #   out_dict['log_alpha']
+        #   out_dict['log_one_minus_alpha']
+        #   out_dict['log_beta']
+        #   out_dict['log_one_minus_beta']
+        #   out_dict['log_gamma']
+        #   out_dict['log_one_minus_gamma']
+        #
+        # contents of approx_flags_dict ( all ArrayLike[float32], (1,) ):
+        #   out_dict['log_one_minus_alpha']
+        #   out_dict['log_beta']
+        #   out_dict['log_one_minus_gamma']
+        #   out_dict['log_gamma']
+        tkf_params_dict, _ = self.tkf_function(mu = mu, 
+                                               offset = offset,
+                                               t_array = t_array,
+                                               unique_time_per_sample = unique_time_per_sample)
+        # cond_logprob is either:
+        # (T, 1, 1, 4, 4), or
+        # (B, 1, 4, 4)
+        cond_logprob =  self.cond_logprob_fn( tkf_params_dict = tkf_params_dict,
+                                              r_extend = r_extend,
+                                              unique_time_per_sample = unique_time_per_sample ) 
+        
+        return cond_logprob, None, None
+    
+    def get_r_ext_prob(self):
+        return None
+
+
+class GlobalTKF92FromFile(GlobalTKF91FromFile):
+    """
+    same as TKF92GlobalRateGlobalFragSize, but load params from file
+    
+    CONDITIONAL LOG-PROBABILITY!!! calculating logP(align_i|align_{i-1},Anc,Desc_{...i-1},t)
+    
+    B = batch size; number of samples
+    T = number of branch lengths; this could be: 
+        > an array of times for all samples (T; marginalize over these later)
+        > an array of time per sample (T=B)
+        
+    Initialize with
+    ----------------
+    config : dict tkf_params_file
+        config["filenames"]["tkf_params_file"] : dict
+            
+    name : str
+        class name, for flax
+    
+    
+    Methods here
+    ------------
+    setup
+    __call__
+    get_r_ext_prob
+        placeholder; returns None
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        """
+        Flax Module Parameters
+        -----------------------
+        None
+        """
+        super().setup()
+        
+        # make sure r_extend is in the parameter dictionary
+        err = f'KEYS SEEN: {self.param_dict.keys()}'
+        assert 'r_extend' in self.param_dict.keys(), err
+        
+        # overwrite the logprob function
+        self.cond_logprob_fn = logprob_tkf92
+    
+    def get_r_ext_prob(self):
+        return self.param_dict['r_extend']
+        
 
 ###############################################################################
 ### LOCAL indel rates   #######################################################
@@ -611,13 +812,10 @@ class LocalTKF91(transitionModuleBase):
         
         # decide tkf function
         tkf_function_name = self.config.get('tkf_function', 'switch_tkf')
-
-        if tkf_function_name == 'regular_tkf':
-            self.tkf_function = regular_tkf
-        elif tkf_function_name == 'approx_tkf':
-            self.tkf_function = approx_tkf
-        elif tkf_function_name == 'switch_tkf':
-            self.tkf_function = switch_tkf
+        tkf_fn_registry = {'regular_tkf': regular_tkf,
+                           'approx_tkf': approx_tkf,
+                           'switch_tkf': switch_tkf}
+        self.tkf_function = tkf_fn_registry[tkf_function_name]
         
         # declare the logprob function
         self.cond_logprob_fn = logprob_tkf91
@@ -712,7 +910,11 @@ class LocalTKF91(transitionModuleBase):
                                               r_extend = r_extend,
                                               unique_time_per_sample = unique_time_per_sample ) 
         
-        return cond_logprob, approx_flags_dict
+        intermed_params_dict = {'lambda': mu * (1-offset),
+                                'mu': mu,
+                                'r_extend': r_extend}
+        
+        return cond_logprob, approx_flags_dict, intermed_params_dict
         
     
     def get_r_ext_prob(self, 

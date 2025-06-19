@@ -387,13 +387,22 @@ def true_beta(oper):
     # log( (1 - offset) * (exp(mu*offset*t) - 1) )
     log_num = jnp.log1p(-offset) + log_x_minus_one( mu*offset*t )
     
-    # x = mu*offset*t
-    # y = jnp.log( 1 - offset )
+    # work out common shape
+    dim0 = max([mu.shape[0], t.shape[0]])
+    dim1 = max([mu.shape[1], t.shape[1]])
+    if len(mu.shape) == 3:
+        dim2 = max([mu.shape[2], t.shape[2]])
+        final_shape = (dim0, dim1, dim2)
+    elif len(mu.shape) == 2:
+        final_shape = (dim0, dim1)
+    
+    # a = mu*offset*t
+    # b = jnp.log( 1 - offset )
     # logsumexp with coeffs does: 
-    #   log( exp(x) - exp(y) ) = log( exp(mu*offset*t) - (1-offset) )
-    log_one_minus_offset = jnp.broadcast_to( jnp.log1p(-offset), t.shape )
-    log_denom = logsumexp_with_arr_lst( [mu*offset*t, log_one_minus_offset],
-                                    coeffs = jnp.array([1.0, -1.0]) )
+    #   log( exp(a) - exp(b) ) = log( exp(mu*offset*t) - (1-offset) )
+    a = jnp.broadcast_to( mu*offset*t, final_shape )
+    b = jnp.broadcast_to( jnp.log1p(-offset), final_shape )
+    log_denom = logsumexp_with_arr_lst( [a, b], coeffs = jnp.array([1.0, -1.0]) )
     
     return log_num - log_denom
 
@@ -794,8 +803,8 @@ def approx_tkf( mu,
     log_one_minus_gamma_reshaped = log_one_minus_gamma.flatten() #(T*B*L_align) or (B*L_align)
     
     vmapped_tkf_params_indv = jax.vmap(tkf_params_indv)
-    to_add = vmapped_tkf_params_indv( log_alpha,
-                                      log_one_minus_gamma )
+    tkf_params_dict = vmapped_tkf_params_indv( log_alpha_reshaped,
+                                      log_one_minus_gamma_reshaped )
     
     # reshape all
     def my_reshape(m):
@@ -859,18 +868,18 @@ def logprob_tkf91(tkf_params_dict,
     # a_f = (1-beta)*alpha;     log(a_f) = log(1-beta) + log(alpha)
     # b_g = beta;               log(b_g) = log(beta)
     # c_h = (1-beta)*(1-alpha); log(c_h) = log(1-beta) + log(1-alpha)
-    log_a_f = out_dict['log_one_minus_beta'] + out_dict['log_alpha']
-    log_b_g = out_dict['log_beta']
-    log_c_h = out_dict['log_one_minus_beta'] + out_dict['log_one_minus_alpha']
-    log_mis_e = out_dict['log_one_minus_beta']
+    log_a_f = tkf_params_dict['log_one_minus_beta'] + tkf_params_dict['log_alpha']
+    log_b_g = tkf_params_dict['log_beta']
+    log_c_h = tkf_params_dict['log_one_minus_beta'] + tkf_params_dict['log_one_minus_alpha']
+    log_mis_e = tkf_params_dict['log_one_minus_beta']
 
     # p = (1-gamma)*alpha;     log(p) = log(1-gamma) + log(alpha)
     # q = gamma;               log(q) = log(gamma)
     # r = (1-gamma)*(1-alpha); log(r) = log(1-gamma) + log(1-alpha)
-    log_p = out_dict['log_one_minus_gamma'] + out_dict['log_alpha']
-    log_q = out_dict['log_gamma']
-    log_r = out_dict['log_one_minus_gamma'] + out_dict['log_one_minus_alpha']
-    log_d_e = out_dict['log_one_minus_gamma']
+    log_p = tkf_params_dict['log_one_minus_gamma'] + tkf_params_dict['log_alpha']
+    log_q = tkf_params_dict['log_gamma']
+    log_r = tkf_params_dict['log_one_minus_gamma'] + tkf_params_dict['log_one_minus_alpha']
+    log_d_e = tkf_params_dict['log_one_minus_gamma']
     
     # logprob_trans is (T, B, L, 4, 4) or (B, L, 4, 4)
     logprob_trans = concat_transition_matrix(m_m = log_a_f, 
@@ -897,6 +906,7 @@ def logprob_tkf91(tkf_params_dict,
 
 def logprob_tkf92(tkf_params_dict,
                   r_extend,
+                  offset,
                   unique_time_per_sample ):
     """
     T = times
@@ -928,14 +938,13 @@ def logprob_tkf92(tkf_params_dict,
         conditional loglike of transitions
     """
     ### get dims  
-    ref_shape =  tkf_params_dict['log_alpha']
+    ref_shape = tkf_params_dict['log_alpha']
     
     if not unique_time_per_sample:
-        final_shape = (T, B, L_align)
-        
         T = ref_shape.shape[0]
         B = max( [ ref_shape.shape[1], r_extend.shape[0] ] )
         L_align = max( [ ref_shape.shape[2], r_extend.shape[1] ] )  
+        final_shape = (T, B, L_align)
         
         r_extend = r_extend[None,...] #(1, B, L_align)
     
@@ -957,92 +966,111 @@ def logprob_tkf92(tkf_params_dict,
     tkf_params_dict['log_one_minus_gamma'] = my_reshape( tkf_params_dict['log_one_minus_gamma'] ) #(T, B, L_align) or  #(B, L_align)
     r_extend = my_reshape( r_extend )
     
-            
-    ### start filling in matrix
-    # need log(r_extend) and log(1 - r_extend) for this
+    
+    ##############################
+    ### start filling in matrix  #
+    ##############################
+    # log-transform variables
     log_r_extend = safe_log(r_extend)
     log_one_minus_r_extend = jnp.log1p(-r_extend)
+    log_lam_div_mu = jnp.log1p(-offset)
+    log_one_minus_lam_div_mu = safe_log(offset)
+    log_one_div_nu = -safe_log( r_extend + (1-r_extend)*(1-offset) )
     
-    # a = r_extend + (1-r_extend)*(1-beta)*alpha
-    # log(a) = logsumexp([r_extend, 
-    #                     log(1-r_extend) + log(1-beta) + log(alpha)
-    #                     ]
-    #                    )
-    log_a_second_half = ( log_one_minus_r_extend + 
-                          out_dict['log_one_minus_beta'] +
-                          out_dict['log_alpha'] )
-    log_a = logsumexp_with_arr_lst([log_r_extend, log_a_second_half])
+    
+    ### match -> (match, ins, del, end)
+    # a = (1/nu) (r_extend + (lam/mu)*(1-r_extend)*(1-beta)*alpha)
+    # log(a) = log(1/nu) + logsumexp([r_extend, 
+    #                                 log(lam/mu) + log(1-r_extend) + log(1-beta) + log(alpha)
+    #                                 ])
+    log_a_second_half = ( log_lam_div_mu +
+                          log_one_minus_r_extend + 
+                          tkf_params_dict['log_one_minus_beta'] +
+                          tkf_params_dict['log_alpha'] )
+    log_a = log_one_div_nu + logsumexp_with_arr_lst([log_r_extend, log_a_second_half])
     
     # b = (1-r_extend)*beta
     # log(b) = log(1-r_extend) + log(beta)
-    log_b = log_one_minus_r_extend + out_dict['log_beta']
+    log_b = log_one_minus_r_extend + tkf_params_dict['log_beta']
     
-    # c_h = (1-r_extend)*(1-beta)*(1-alpha)
-    # log(c_h) = log(1-r_extend) + log(1-beta) + log(1-alpha)
-    log_c_h = ( log_one_minus_r_extend +
-                out_dict['log_one_minus_beta'] +
-                out_dict['log_one_minus_alpha'] )
+    # c_h = (1/nu) ( (lam/mu)*(1-r_extend)*(1-beta)*(1-alpha) )
+    # log(c_h) = log(1/nu) + log(lam/mu) + log(1-r_extend) + log(1-beta) + log(1-alpha)
+    log_c_h = ( log_one_div_nu +
+                log_lam_div_mu +
+                log_one_minus_r_extend +
+                tkf_params_dict['log_one_minus_beta'] +
+                tkf_params_dict['log_one_minus_alpha'] )
     
-    # m_e = (1-r_extend) * (1-beta)
-    # log(mi_e) = log(1-r_extend) + log(1-beta)
-    log_mi_e = log_one_minus_r_extend + out_dict['log_one_minus_beta']
-
-    # f = (1-r_extend)*(1-beta)*alpha
-    # log(f) = log(1-r_extend) +log(1-beta) +log(alpha)
-    log_f = ( log_one_minus_r_extend +
-              out_dict['log_one_minus_beta'] +
-              out_dict['log_alpha'] )
+    # m_e = (1-beta)
+    # log(mi_e) = log(1-beta)
+    log_mis_e = tkf_params_dict['log_one_minus_beta']
+    
+    
+    ### ins -> (match, ins, del, end)
+    # f = (1/nu)*(lam/mu)*(1-r_extend)*(1-beta)*alpha
+    # log(f) = log(1/nu) + log(lam/mu) + log(1-r_extend) +log(1-beta) +log(alpha)
+    log_f = ( log_one_div_nu +
+              log_lam_div_mu +
+              log_one_minus_r_extend +
+              tkf_params_dict['log_one_minus_beta'] +
+              tkf_params_dict['log_alpha'] )
     
     # g = r_extend + (1-r_extend)*beta
     # log(g) = logsumexp([r_extend, 
     #                     log(1-r_extend) + log(beta)
     #                     ]
     #                    )
-    log_g_second_half = log_one_minus_r_extend + out_dict['log_beta']
+    log_g_second_half = log_one_minus_r_extend + tkf_params_dict['log_beta']
     log_g = logsumexp_with_arr_lst([log_r_extend, log_g_second_half])
     
     # h and log(h) are the same as c and log(c) 
+    # ins->end is same as match->end
 
-    # p = (1-r_extend)*(1-gamma)*alpha
-    # log(p) = log(1-r_extend) + log(1-gamma) +log(alpha)
-    log_p = ( log_one_minus_r_extend +
-              out_dict['log_one_minus_gamma'] +
-              out_dict['log_alpha'] )
+
+    ### del -> (match, ins, del, end)
+    # p = (1/nu)*(lam/mu)*(1-r_extend)*(1-gamma)*alpha
+    # log(p) = log(1/nu) + log(lam/mu) + log(1-r_extend) + log(1-gamma) +log(alpha)
+    log_p = ( log_one_div_nu +
+              log_lam_div_mu +
+              log_one_minus_r_extend +
+              tkf_params_dict['log_one_minus_gamma'] +
+              tkf_params_dict['log_alpha'] )
 
     # q = (1-r_extend)*gamma
     # log(q) = log(1-r_extend) + log(gamma)
-    log_q = log_one_minus_r_extend + out_dict['log_gamma']
+    log_q = log_one_minus_r_extend + tkf_params_dict['log_gamma']
 
-    # r = r_extend + (1-r_extend)*(1-gamma)*(1-alpha)
-    # log(r) = logsumexp([r_extend, 
-    #                     log(1-r_extend) + log(1-gamma) + log(1-alpha)
-    #                     ]
-    #                    )
-    log_r_second_half = ( log_one_minus_r_extend +
-                          out_dict['log_one_minus_gamma'] +
-                          out_dict['log_one_minus_alpha'] )
-    log_r = logsumexp_with_arr_lst([log_r_extend, log_r_second_half])
+    # r = (1/nu) * ( r_extend + (lam/mu)*(1-r_extend)*(1-gamma)*(1-alpha) )
+    # log(r) = log(1/nu) + logsumexp([r_extend, 
+    #                                 log(lam/mu) + log(1-r_extend) + log(1-gamma) + log(1-alpha)
+    #                                 ])
+    log_r_second_half = ( log_lam_div_mu +
+                          log_one_minus_r_extend +
+                          tkf_params_dict['log_one_minus_gamma'] +
+                          tkf_params_dict['log_one_minus_alpha'] )
+    log_r = log_one_div_nu + logsumexp_with_arr_lst([log_r_extend, log_r_second_half])
     
-    # d_e = (1-r_extend) * (1-gamma)
-    # log(d_e) = log(1-r_extend) + log(1-gamma)
-    log_d_e = log_one_minus_r_extend + out_dict['log_one_minus_gamma']
+    # d_e = (1-gamma)
+    # log(d_e) = log(1-gamma)
+    log_d_e = tkf_params_dict['log_one_minus_gamma']
     
-    # final row: start -> any
-    log_s_m = out_dict['log_one_minus_beta'] + out_dict['log_alpha']
-    log_s_i = out_dict['log_beta']
-    log_s_d = out_dict['log_one_minus_beta'] + out_dict['log_one_minus_alpha']
-    log_s_e = out_dict['log_one_minus_beta']
+    
+    ### final row: start -> any
+    log_s_m = tkf_params_dict['log_one_minus_beta'] + tkf_params_dict['log_alpha']
+    log_s_i = tkf_params_dict['log_beta']
+    log_s_d = tkf_params_dict['log_one_minus_beta'] + tkf_params_dict['log_one_minus_alpha']
+    # start->end is same as match->end
     
     # final mat is (T, B, L, 4, 4) or (B, L, 4, 4)
     logprob_trans = concat_transition_matrix(m_m = log_a, 
                                              m_i = log_b,
                                              m_d = log_c_h, 
-                                             m_e = log_mi_e,
+                                             m_e = log_mis_e,
                                                   
                                              i_m = log_f, 
                                              i_i = log_g, 
                                              i_d = log_c_h, 
-                                             i_e = log_mi_e,
+                                             i_e = log_mis_e,
                                                   
                                              d_m = log_p, 
                                              d_i = log_q, 
@@ -1052,7 +1080,7 @@ def logprob_tkf92(tkf_params_dict,
                                              s_m = log_s_m, 
                                              s_i = log_s_i, 
                                              s_d = log_s_d, 
-                                             s_e = log_s_e)
+                                             s_e = log_mis_e)
     return logprob_trans
 
 

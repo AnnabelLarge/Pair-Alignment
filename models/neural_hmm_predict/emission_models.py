@@ -56,7 +56,8 @@ from jax.scipy.linalg import expm
 
 from models.BaseClasses import (neuralTKFModuleBase, 
                                 ModuleBase)
-from models.neural_hmm_predict.model_functions import (bound_sigmoid,
+from models.neural_hmm_predict.model_functions import (safe_log,
+                                                       bound_sigmoid,
                                                        logprob_f81,
                                                        logprob_gtr)
 
@@ -67,53 +68,44 @@ from models.neural_hmm_predict.model_functions import (bound_sigmoid,
 ###############################################################################
 class GlobalEqul(neuralTKFModuleBase):
     """
-    Set of logits for equilibrium distribution for all positions
+    Use the observed amino acid frequencies as the equilibrium distribution
+    
+    Doesn't have to be a module, but make it one for consistency, I guess
     """
     config: dict
     name: str
     
     def setup(self):
         """
-        A = alphabet size
-        
         Flax Module Parameters
         -----------------------
-        logits : ArrayLike (A,)
-            initialize logits from unit normal
-        
+        None
         """
-        emission_alphabet_size = self.config['emission_alphabet_size']
-        
-        self.logits = self.param('Equilibrium distr.',
-                                  nn.initializers.normal(),
-                                  (emission_alphabet_size,),
-                                  jnp.float32)
+        training_dset_emit_counts = self.config['training_dset_emit_counts'] #(A,)
+        prob_equilibr = training_dset_emit_counts/training_dset_emit_counts.sum() #(A,)
+        logprob_equilibr = safe_log( prob_equilibr ) #(A,)
+        self.logprob_equilibr = logprob_equilibr[None,None,:] #(1,1,A)
         
     def __call__(self,
-                 sow_intermediates: bool,
                  *args,
                  **kwargs): 
         """
         Arguments
         ----------
-        sow_intermediates : bool
-            switch for tensorboard logging
-         
+        None
+        
         Returns
         --------
         ArrayLike, (1, 1, A) 
-            scoring matrix for emissions from indels, which includes 
-            placeholder dimensions for B and L
+            scoring matrix for emissions from indels, from observed frequencies
         """
-        out = self.apply_log_softmax_activation(logits = self.logits,
-                                                sow_intermediates = sow_intermediates)
-        return out[None, None, :] #(1, 1, A)
+        return self.logprob_equilibr  #(1,1,A)
     
     
 class LocalEqul(GlobalEqul):
     """
-    Set of logits for equilibrium distribution for each sample, each position
-      like GlobalEqul, but you do a linear projection first
+    Use a set of logits to find equilibrium distribution for each position, 
+      each sample
     """
     config: dict
     name: str
@@ -271,10 +263,14 @@ class GlobalF81(neuralTKFModuleBase):
         # shape of output
         #   if unique time per sample: (1, 1, A, 2)
         #   if not unique time per sample: (T, 1, 1, A, 2)
-        return logprob_f81(equl = equl,
+        cond_logprobs = logprob_f81(equl = equl,
                            rate_multiplier = self.global_rate_multiplier,
                            t_array = t_array,
                            unique_time_per_sample = unique_time_per_sample)
+    
+        intermed_params_dict = {'rate_multiplier': self.global_rate_multiplier}
+    
+        return cond_logprobs, intermed_params_dict
     
     
 class LocalF81(neuralTKFModuleBase):
@@ -361,10 +357,14 @@ class LocalF81(neuralTKFModuleBase):
         # shape of output
         #   if unique time per sample: (B, L_align, A, 2)
         #   if not unique time per sample: (T, B, L_align, A, 2)
-        return logprob_f81(equl = equl,
-                           rate_multiplier = rate_multiplier,
-                           t_array = t_array,
-                           unique_time_per_sample = unique_time_per_sample)
+        cond_logprobs = logprob_f81(equl = equl,
+                                    rate_multiplier = rate_multiplier,
+                                    t_array = t_array,
+                                    unique_time_per_sample = unique_time_per_sample)
+    
+        intermed_params_dict = {'rate_multiplier': rate_multiplier}
+    
+        return cond_logprobs, intermed_params_dict
 
 # alias for GlobalF81; never loading local parameters, so whenever this is 
 #   invoked, just use GlobalF81 instead
@@ -418,11 +418,16 @@ class GTRGlobalExchGlobalRateMult(neuralTKFModuleBase):
                                                    param_name = 'exchangeabilities',
                                                    sow_intermediates = sow_intermediates)
             
-        return logprob_gtr( exch_upper_triag_values = exch_upper_triag_values,
+        cond_logprobs = logprob_gtr( exch_upper_triag_values = exch_upper_triag_values,
                             equilibrium_distributions = jnp.exp(log_equl),
                             rate_multiplier = self.global_rate_multiplier,
                             t_array = t_array,
                             unique_time_per_sample = unique_time_per_sample )
+    
+        intermed_params_dict = {'rate_multiplier': self.global_rate_multiplier,
+                                'exch_upper_triag_values': exch_upper_triag_values}
+    
+        return cond_logprobs, intermed_params_dict
     
 
 class GTRGlobalExchLocalRateMult(neuralTKFModuleBase):
@@ -480,11 +485,16 @@ class GTRGlobalExchLocalRateMult(neuralTKFModuleBase):
                                                    param_name = 'exchangeabilities',
                                                    sow_intermediates = sow_intermediates)
         
-        return logprob_gtr( exch_upper_triag_values = exch_upper_triag_values,
+        cond_logprobs = logprob_gtr( exch_upper_triag_values = exch_upper_triag_values,
                             equilibrium_distributions = jnp.exp(log_equl),
                             rate_multiplier = rate_multiplier,
                             t_array = t_array,
                             unique_time_per_sample = unique_time_per_sample )
+        
+        intermed_params_dict = {'rate_multiplier': rate_multiplier,
+                         'exch_upper_triag_values': exch_upper_triag_values}
+    
+        return cond_logprobs, intermed_params_dict
 
 
 class GTRLocalExchLocalRateMult(neuralTKFModuleBase):
@@ -545,11 +555,16 @@ class GTRLocalExchLocalRateMult(neuralTKFModuleBase):
                                                    param_name = 'exchangeabilities',
                                                    sow_intermediates = sow_intermediates)
         
-        return logprob_gtr( exch_upper_triag_values = exch_upper_triag_values,
-                            equilibrium_distributions = jnp.exp(log_equl),
-                            rate_multiplier = rate_multiplier,
-                            t_array = t_array,
-                            unique_time_per_sample = unique_time_per_sample )
+        cond_logprobs = logprob_gtr( exch_upper_triag_values = exch_upper_triag_values,
+                                     equilibrium_distributions = jnp.exp(log_equl),
+                                     rate_multiplier = rate_multiplier,
+                                     t_array = t_array,
+                                     unique_time_per_sample = unique_time_per_sample )
+        
+        intermed_params_dict = {'rate_multiplier': rate_multiplier,
+                         'exch_upper_triag_values': exch_upper_triag_values}
+    
+        return cond_logprobs, intermed_params_dict
 
 
 class GTRFromFile(neuralTKFModuleBase):
@@ -602,12 +617,13 @@ class GTRFromFile(neuralTKFModuleBase):
                  sow_intermediates: bool,
                  *args,
                  **kwargs):
-        pass
         
-        return logprob_gtr( exch_upper_triag_values = self.exch_upper_triag_values,
+        cond_logprobs = logprob_gtr( exch_upper_triag_values = self.exch_upper_triag_values,
                             equilibrium_distributions = jnp.exp(log_equl),
                             rate_multiplier = self.global_rate_multiplier,
                             t_array = t_array,
                             unique_time_per_sample = unique_time_per_sample )
+    
+        return cond_logprobs, None
     
     

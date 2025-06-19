@@ -216,10 +216,6 @@ class TKF91TransitionLogprobs(ModuleBase):
     Initialize with
     ----------------
     config : dict (but nothing used here)
-        config["tkf_err"] : float
-            error term for tkf approximation
-            DEFAULT: 1e-4
-            
         config["init_mu_offset_logits"] : Tuple, (2,)
             initial values for logits that determine lambda, offset
             DEFAULT: -2, -5
@@ -556,10 +552,6 @@ class TKF91TransitionLogprobsFromFile(TKF91TransitionLogprobs):
     Initialize with
     ----------------
     config : dict (but nothing used here)
-        config["tkf_err"]
-            error term for tkf approximation
-            DEFAULT: 1e-4
-            
         config["filenames"]["tkf_params_file"]
             contains values for lambda, mu
             
@@ -691,10 +683,6 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
     Initialize with
     ----------------
     config : dict (but nothing used here)
-        config["tkf_err"] : float
-            error term for tkf approximation
-            DEFAULT: 1e-4
-            
         config["init_mu_offset_logits"] : Tuple, (2,)
             initial values for logits that determine mu, offset
             DEFAULT: -2, -5
@@ -1041,7 +1029,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         class_probs : ArrayLike, (C,)
             support for the classes i.e. P(end at class c)
           
-        joint_matrix : ArrayLike, (T, 4, 4)
+        joint_matrix : ArrayLike, (T, C, C, 4, 4)
         
         
         Returns
@@ -1081,10 +1069,6 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
     Initialize with
     ----------------
     config : dict (but nothing used here)
-        config["tkf_err"] : float
-            error term for tkf approximation
-            DEFAULT: 1e-4
-            
         config["tkf_params_file"] : str
             contains values for lambda, mu, r-extension
                     

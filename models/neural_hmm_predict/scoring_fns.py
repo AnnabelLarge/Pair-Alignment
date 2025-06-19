@@ -196,10 +196,10 @@ def preproc_emissions( samples: jnp.array,
 ###############################################################################
 ### score transitions   #######################################################
 ###############################################################################
-def score_transitions(staggered_alignment_state, 
-                      logprob_trans_mat,
+def score_transitions(staggered_alignment_state: jnp.array, 
+                      logprob_trans_mat: jnp.array,
                       unique_time_per_sample: bool,
-                      padding_idx = 0):
+                      padding_idx: int = 0):
     """
     T: number of times (only a valid dimension if unique_time_per_sample)
     B: batch size

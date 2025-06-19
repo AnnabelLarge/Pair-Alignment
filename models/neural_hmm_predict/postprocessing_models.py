@@ -15,17 +15,15 @@ classes available:
 ==================
 1.) Placeholder (ignore outputs from sequence embedders)
 2.) SelectMask (one-hot encode amino acids from training path)
-3.) FeedforwardToEvoparams 
+3.) FeedforwardPostproc 
     norm -> dense -> act -> dropout
-4.) ConvToEvoparams
-    norm -> conv -> mask -> act -> dropout
 
 """
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
 
-from models.model_utils.BaseClasses import ModuleBase
+from models.BaseClasses import ModuleBase
 from models.neural_hmm_predict.model_functions import (process_datamat_lst)
 
 
@@ -36,6 +34,8 @@ class Placeholder(ModuleBase):
     """
     config: None
     name: str
+    use_anc_emb: None
+    use_desc_emb: None
     
     @nn.compact
     def __call__(self, 
@@ -67,6 +67,8 @@ class Placeholder(ModuleBase):
 class SelectMask(ModuleBase):
     config: dict
     name: str
+    use_anc_emb: bool=True
+    use_desc_emb: bool=True
     
     @nn.compact
     def __call__(self,
@@ -96,10 +98,6 @@ class SelectMask(ModuleBase):
         padding_mask: ArrayLike, (B, L_align)
             location of padding in alignment
         """
-        # unpack config file
-        use_anc_emb = self.config['use_anc_emb']
-        use_desc_emb = self.config['use_desc_emb']
-        
         # select (potentially concat) and mask padding
         datamat, padding_mask = process_datamat_lst(datamat_lst,
                                                     padding_mask,
@@ -116,6 +114,8 @@ class FeedforwardPostproc(SelectMask):
     """
     config: dict
     name: str
+    use_anc_emb: bool=True
+    use_desc_emb: bool=True
     
     def setup(self):
         """
@@ -130,8 +130,6 @@ class FeedforwardPostproc(SelectMask):
         """
         ### read config
         # required
-        self.use_anc_emb = self.config['use_anc_emb']
-        self.use_desc_emb = self.config['use_desc_emb']
         self.layer_sizes = self.config['layer_sizes']
         
         # optional
