@@ -387,6 +387,18 @@ class TestNeuralLoglikeVsPairhmmLoglike(unittest.TestCase):
                         subst_model_type = 'gtr',
                         indel_model_type = 'tkf92',
                         jit_compiled = True  )
+        
+    @classmethod
+    def tearDownClass(cls):
+        import os
+        for fname in [
+            'equl_dist.npy',
+            'tkf91_params_file.pkl',
+            'tkf92_params_file.pkl'
+        ]:
+            path = f'./tests/neural_hmm/vs_simple_site_class/req_files/{fname}'
+            if os.path.exists(path):
+                os.remove(path)
     
         
 if __name__ == '__main__':
