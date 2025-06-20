@@ -1112,7 +1112,8 @@ def logprob_tkf92(tkf_params_dict,
 def process_datamat_lst(datamat_lst: list,
                         padding_mask: jnp.array,
                         use_anc_emb: bool,
-                        use_desc_emb: bool):
+                        use_desc_emb: bool,
+                        use_prev_align_info: bool):
     """
     select which embedding, then mask out padding tokens
     
@@ -1122,9 +1123,10 @@ def process_datamat_lst(datamat_lst: list,
     
     Arguments
     ----------
-    datamat_lst : list[ArrayLike, ArrayLike]
-        > ancestor embedding, descendant embedding (in that order)
-        > each are (B, L_align, H)
+    datamat_lst : list[ArrayLike, ArrayLike, ArrayLike]
+        > first array: ancestor embedding (B, L_align, H)
+        > second array: descendant embedding (B, L_align, H)
+        > third array: previous position alignment info (B, L_align, 1)
     
     padding_mask : ArrayLike, (B, L_align)
     
@@ -1136,32 +1138,57 @@ def process_datamat_lst(datamat_lst: list,
         > use descendant embedding information to generate evolutionary 
           model parameters?
     
+    use_prev_align_info : bool
+        > use previous position alignment label?
+    
     Returns
     --------
-    datamat : ArrayLike, (B, L_align, n*H)
+    datamat : ArrayLike, (B, L_align, n*H + d*6)
         concatenated and padding-masked features
         > n=1, if only using ancestor embedding OR descendant embedding
         > n=2, if using both embeddings
+        > d=1 if use_prev_align_info, otherwise 0
         
-    masking_mat: ArrayLike, (B, L_align, n*H)
+    masking_mat: ArrayLike, (B, L_align, n*H + d*6)
         location of padding in alignment
         > n=1, if only using ancestor embedding OR descendant embedding
         > n=2, if using both embeddings
+        > d=1 if use_prev_align_info, otherwise 0
     """
-    if (use_anc_emb) and (use_desc_emb):
-        datamat = jnp.concatenate( datamat_lst, axis = -1 ) #(B, L_align, 2*H)
+    to_concat = []
     
-    elif (use_anc_emb) and (not use_desc_emb):
-        datamat = datamat_lst[0] #(B, L_align, H)
+    if use_anc_emb:
+        to_concat.append( datamat_lst[0] )
     
-    elif (not use_anc_emb) and (use_desc_emb):
-        datamat = datamat_lst[1] #(B, L_align, H)
+    if use_desc_emb:
+        to_concat.append( datamat_lst[1] )
     
+    if use_prev_align_info:
+        to_concat.append( datamat_lst[2] )
+    
+    # datamat could be:
+    #   (B, L_align, H): (use_anc_emb | use_anc_emb) & ~use_prev_align_info
+    #   (B, L_align, H+6): (use_anc_emb | use_anc_emb) & use_prev_align_info 
+    #   (B, L_align, 2*H): use_anc_emb & use_anc_emb & ~use_prev_align_info
+    #   (B, L_align, 2*H+6): use_anc_emb & use_anc_emb & use_prev_align_info
+    datamat = jnp.concatenate( to_concat, axis = -1 ) 
+    
+    # masking_mat could be:
+    #   (B, L_align, H): (use_anc_emb | use_anc_emb) & ~use_prev_align_info
+    #   (B, L_align, H+6): (use_anc_emb | use_anc_emb) & use_prev_align_info 
+    #   (B, L_align, 2*H): use_anc_emb & use_anc_emb & ~use_prev_align_info
+    #   (B, L_align, 2*H+6): use_anc_emb & use_anc_emb & use_prev_align_info
     new_shape = (padding_mask.shape[0],
                  padding_mask.shape[1],
-                 datamat.shape[2])  
-    masking_mat = jnp.broadcast_to(padding_mask[...,None], new_shape) #(B, L_align, H) or (B, L_align, 2*H)
+                 datamat.shape[2]) 
+    
+    masking_mat = jnp.broadcast_to(padding_mask[...,None], new_shape)
     del new_shape
     
-    datamat = jnp.multiply(datamat, masking_mat) #(B, L_align, H) or (B, L_align, 2*H)
+    # datamat could be:
+    #   (B, L_align, H): (use_anc_emb | use_anc_emb) & ~use_prev_align_info
+    #   (B, L_align, H+6): (use_anc_emb | use_anc_emb) & use_prev_align_info 
+    #   (B, L_align, 2*H): use_anc_emb & use_anc_emb & ~use_prev_align_info
+    #   (B, L_align, 2*H+6): use_anc_emb & use_anc_emb & use_prev_align_info
+    datamat = jnp.multiply(datamat, masking_mat)
     return datamat, masking_mat

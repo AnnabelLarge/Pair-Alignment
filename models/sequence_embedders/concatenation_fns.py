@@ -18,11 +18,15 @@ import jax.numpy as jnp
 
 def extract_embs(anc_encoded, 
                  desc_encoded, 
-                 extra_features,
                  idx_lst, 
                  align_idx_padding: int = -9,
                  **kwargs):
     """
+    B = batch size
+    L_align = length of alignment
+    H = hidden dim
+    
+    
     extract embeddings, according to coordinates given by idx_lst
     need this as a class in order to initialize the special indexing function
       once
@@ -41,9 +45,9 @@ def extract_embs(anc_encoded,
           > (batch, seq_len, 2)
         
     outputs:
-        - tuple of (anc_embs, desc_embs, extra_features)
-          > both of size (batch, alignment_len, hid_dim)
-        - mask for alignment positions
+        - tuple of (anc_embs, desc_embs)
+          > both of size (B, L_align, H)
+        - mask for alignment positions (B, L_align)
     """
     # get indexes needed; each are (B, L_align, 1)
     anc_idxes = idx_lst[:,:,0][...,None]
@@ -57,12 +61,8 @@ def extract_embs(anc_encoded,
     desc_selected = jnp.take_along_axis(desc_encoded, desc_idxes, axis=1)
     desc_selected = desc_selected * masking_vec
     
-    out_lst = [anc_selected, desc_selected]
+    return [anc_selected, desc_selected]
     
-    if extra_features is not None:
-        out_lst.append(extra_features)
-    
-    return (out_lst, masking_vec[...,0])
 
 
 

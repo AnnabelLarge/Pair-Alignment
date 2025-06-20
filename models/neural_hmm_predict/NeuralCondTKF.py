@@ -74,11 +74,12 @@ class NeuralCondTKF(ModuleBase):
         
         entries in config['use_which_emb']:
         -----------------------------------------
-        (these are tuples of booleans; first is whether or not to use the 
-         ancestor embedding, second refers to descendant embedding)
-        preproc_equl : (bool, bool)
-        preproc_subs : (bool, bool)
-        preproc_trans : (bool, bool)
+        these are tuples of booleans; first is whether or not to use the 
+         ancestor embedding, second refers to descendant embedding, third
+         refers to previous alignment path
+        preproc_equl : (bool, bool, bool)
+        preproc_subs : (bool, bool, bool)
+        preproc_trans : (bool, bool, bool)
         
         """
         ###################
@@ -415,7 +416,7 @@ class NeuralCondTKF(ModuleBase):
     
     def evaluate_loss_after_scan(self, 
                                  logprob_perSamp_perTime,
-                                 length_for_normalization,
+                                 length_for_normalization_for_reporting,
                                  t_array,
                                  padding_idx: int = 0):
         """
@@ -468,8 +469,6 @@ class NeuralCondTKF(ModuleBase):
 class NeuralCondTKFLoadAll(NeuralCondTKF):
     """
     Replicate a simple tkf model using the neural codebase
-    
-    I think I only need a unique setup; everything else should work out
     
     [fill in later]
     """

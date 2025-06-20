@@ -36,6 +36,7 @@ class Placeholder(ModuleBase):
     name: str
     use_anc_emb: None
     use_desc_emb: None
+    use_prev_align_info: None
     
     @nn.compact
     def __call__(self, 
@@ -69,6 +70,7 @@ class SelectMask(ModuleBase):
     name: str
     use_anc_emb: bool=True
     use_desc_emb: bool=True
+    use_prev_align_info: bool=True
     
     @nn.compact
     def __call__(self,
@@ -101,8 +103,9 @@ class SelectMask(ModuleBase):
         # select (potentially concat) and mask padding
         datamat, padding_mask = process_datamat_lst(datamat_lst,
                                                     padding_mask,
-                                                    use_anc_emb,
-                                                    use_desc_emb)
+                                                    self.use_anc_emb,
+                                                    self.use_desc_emb,
+                                                    self.use_prev_align_info)
         
         return datamat, padding_mask[...,0]
         
@@ -116,6 +119,7 @@ class FeedforwardPostproc(SelectMask):
     name: str
     use_anc_emb: bool=True
     use_desc_emb: bool=True
+    use_prev_align_info: bool=True
     
     def setup(self):
         """
@@ -197,7 +201,8 @@ class FeedforwardPostproc(SelectMask):
         datamat, full_concat_masking_mat = process_datamat_lst(datamat_lst,
                                                                padding_mask,
                                                                self.use_anc_emb,
-                                                               self.use_desc_emb)
+                                                               self.use_desc_emb,
+                                                               self.use_prev_align_info)
         del datamat_lst
         
         

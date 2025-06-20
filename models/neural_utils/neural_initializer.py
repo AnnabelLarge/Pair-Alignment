@@ -16,16 +16,12 @@ TODO:
 - Incorporate batch stats (whenever you use BatchNorm)
 """
 import importlib
+from typing import Optional, Dict
 
 import jax
 import jax.numpy as jnp
 from flax import linen as nn
 from flax.training.train_state import TrainState
-
-# # additional key entry for trainstate object (do I need this?)
-# class TrainState(train_state.TrainState):
-#     key: jax.Array
-
 
 
 ##############################
@@ -194,7 +190,7 @@ def create_seq_model_tstate(embedding_which,
             
             
     ### Placeholder (ignore seq)
-    elif model_type == None:
+    elif model_type is None:
         from models.sequence_embedders.no_params.embedders import EmptyEmb
         seq_model_instance = EmptyEmb(config = model_config,
                                      name = f'PLACEHOLDER {model_name_suffix}')
@@ -254,22 +250,31 @@ def create_seq_model_tstate(embedding_which,
     return (seq_model_trainstate, seq_model_instance, expected_dim3_size)
 
 
-def feedforward_params_instance( input_shapes, 
-                                 model_init_rngkey, 
-                                 tabulate_file_loc,
-                                 model_config: dict = dict(),
-                                 **kwargs ):
+def prediction_head_instance( pred_model_type: str,
+                              datamat_lst_shapes: jnp.array, 
+                              tx: Dict,
+                              model_init_rngkey: jnp.array, 
+                              tabulate_file_loc: str,
+                              t_array: Optional[jnp.array],
+                              model_config: Dict = dict() ):
     #############
     ### imports #
     #############
-    from models.feedforward_predict.FeedforwardPredict import FeedforwardPredict
-    finalpred_instance = FeedforwardPredict(config = model_config,
-                                             name = f'FEEDFORWARD PREDICT')
+    if pred_model_type == 'neural_hmm':
+        from models.neural_hmm_predict.NeuralCondTKF import NeuralCondTKF as Model
+        model_name = 'FEEDFORWARD PREDICT'
+    
+    elif pred_model_type == 'feedforward':
+        from models.feedforward_predict.FeedforwardPredict import FeedforwardPredict as Model
+        model_name = 'NEURAL-TKF PREDICT'
+    
+    finalpred_instance = Model(config = model_config,
+                               name = model_name)
     
     ##################
     ### initialize   #
     ##################
-    dummy_mat_lst = [jnp.empty(s) for s in input_shapes]
+    dummy_mat_lst = [jnp.empty(s) for s in datamat_lst_shapes]
     dim0 = dummy_mat_lst[0].shape[0]
     dim1 = dummy_mat_lst[0].shape[1]
     dummy_masking_mat = jnp.empty( (dim0, dim1) )
@@ -277,27 +282,45 @@ def feedforward_params_instance( input_shapes,
     
     ### tabulate and save the model
     if (tabulate_file_loc is not None):
-        tab_fn = nn.tabulate(finalpred_instance, 
+        tab_fn = nn.tabulate( finalpred_instance, 
                              rngs=model_init_rngkey,
-                             console_kwargs = {'soft_wrap':True,
-                                               'width':250})
-        
-        str_out = tab_fn(datamat_lst=dummy_mat_lst, 
-                          padding_mask = dummy_masking_mat,
-                          training=False,
-                          sow_intermediates = False)
+                             console_kwargs={'soft_wrap': True, 
+                                             'width': 250} 
+                             )
+    
+        # Build argument dictionary
+        tabulate_kwargs = {
+            "datamat_lst": dummy_mat_lst,
+            "padding_mask": dummy_masking_mat,
+            "training": False,
+            "sow_intermediates": False
+        }
+    
+        if pred_model_type == 'neural_hmm':
+            tabulate_kwargs["t_array"] = jnp.zeros(t_array.shape)
+    
+        str_out = tab_fn(**tabulate_kwargs)
         with open(f'{tabulate_file_loc}/OUT-PROJ_tabulate.txt','w') as g:
             g.write(str_out)
         
     
     ### turn into a train state
-    init_params = finalpred_instance.init(rngs = model_init_rngkey,
-                                           datamat_lst = dummy_mat_lst,
-                                           padding_mask = dummy_masking_mat,
-                                           training = False,
-                                           sow_intermediates = False,
-                                           mutable=['params'])
-    return (finalpred_instance, init_params)
+    init_kwargs = { "datamat_lst": dummy_mat_lst,
+                    "padding_mask": dummy_masking_mat,
+                    "training": False,
+                    "sow_intermediates": False,
+                    "mutable": ['params'] }
+    
+    if pred_model_type == 'neural_hmm':
+        init_kwargs["t_array"] = jnp.zeros(t_array.shape)
+    
+    # Initialize with conditional arguments
+    init_params = finalpred_instance.init(rngs=model_init_rngkey, **init_kwargs)
+    finalpred_trainstate = TrainState.create(apply_fn=finalpred_instance.apply, 
+                                              params=init_params,
+                                              tx=tx)
+    
+    return (finalpred_trainstate, finalpred_instance)
 
 
 def create_all_tstates(seq_shapes, 
@@ -309,7 +332,8 @@ def create_all_tstates(seq_shapes,
                        pred_model_type: str, 
                        anc_enc_config: dict, 
                        desc_dec_config: dict, 
-                       pred_config: dict
+                       pred_config: dict,
+                       t_array: Optional[jax.array]
                        ):
     largest_seqs, largest_aligns = seq_shapes
     
@@ -357,17 +381,16 @@ def create_all_tstates(seq_shapes,
         list_of_shapes.append(prev_state_size)
     
     # init
-    out = feedforward_params_instance(input_shapes = list_of_shapes, 
-                                      model_init_rngkey = outproj_rngkey, 
-                                      tabulate_file_loc = tabulate_file_loc,
-                                      model_config = pred_config)
+    out = prediction_head_instance(pred_model_type = pred_model_type,
+                                   datamat_lst_shapes = list_of_shapes, 
+                                   tx = tx,
+                                   model_init_rngkey = outproj_rngkey, 
+                                   tabulate_file_loc = tabulate_file_loc,
+                                   t_array = t_array,
+                                   model_config = pred_config)
     
     finalpred_trainstate, finalpred_instance = out
-    
-    finalpred_trainstate = TrainState.create(apply_fn=finalpred_instance.apply, 
-                                              params=init_params,
-                                              key=model_init_rngkey,
-                                              tx=tx)
+    del out
     
     all_trainstates = (ancestor_trainstate, 
                        descendant_trainstate, 
