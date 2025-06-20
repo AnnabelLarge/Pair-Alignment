@@ -166,7 +166,7 @@ def logprob_f81(equl,
     #     sample: (T, B, L_align, A, 2)
     #   if per-site equlibrium distribution or rates, and not unique time per 
     #     sample: (B, L_align, A, 2)
-    return jnp.log( jnp.stack( [match_prob, subs_prob], axis = -1 ) )
+    return safe_log( jnp.stack( [match_prob, subs_prob], axis = -1 ) )
 
 def upper_tri_vector_to_sym_matrix(vec: ArrayLike):
     """
@@ -316,7 +316,7 @@ def logprob_gtr( exch_upper_triag_values,
         > if per-site: (B, L_align)
         > if global: (1, 1)
     
-    t_array : ArrayLike, 
+    t_array : ArrayLike, (T,) or (B,)
     
     unique_time_per_sample : Bool
         whether there's one time per sample, or a grid of times you'll 
@@ -332,9 +332,6 @@ def logprob_gtr( exch_upper_triag_values,
             > if given time grid: (T, 1, 1, A, A)
             > if unique time per sample: (1, 1, A, A)
     """
-    B = max( [exch_upper_triag_values.shape[0],
-              equilibrium_distributions.shape[0],
-              rate_multiplier.shape[0]] )
     L_align = max( [exch_upper_triag_values.shape[1],
                     equilibrium_distributions.shape[1],
                     rate_multiplier.shape[1]] )
@@ -354,12 +351,21 @@ def logprob_gtr( exch_upper_triag_values,
     # adjust dims
     if unique_time_per_sample:
         T = t_array.shape[0]
+        B = max( [exch_upper_triag_values.shape[0],
+                  equilibrium_distributions.shape[0],
+                  rate_multiplier.shape[0]] )
+        
         before_reshape = (T*B*L_align, A, A)
         after_reshape = (T, B, L_align, A, A)
         t_array = jnp.expand_dims(t_array, (1,2,3,4)) #(T, 1, 1, 1, 1)
         rate_mat = rate_mat[None, ...] #(1, B, L_align, A, A) 
     
     elif not unique_time_per_sample:
+        B = max( [exch_upper_triag_values.shape[0],
+                  equilibrium_distributions.shape[0],
+                  rate_multiplier.shape[0],
+                  t_array.shape[0]] )
+    
         before_reshape = (B*L_align, A, A)
         after_reshape = (B, L_align, A, A)
         t_array = jnp.expand_dims(t_array, (1,2,3)) #(B, 1, 1, 1)
@@ -372,7 +378,7 @@ def logprob_gtr( exch_upper_triag_values,
     cond_prob_raw = vmapped_expm( reshaped_oper ) #(T*B*L, A, A) or (B*L, A, A)
     cond_prob = jnp.reshape( cond_prob_raw, after_reshape )
     
-    return jnp.log(cond_prob) # (T, B, L_align, A, A) or (B, L_align, A, A)
+    return safe_log(cond_prob) # (T, B, L_align, A, A) or (B, L_align, A, A)
 
 
 ###############################################################################
@@ -387,21 +393,28 @@ def true_beta(oper):
     # log( (1 - offset) * (exp(mu*offset*t) - 1) )
     log_num = jnp.log1p(-offset) + log_x_minus_one( mu*offset*t )
     
-    # work out common shape
-    dim0 = max([mu.shape[0], t.shape[0]])
-    dim1 = max([mu.shape[1], t.shape[1]])
-    if len(mu.shape) == 3:
-        dim2 = max([mu.shape[2], t.shape[2]])
-        final_shape = (dim0, dim1, dim2)
-    elif len(mu.shape) == 2:
-        final_shape = (dim0, dim1)
+    # work out common shape, if batched
+    if len(mu.shape) > 0:
+        dim0 = max([mu.shape[0], t.shape[0]])
+        dim1 = max([mu.shape[1], t.shape[1]])
+        if len(mu.shape) == 3:
+            dim2 = max([mu.shape[2], t.shape[2]])
+            final_shape = (dim0, dim1, dim2)
+        elif len(mu.shape) == 2:
+            final_shape = (dim0, dim1)
+            
+        # a = mu*offset*t
+        # b = jnp.log( 1 - offset )
+        # logsumexp with coeffs does: 
+        #   log( exp(a) - exp(b) ) = log( exp(mu*offset*t) - (1-offset) )
+        a = jnp.broadcast_to( mu*offset*t, final_shape )
+        b = jnp.broadcast_to( jnp.log1p(-offset), final_shape )
     
-    # a = mu*offset*t
-    # b = jnp.log( 1 - offset )
-    # logsumexp with coeffs does: 
-    #   log( exp(a) - exp(b) ) = log( exp(mu*offset*t) - (1-offset) )
-    a = jnp.broadcast_to( mu*offset*t, final_shape )
-    b = jnp.broadcast_to( jnp.log1p(-offset), final_shape )
+    # do computation as intended, otherwise
+    else:
+        a = mu*offset*t
+        b = jnp.log1p(-offset)
+    
     log_denom = logsumexp_with_arr_lst( [a, b], coeffs = jnp.array([1.0, -1.0]) )
     
     return log_num - log_denom
@@ -467,13 +480,13 @@ def switch_tkf( mu,
         out_dict['log_gamma']: ArrayLike[bool], 
     
     """
-    B = mu.shape[0]
     L_align = mu.shape[1]
     
     # mu: (B, L_align)
     # offset: (B, L_align)
     # t_array: either (B,) or (T,)
     if not unique_time_per_sample:
+        B = mu.shape[0]
         T = t_array.shape[0]
         
         mu = mu[None,...] #(1, B, L_align)
@@ -482,6 +495,7 @@ def switch_tkf( mu,
         final_shape = (T, B, L_align)
     
     elif unique_time_per_sample:
+        B = max( [mu.shape[0], t_array.shape[0]] )
         t_array = t_array[:,None] #(B, 1)
         final_shape = (B, L_align)
     
@@ -515,6 +529,8 @@ def switch_tkf( mu,
     def tkf_params_indv(log_alpha_indv, 
                         gamma_log_numerator_indv,
                         gamma_log_denom_term1_indv,
+                        mu_indv,
+                        offset_indv,
                         t):
         ### 1 - alpha
         log_one_minus_alpha = stable_log_one_minus_x(log_x = log_alpha_indv)
@@ -522,10 +538,10 @@ def switch_tkf( mu,
         
         ### beta, 1 - beta
         # beta
-        log_beta = jax.lax.cond( mu*offset*t > SMALL_POSITIVE_NUM ,
+        log_beta = jax.lax.cond( mu_indv*offset_indv*t > SMALL_POSITIVE_NUM ,
                                   true_beta,
                                   approx_beta,
-                                  (mu, offset, t) )  
+                                  (mu_indv, offset_indv, t) )  
         
         # regardless of approx or not, 1-beta calculated from beta
         log_one_minus_beta = log_one_minus_x(log_x = log_beta)
@@ -538,9 +554,9 @@ def switch_tkf( mu,
         # ad hoc series of conditionals to determine if you approx
         #   1-gamma or not (meh)
         valid_frac = gamma_log_numerator_indv < gamma_log_denom
-        large_product = mu * offset * t > 1e-3
+        large_product = mu_indv * offset_indv * t > 1e-3
         log_diff_large = jnp.abs(gamma_log_numerator_indv - gamma_log_denom) > 0.1
-        approx_formula_will_fail = (0.5*mu*t) > 1.0
+        approx_formula_will_fail = (0.5*mu_indv*t) > 1.0
         
         cond1 = large_product
         cond2 = ~large_product & log_diff_large
@@ -551,7 +567,7 @@ def switch_tkf( mu,
         log_one_minus_gamma = jax.lax.cond( use_real_function,
                                             lambda _: gamma_log_numerator_indv - gamma_log_denom,
                                             approx_one_minus_gamma,
-                                            (mu, offset, t) )
+                                            (mu_indv, offset_indv, t) )
         
         # gamma
         log_gamma = stable_log_one_minus_x(log_x = log_one_minus_gamma)
@@ -565,7 +581,7 @@ def switch_tkf( mu,
                     'log_one_minus_gamma': log_one_minus_gamma}
         
         used_one_minus_alpha_approx = ~(log_alpha_indv < -SMALL_POSITIVE_NUM)
-        used_beta_approx = ~(mu*offset*t > SMALL_POSITIVE_NUM)
+        used_beta_approx = ~(mu_indv*offset_indv*t > SMALL_POSITIVE_NUM)
         used_log_one_minus_gamma_approx = ~use_real_function
         used_log_gamma_approx = ~(log_one_minus_gamma < -SMALL_POSITIVE_NUM)
         
@@ -589,12 +605,18 @@ def switch_tkf( mu,
     gamma_full_log_denom_term1_reshaped = gamma_full_log_denom_term1.flatten() #(T*B*L_align) or (B*L_align)
     t_array_reshaped = jnp.broadcast_to( t_array, log_alpha.shape ) #(T, B, L_align) or (B, L_align)
     t_array_reshaped = t_array_reshaped.flatten() #(T*B*L_align) or (B*L_align)
+    mu_reshaped = jnp.broadcast_to( mu, log_alpha.shape )
+    mu_reshaped = mu_reshaped.flatten()
+    offset_reshaped = jnp.broadcast_to( offset, log_alpha.shape )
+    offset_reshaped = offset_reshaped.flatten()
     
     # vmap the function
     vmapped_tkf_params_indv = jax.vmap(tkf_params_indv)
     out = vmapped_tkf_params_indv(log_alpha_reshaped,
-                                  gamm_full_log_num_reshaped,
+                                  gamma_full_log_num_reshaped,
                                   gamma_full_log_denom_term1_reshaped,
+                                  mu_reshaped,
+                                  offset_reshaped,
                                   t_array_reshaped)
     tkf_params_dict, approx_flags_dict = out
     del out
@@ -938,7 +960,7 @@ def logprob_tkf92(tkf_params_dict,
         conditional loglike of transitions
     """
     ### get dims  
-    ref_shape = tkf_params_dict['log_alpha']
+    ref_shape = tkf_params_dict['log_alpha'] #(T,B,L) or (B,L)
     
     if not unique_time_per_sample:
         T = ref_shape.shape[0]
@@ -948,11 +970,10 @@ def logprob_tkf92(tkf_params_dict,
         
         r_extend = r_extend[None,...] #(1, B, L_align)
     
-    elif unique_time_per_sample:
-        final_shape = (B, L_align)
-        
+    elif unique_time_per_sample:        
         B = max( [ ref_shape.shape[0], r_extend.shape[0] ] )
         L_align = max( [ ref_shape.shape[1], r_extend.shape[1] ] )  
+        final_shape = (B, L_align)
     
     # reshape tensors with broadcasting, where needed
     def my_reshape(m):

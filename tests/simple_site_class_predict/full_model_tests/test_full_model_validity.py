@@ -17,18 +17,14 @@ import unittest
 
 from tests.data_processing import (str_aligns_to_tensor,
                                    summarize_alignment)
-from models.simple_site_class_predict.transition_models import (TKF91TransitionLogprobs,
-                                                                TKF92TransitionLogprobs)
-from models.simple_site_class_predict.model_functions import (MargTKF91TransitionLogprobs,
-                                                              MargTKF92TransitionLogprobs,
-                                                              CondTransitionLogprobs)
 from models.simple_site_class_predict.IndpSites import IndpSites
 
 THRESHOLD = 1e-6
 
+
 class TestFullModelValidity(unittest.TestCase):
     """
-    Make sure that joint = cond * marginal
+    Make sure that joint = cond * marginal, with full models
     """
     def setUp(self):
         ### fake alignments, time array
@@ -63,7 +59,7 @@ class TestFullModelValidity(unittest.TestCase):
                     "times_from": "t_array_from_file",
                     "exponential_dist_param": 1.0,
       
-                    "filenames": {"exch": "tests/full_model_tests/req_files/LG08_exchangeability_vec.npy"},
+                    "filenames": {"exch": "tests/simple_site_class_predict/full_model_tests/req_files/LG08_exchangeability_vec.npy"},
                     
                     'training_dset_emit_counts': counts['emit_counts'].sum(axis=0),
                     'emission_alphabet_size': 20
@@ -93,7 +89,6 @@ class TestFullModelValidity(unittest.TestCase):
         self._run_test({'num_mixtures': 1,
                         'indel_model_type': None,
                         'num_tkf_fragment_classes': None})
-        
     
     def test_multiple_gtrs(self):
         self._run_test({'num_mixtures': 3,

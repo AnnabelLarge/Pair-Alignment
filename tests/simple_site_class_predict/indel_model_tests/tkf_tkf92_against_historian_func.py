@@ -65,8 +65,6 @@ def TKF92_Ftransitions (lam, mu, r, t):
     
     return jnp.stack([match_row, ins_row, del_row, start_row])
 
-out = TKF92_Ftransitions (lam = 0.1, mu = 0.2, r=0.5, t=1)    
-
 
 class TestTKF92AgainstIansFunc(unittest.TestCase):
     """

@@ -27,6 +27,7 @@ functions:
 'get_joint_logprob_emit_at_match_per_class',
 'joint_only_forward',
 'joint_prob_from_counts',
+'cond_prob_from_counts',
 'log_one_minus_x',
 'log_x_minus_one',
 'logsumexp_with_arr_lst',
@@ -160,7 +161,6 @@ def upper_tri_vector_to_sym_matrix( vec: ArrayLike ):
     
     
     ### fill upper triangular part of matrix
-    # breakpoint()
     out_size = (emission_alphabet_size, emission_alphabet_size)
     upper_tri_exchang = jnp.zeros( out_size )
     idxes = jnp.triu_indices(emission_alphabet_size, k=1)  
@@ -842,17 +842,21 @@ def MargTKF92TransitionLogprobs(offset,
     
     ### build cells
     # cell 1: emit -> emit 
+    # (1-r) * (lam/mu) * P(c)
     log_cell1 = (log_one_minus_r + log_lam_div_mu)[:, None] + log_class_prob[None, :] # (C,C)
     
     # cell 2: emit -> end 
+    # (1-r) * (1 - lam/mu)
     log_cell2 = ( log_one_minus_r + log_one_minus_lam_div_mu )[:,None] #(1,C)
     log_cell2 = jnp.broadcast_to( log_cell2, (C, C) ) # (C,C)
     
     # cell 3: start -> emit
+    # (lam/mu) * P(c)
     log_cell3 = ( log_lam_div_mu + log_class_prob )[None,:] # (1,C)
     log_cell3 = jnp.broadcast_to( log_cell3, (C, C) )   # (C,C)
     
     # cell 4: start -> end
+    # (1-lam/mu)
     log_cell4 = jnp.broadcast_to( log_one_minus_lam_div_mu, (C,C) )  # (C,C)
     
 
@@ -862,11 +866,12 @@ def MargTKF92TransitionLogprobs(offset,
                                      axis = -2 ) #(C,C,2,2)
     
     # add fragment extension probability to transitions between same class
+    # at cell 1: emit -> emit 
+    # r + (1-r) * (lam/mu) * P(c)
     i_idx = jnp.arange(C)
     prev_vals = log_single_seq_tkf92[i_idx, i_idx, 0, 0] #(C,C)
     new_vals = logsumexp_with_arr_lst([log_r_ext_prob, prev_vals]) #(C,C)
     log_single_seq_tkf92 = log_single_seq_tkf92.at[i_idx, i_idx, 0, 0].set(new_vals) #(C,C,2,2)
-    
     return log_single_seq_tkf92 #(C,C,2,2)
 
 
@@ -899,7 +904,7 @@ def CondTransitionLogprobs(marg_matrix,
         P(desc, align | anc, t)
         
     """
-    # cond_matrix is always  #(T,C,C,2,2)
+    # cond_matrix is always  #(T,C,C,S,S)
     cond_matrix = joint_matrix.at[...,[0,1,2], 0].add(-marg_matrix[..., 0,0][None,...,None])
     cond_matrix = cond_matrix.at[...,[0,1,2], 2].add(-marg_matrix[..., 0,0][None,...,None])
     cond_matrix = cond_matrix.at[...,3,0].add(-marg_matrix[..., 1,0][None,...])
@@ -995,7 +1000,8 @@ def joint_prob_from_counts( batch: tuple[ArrayLike],
                             scoring_matrices_dict: dict,
                             t_array: ArrayLike or None,
                             exponential_dist_param: float,
-                            norm_loss_by: str or None ):
+                            norm_loss_by: str or None,
+                            return_intermeds: bool=False ):
     """
     score an alignment from summary counts
     
@@ -1102,8 +1108,8 @@ def joint_prob_from_counts( batch: tuple[ArrayLike],
     # emission_score has following sizes- 
     #   if time_from in [geometric, t_array_from_file]: (T,B)
     #   elif time_from == t_per_sample: (B,)
-    emission_score = time_dep_score_fn(scoring_matrices_dict['joint_logprob_emit_at_match'], 
-                                       subCounts)
+    joint_match_score = time_dep_score_fn(scoring_matrices_dict['joint_logprob_emit_at_match'], 
+                                          subCounts)
     
     if score_indels:
         ### emissions at insert sites
@@ -1126,10 +1132,12 @@ def joint_prob_from_counts( batch: tuple[ArrayLike],
                                                    expected_num_output_dims )
         
         # add to emission score
-        emission_score = ( emission_score +
+        emission_score = ( joint_match_score +
                            ins_emit_score +
                            del_emit_score )
-            
+    
+    elif not score_indels:
+        emission_score = joint_match_score
         
     #########################
     ### score transitions   #
@@ -1147,7 +1155,7 @@ def joint_prob_from_counts( batch: tuple[ArrayLike],
     if score_indels:
         joint_transit_score = time_dep_score_fn(scoring_matrices_dict['all_transit_matrices']['joint'], 
                                                 transCounts)
-    
+        
     elif not score_indels:
         align_lens = subCounts.sum(axis=(-1,-2))
         logprob_emit = scoring_matrices_dict['all_transit_matrices']['joint'][0]
@@ -1191,14 +1199,235 @@ def joint_prob_from_counts( batch: tuple[ArrayLike],
     
     joint_neg_logP_length_normed = joint_neg_logP / length_for_normalization #(B,)
     
-    return {'joint_neg_logP': joint_neg_logP,  #(B,)
-            'joint_neg_logP_length_normed': joint_neg_logP_length_normed,
+    out = {'joint_neg_logP': joint_neg_logP,  #(B,)
+            'joint_neg_logP_length_normed': joint_neg_logP_length_normed,  #(B,)
             'align_length_for_normalization': length_for_normalization}  #(B,)
+    
+    if return_intermeds:
+        out['joint_transit_score'] = joint_transit_score
+        out['joint_emission_score'] = emission_score
+    
+    return out
 
+def cond_prob_from_counts( batch: tuple[ArrayLike],
+                            times_from: str,
+                            score_indels: bool,
+                            scoring_matrices_dict: dict,
+                            t_array: ArrayLike or None,
+                            exponential_dist_param: float,
+                            norm_loss_by: str or None,
+                            return_intermeds: bool=False ):
+    """
+    score an alignment from summary counts
+    
+    B = batch; number of alignments
+    A = alphabet size
+    S = number of transition states; here, it's 4: M, I, D, [S or E]
+    T = branch length; time
+    
+    
+    Arguments
+    ----------
+    batch : Tuple (from pytorch dataloader)
+        batch[0] : ArrayLike, (B,A,A)
+            subCounts
+
+        batch[1] : ArrayLike, (B,A)
+            insCounts
+
+        batch[2] : ArrayLike, (B,A)
+            delCounts
+
+        batch[3] : ArrayLike, (B,S,S)
+            transCounts
+        
+        batch[4] : ArrayLike, (B,)
+            branch length for each sample
+
+    times_from :  {geometric, t_array_from_file, t_per_sample}
+        STATIC ARGUEMENT FOR JIT COMPILATION
+        how to handle time
+    
+    score_indels : bool
+        STATIC ARGUEMENT FOR JIT COMPILATION
+        whether or not to score indel positions
+
+    scoring_matrices_dict : dict
+        scoring_matrices_dict['logprob_emit_at_match'] : ArrayLike
+            logprob of emissions at match sites
+            if time_from in [geometric, t_array_from_file]: (T,A,A)
+            elif time_from == 't_per_sample': (B,A,A)
+        
+        scoring_matrices_dict['logprob_emit_at_indel'] : ArrayLike, (A,)
+            logprob of emissions at ins and del sites
+        
+        scoring_matrices_dict['all_transit_matrices']['joint'] : ArrayLike
+            logprob transitions
+            if time_from in [geometric, t_array_from_file] and score_indels: (T,S,S)
+            elif time_from == 't_per_sample' and score_indels: (B,S,S)
+            elif not score_indels: (2,)
+            
+    t_array : ArrayLike, (T,)
+        branch lengths to apply to all samples
+        if time_from in [geometric, t_array_from_file]: (T,)
+        else t_array = None (never used) 
+    
+    exponential_dist_param : float or None
+        when marginalizing over time, use an exponential prior; this is the 
+        parameter for that exponential distribution
+    
+    norm_loss_by : {desc_len, align_len}
+        how to normalize the loss, if including indels (if not scoring indels, 
+        normalization length is already decided)
+        
+    Returns
+    -------
+    out['joint_neg_logP'] : ArrayLike, (B,)
+        raw loglikelihood of alignment
+    
+    out['joint_neg_logP_length_normed'] : ArrayLike, (B,)
+        loglikelihood of alignment, after normalizing by length
+    
+    """
+    ####################################################################
+    ### static arguments that determine shape during jit compilation   #
+    ####################################################################
+    if times_from in ['geometric', 't_array_from_file']:
+        time_dep_score_fn = partial( jnp.einsum, 'tij,bij->tb' )
+        expected_num_output_dims = 2
+    
+    elif times_from == 't_per_sample':
+        time_dep_score_fn = partial( jnp.einsum, 'bij,bij->b' )
+        expected_num_output_dims = 1
+    
+    
+    ####################
+    ### unpack batch   #
+    ####################
+    subCounts = batch[0] #(B, A, A)
+    insCounts = batch[1] #(B, A)
+    delCounts = batch[2] #(B, A)
+    transCounts = batch[3] #(B, S)
+        
+    
+    #######################
+    ### score emissions   #
+    #######################
+    ### emissions at match sites
+    # subCounts is (B,A,A)
+    #
+    # scoring_matrices_dict['logprob_emit_at_match'] has following sizes-
+    #   if time_from in [geometric, t_array_from_file]: (T,A,A)
+    #   elif time_from == 't_per_sample': (B,A,A)
+    #
+    # emission_score has following sizes- 
+    #   if time_from in [geometric, t_array_from_file]: (T,B)
+    #   elif time_from == t_per_sample: (B,)
+    cond_match_score = time_dep_score_fn(scoring_matrices_dict['cond_logprob_emit_at_match'], 
+                                          subCounts)
+    
+    if score_indels:
+        ### emissions at insert sites
+        # insCounts is (B,A)
+        # scoring_matrices_dict['logprob_emit_at_indel'] is (A,)
+        # ins_emit_score is (B)
+        ins_emit_score = jnp.einsum('i,bi->b',
+                                    scoring_matrices_dict['logprob_emit_at_indel'], 
+                                    insCounts) #(B,)
+        ins_emit_score = _selectively_add_time_dim( ins_emit_score,
+                                                   expected_num_output_dims )
+        
+        # add to emission score
+        emission_score = ( cond_match_score +
+                           ins_emit_score )
+    
+    elif not score_indels:
+        emission_score = cond_match_score
+        
+    #########################
+    ### score transitions   #
+    #########################
+    # transCounts is (B,S,S)
+    #
+    # scoring_matrices_dict['all_transit_matrices']['conditional'] has the following sizes-
+    #    if time_from in [geometric, t_array_from_file] and score_indels: (T,S,S)
+    #    elif time_from == 't_per_sample' and score_indels: (B,S,S)
+    #    elif not score_indels: (2,)
+    #
+    # cond_transit_score has the following sizes-
+    #   if time_from in [geometric, t_array_from_file]: (T,B)
+    #   elif time_from == t_per_sample or not score_indels: (B,)
+    if score_indels:
+        cond_transit_score = time_dep_score_fn(scoring_matrices_dict['all_transit_matrices']['conditional'], 
+                                                transCounts)
+        
+        # if starting with start -> I, will be missing a 1 / (lambda/mu) term
+        mask_s_i = transCounts[:,3,1]
+        corr_s_i = mask_s_i * scoring_matrices_dict['all_transit_matrices']['corr_start_to_ins']
+        cond_transit_score = cond_transit_score + corr_s_i
+        
+        # if ending with I -> end, will have extra (1/nu) term
+        mask_i_e = transCounts[:,1,3]
+        corr_i_e = mask_i_e * scoring_matrices_dict['all_transit_matrices']['corr_ins_to_end']
+        cond_transit_score = cond_transit_score + corr_i_e
+        
+    elif not score_indels:
+        align_lens = subCounts.sum(axis=(-1,-2))
+        logprob_emit = scoring_matrices_dict['all_transit_matrices']['conditional'][0]
+        log_one_minus_prob_emit = scoring_matrices_dict['all_transit_matrices']['conditional'][1]
+        cond_transit_score = align_lens * logprob_emit + log_one_minus_prob_emit
+    
+    cond_transit_score = _selectively_add_time_dim( cond_transit_score,
+                                                    expected_num_output_dims )
+    cond_logprob_perSamp_maybePerTime = cond_transit_score + emission_score
+    
+    
+    ################
+    ### postproc   #
+    ################
+    # marginalize over times, if required
+    if (expected_num_output_dims==2) and (t_array.shape[0] > 1):
+        cond_neg_logP = -marginalize_over_times(logprob_perSamp_perTime = cond_logprob_perSamp_maybePerTime,
+                                                 exponential_dist_param = exponential_dist_param,
+                                                 t_array = t_array) #(B,)
+         
+    elif (expected_num_output_dims==2) and (t_array.shape[0] == 1):
+        cond_neg_logP = -cond_logprob_perSamp_maybePerTime[0,:] #(B,)
+    
+    elif expected_num_output_dims == 1:
+        cond_neg_logP = -cond_logprob_perSamp_maybePerTime #(B,)
+    
+    
+    # normalize by some length    
+    if (norm_loss_by == 'desc_len') and score_indels:
+        length_for_normalization = ( subCounts.sum(axis=(-2, -1)) + 
+                                     insCounts.sum(axis=(-1))
+                                     )
+    
+    elif (norm_loss_by == 'align_len') and score_indels:
+        length_for_normalization = ( subCounts.sum(axis=(-2, -1)) + 
+                                     insCounts.sum(axis=(-1)) + 
+                                     delCounts.sum(axis=(-1))
+                                     ) 
+    elif not score_indels:
+        length_for_normalization = subCounts.sum(axis=(-2, -1))
+    
+    cond_neg_logP_length_normed = cond_neg_logP / length_for_normalization #(B,)
+    
+    out = {'cond_neg_logP': cond_neg_logP,  #(B,)
+            'cond_neg_logP_length_normed': cond_neg_logP_length_normed}  #(B,)
+    
+    if return_intermeds:
+        out['cond_transit_score'] = cond_transit_score
+        out['cond_emission_score'] = emission_score
+    
+    return out
+        
 
 def anc_marginal_probs_from_counts( batch: tuple[ArrayLike],
                                     score_indels: bool,
-                                    scoring_matrices_dict: dict):
+                                    scoring_matrices_dict: dict,
+                                    return_intermeds: bool=False ):
     """
     score single-sequence marginals of ANCESTOR SEQUENCE
     
@@ -1270,7 +1499,7 @@ def anc_marginal_probs_from_counts( batch: tuple[ArrayLike],
     if score_indels:
         # use only transitions that end with match (0) and del (2)
         anc_emit_to_emit = ( transCounts[...,0].sum( axis=-1 ) + 
-                             transCounts[...,2].sum( axis=-1 ) ) - 1  #(B,)
+                              transCounts[...,2].sum( axis=-1 ) ) - 1  #(B,)
         
         anc_transCounts = jnp.stack( [jnp.stack( [anc_emit_to_emit, 
                                                   jnp.ones(anc_emit_to_emit.shape[0])], 
@@ -1281,9 +1510,9 @@ def anc_marginal_probs_from_counts( batch: tuple[ArrayLike],
                                       axis = -2 ) #(B,2,2)
         
         anc_marg_transit_score = jnp.einsum( 'mn,bmn->b', 
-                                             scoring_matrices_dict['all_transit_matrices']['marginal'] , 
-                                             anc_transCounts ) #(B,)
-    
+                                              scoring_matrices_dict['all_transit_matrices']['marginal'] , 
+                                              anc_transCounts ) #(B,)
+        
     elif not score_indels:
         logprob_emit = scoring_matrices_dict['all_transit_matrices']['marginal'][0] #(1,)
         log_one_minus_prob_emit = scoring_matrices_dict['all_transit_matrices']['marginal'][1] #(1,)
@@ -1292,14 +1521,21 @@ def anc_marginal_probs_from_counts( batch: tuple[ArrayLike],
     anc_neg_logP = -(anc_marg_emit_score + anc_marg_transit_score)
     anc_neg_logP_length_normed = anc_neg_logP / anc_len
     
-    
-    return {'anc_neg_logP': anc_neg_logP,  #(B,)
+    out = {'anc_neg_logP': anc_neg_logP,  #(B,)
             'anc_neg_logP_length_normed': anc_neg_logP_length_normed}  #(B,)
+    
+    if return_intermeds:
+        out['anc_marg_transit_score'] = anc_marg_transit_score
+        out['anc_marg_emit_score'] = anc_marg_emit_score
+    
+    return out
 
 
 def desc_marginal_probs_from_counts( batch: tuple[ArrayLike],
                                      score_indels: bool,
-                                     scoring_matrices_dict: dict):
+                                     scoring_matrices_dict: dict,
+                                     *args,
+                                     **kwargs ):
     """
     score single-sequence marginals of DESCENDANT SEQUENCE
     

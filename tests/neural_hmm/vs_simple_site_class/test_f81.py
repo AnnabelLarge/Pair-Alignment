@@ -12,7 +12,7 @@ import numpy as np
 import numpy.testing as npt
 import unittest
 
-from models.simple_site_class_predict.emission_models import F81LogProbs
+from models.simple_site_class_predict.emission_models import F81Logprobs
 from models.neural_hmm_predict.model_functions import logprob_f81 as neural_f81
 
 THRESHOLD = 1e-6
@@ -25,12 +25,12 @@ class TestF81(unittest.TestCase):
     See if F81 model in neural TKF code matches this reference implementation
     """
     def setUp(self):    
-        self.equl = np.array([0.1, 0.2, 0.3, 0.4])
+        self.equl = np.array([0, 0.2, 0.3, 0.4])
         normalizing_factor = np.array( [1 / ( 1 - np.square(self.equl).sum() )] )
         self.t_array = np.array([0.1, 0.2, 0.3])
         
         # reference implementation; return the conditional logprob
-        my_model = F81LogProbs(config={'num_mixtures': 1},
+        my_model = F81Logprobs(config={'num_mixtures': 1},
                                name='ref')
         self.true_f81 = my_model.apply( variables={},
                                         equl=self.equl[None,...],

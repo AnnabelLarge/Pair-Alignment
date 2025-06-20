@@ -87,13 +87,21 @@ class NeuralCondTKF(ModuleBase):
         # required
         self.times_from = self.config['times_from']
         self.subst_model_type = self.config['subst_model_type'].lower()
-        indel_model_type = self.config['indel_model_type'].lower()
+        self.indel_model_type = self.config['indel_model_type'].lower()
+        times_from = self.config['times_from'].lower()
         global_or_local_dict = self.config['global_or_local']
         use_which_emb_dict = self.config['use_which_emb']
         
         # optional
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1.)
         preproc_model_type = self.config.get('preproc_model_type', 'selectmask').lower()
+        
+        # handle time
+        if times_from =='t_per_sample':
+            self.unique_time_per_sample = True
+        
+        elif times_from in ['geometric','t_array_from_file']:
+            self.unique_time_per_sample = False
         
         
         ######################################################################
@@ -228,7 +236,6 @@ class NeuralCondTKF(ModuleBase):
                  datamat_lst: list[jnp.array], 
                  padding_mask: jnp.array, 
                  t_array: jnp.array,
-                 unique_time_per_sample: bool,
                  training: bool, 
                  sow_intermediates: bool=False,
                  **kwargs):
@@ -253,7 +260,7 @@ class NeuralCondTKF(ModuleBase):
         logprob_emit_match, subs_model_params = self.subs_module(datamat = sub_feats,
                                                                 log_equl = logprob_emit_indel,
                                                                 t_array = t_array,
-                                                                unique_time_per_sample = unique_time_per_sample,
+                                                                unique_time_per_sample = self.unique_time_per_sample,
                                                                 sow_intermediates = sow_intermediates)
         
         # transition model; used to score markovian alignment path
@@ -264,7 +271,7 @@ class NeuralCondTKF(ModuleBase):
         
         out = self.trans_module(datamat = trans_feats,
                                 t_array = t_array,
-                                unique_time_per_sample = unique_time_per_sample,
+                                unique_time_per_sample = self.unique_time_per_sample,
                                 sow_intermediates = sow_intermediates) 
         logprob_transits, approx_flags_dict, indel_model_params = out
         del out
@@ -276,6 +283,21 @@ class NeuralCondTKF(ModuleBase):
                     'subs_model_params': subs_model_params,
                     'indel_model_params': indel_model_params}
         
+        ### correction to conditional logprob
+        # if tkf91, no corrections needed
+        if self.indel_model_type == 'tkf91':
+            out_dict['corr'] = ( jnp.zeros( indel_model_params['lambda'].shape ), #(T,B) or (B,)
+                                 jnp.zeros( indel_model_params['lambda'].shape ) ) #(T,B) or (B,)
+            
+        # if tkf92, include correction factor for starting with s->ins transition, 
+        # and ending with ins->e
+        elif self.indel_model_type == 'tkf92':
+            lam = indel_model_params['lambda'] #(T,B) or (B,)
+            mu = indel_model_params['mu'] #(T,B) or (B,)
+            r_extend = indel_model_params['r_extend'] #(T,B) or (B,)
+            out_dict['corr'] = ( jnp.log(mu/lam), #(T,B) or (B,)
+                                 jnp.log( r_extend + (1-r_extend)*(lam/mu) ) ) #(T,B) or (B,)
+        
         return out_dict
         
     
@@ -283,8 +305,8 @@ class NeuralCondTKF(ModuleBase):
                               logprob_emit_match: jnp.array, 
                               logprob_emit_indel: jnp.array,
                               logprob_transits: jnp.array,
+                              corr: tuple[jnp.array, jnp.array],
                               true_out: jnp.array,
-                              unique_time_per_sample: bool,
                               gap_idx: int=43,
                               padding_idx: int=0,
                               start_idx: int=1,
@@ -302,9 +324,9 @@ class NeuralCondTKF(ModuleBase):
         L = logprob_emit_indel.shape[1]
         
         # unpack inputs
-        staggered_alignment_state = true_out[...,2:]
-        curr_state = true_out[...,3]
-        true_alignment_without_start = true_out[...,:2]
+        staggered_alignment_state = true_out[...,2:] #(B, L_align-1, 2)
+        curr_state = true_out[...,3] #(B,L_align-1)
+        true_alignment_without_start = true_out[...,:2] #(B, L_align-1, 2)
         
         
         ### score transitions
@@ -312,24 +334,24 @@ class NeuralCondTKF(ModuleBase):
         # elif not unique_time_per_sample, tr is (T, B, length_for_scan)
         tr = score_transitions(staggered_alignment_state = staggered_alignment_state,
                                logprob_trans_mat = logprob_transits, 
-                               unique_time_per_sample = unique_time_per_sample,
+                               unique_time_per_sample = self.unique_time_per_sample,
                                padding_idx=padding_idx)
         
         
         ### score emissions
         # if unique_time_per_sample, e is (B, length_for_scan)
         # elif not unique_time_per_sample, e is (T, B, length_for_scan)
-        if unique_time_per_sample:
+        if self.unique_time_per_sample:
             e = jnp.zeros( (B,L) )
-        elif not unique_time_per_sample:
+        elif not self.unique_time_per_sample:
             T = logprob_emit_match.shape[0]
             e = jnp.zeros( (T,B,L) )
         
         # match positions: decide function
-        if (self.subst_model_type == 'f81') and unique_time_per_sample:
+        if (self.subst_model_type == 'f81') and self.unique_time_per_sample:
             score_substitutions = score_f81_substitutions_t_per_samp
             
-        elif (self.subst_model_type == 'f81') and not unique_time_per_sample:
+        elif (self.subst_model_type == 'f81') and not self.unique_time_per_sample:
             score_substitutions = score_f81_substitutions_marg_over_times
             
         elif self.subst_model_type == 'gtr':
@@ -339,7 +361,7 @@ class NeuralCondTKF(ModuleBase):
         e = e + jnp.where( curr_state == 1,
                            score_substitutions( true_alignment_without_start = true_alignment_without_start,
                                                 logprob_scoring_mat = logprob_emit_match,
-                                                unique_time_per_sample = unique_time_per_sample,
+                                                unique_time_per_sample = self.unique_time_per_sample,
                                                 gap_idx = gap_idx,
                                                 padding_idx = padding_idx,
                                                 start_idx = start_idx,
@@ -358,9 +380,7 @@ class NeuralCondTKF(ModuleBase):
                                         end_idx = end_idx),
                            0
                            )
-        
         # conditional logprob, so don't score "emissions" from ancestor tokens
-        
         
         ### final logprob(sequences)
         # if unique_time_per_sample, logprob_perSamp_perPos_perTime is (B, length_for_scan)
@@ -372,6 +392,24 @@ class NeuralCondTKF(ModuleBase):
         # elif not unique_time_per_sample, logprob_perSamp_perTime is (T, B)
         logprob_perSamp_perTime = logprob_perSamp_perPos_perTime.sum(axis=-1)
         
+        # extra correction factors, if needed
+        include_s_i_corr_mask = jnp.all(staggered_alignment_state[:,0,:] == jnp.array([4, 2]), axis=-1) #(B,)
+        include_i_e_corr_mask = jnp.any( jnp.all(staggered_alignment_state == jnp.array([2, 5]), axis=-1), axis=-1 ) #(B,)
+
+        if len(logprob_perSamp_perTime.shape) == 2:
+            include_s_i_corr_mask = jnp.broadcast_to(include_s_i_corr_mask[None,:],
+                                                      logprob_perSamp_perTime.shape) #(T,B)
+            include_i_e_corr_mask = jnp.broadcast_to(include_i_e_corr_mask[None,:],
+                                                      logprob_perSamp_perTime.shape) #(T,B)
+        
+        logprob_perSamp_perTime = jnp.where( include_s_i_corr_mask,
+                                             logprob_perSamp_perTime + corr[0],
+                                             logprob_perSamp_perTime ) #(T,B) or (B,)
+        
+        logprob_perSamp_perTime = jnp.where( include_i_e_corr_mask,
+                                             logprob_perSamp_perTime + corr[1],
+                                             logprob_perSamp_perTime ) #(T,B) or (B,)
+        
         return logprob_perSamp_perTime
         
     
@@ -379,23 +417,21 @@ class NeuralCondTKF(ModuleBase):
                                  logprob_perSamp_perTime,
                                  length_for_normalization,
                                  t_array,
-                                 unique_time_per_sample,
-                                 exponential_dist_param,
                                  padding_idx: int = 0):
         """
         postprocessing after accumulating logprobs in a scan function
         """
         ### handle time, if needed
         # marginalize over time grid
-        if not unique_time_per_sample:
+        if not self.unique_time_per_sample:
             if t_array.shape[0] > 1:
                 # logP(t_k) = exponential distribution
-                logP_time = ( jnp.log(exponential_dist_param) - 
-                              jnp.log(exponential_dist_param) * t_array )
+                logP_time = ( jnp.log(self.exponential_dist_param) - 
+                              (self.exponential_dist_param * t_array) ) #(T,)
                 log_t_grid = jnp.log( t_array[1:] - t_array[:-1] ) #(T-1,)
                 
                 # kind of a hack, but repeat the last time array value
-                log_t_grid = jnp.concatenate( [log_t_grid, log_t_grid[-1] ], axis=0)  #(T,)
+                log_t_grid = jnp.concatenate( [log_t_grid, log_t_grid[-1][None] ], axis=0)  #(T,)
                 
                 logP_perSamp_perTime_withConst = ( logprob_perSamp_perTime +
                                                    logP_time[:,None] +
@@ -407,7 +443,7 @@ class NeuralCondTKF(ModuleBase):
                 logprob_perSamp = logprob_perSamp_perTime[0,...]
         
         # otherwise, just rename the variable
-        elif unique_time_per_sample:
+        elif self.unique_time_per_sample:
             logprob_perSamp = logprob_perSamp_perTime
         
         # collect loss and intermediate values
@@ -431,7 +467,7 @@ class NeuralCondTKF(ModuleBase):
 
 class NeuralCondTKFLoadAll(NeuralCondTKF):
     """
-    Replicate a simple tkf91 model using the neural codebase
+    Replicate a simple tkf model using the neural codebase
     
     I think I only need a unique setup; everything else should work out
     
@@ -478,13 +514,21 @@ class NeuralCondTKFLoadAll(NeuralCondTKF):
         ### read config   #
         ###################
         # required
-        self.times_from = self.config['times_from']
         self.subst_model_type = self.config['subst_model_type'].lower()
+        times_from = self.config['times_from'].lower()
         indel_model_type = self.config['indel_model_type'].lower()
         
         # optional
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
         preproc_model_type = self.config.get('preproc_model_type', 'selectmask')
+        
+        # handle time
+        if times_from =='t_per_sample':
+            self.unique_time_per_sample = True
+        
+        elif times_from in ['geometric','t_array_from_file']:
+            self.unique_time_per_sample = False
+        
         
         ###########################################
         ### module for equilibrium distribution   #

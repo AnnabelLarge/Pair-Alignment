@@ -396,6 +396,8 @@ class TKF91TransitionLogprobs(ModuleBase):
         
         matrix_dict = self.return_all_matrices(offset=offset,
                                                joint_matrix=joint_matrix)
+        matrix_dict['corr_start_to_ins'] = 0
+        matrix_dict['corr_ins_to_end'] = 0
         return matrix_dict, approx_flags_dict
         
     
@@ -608,7 +610,7 @@ class TKF91TransitionLogprobsFromFile(TKF91TransitionLogprobs):
                         param_dict[param_name] = jnp.array( float(value) )
             self.param_dict = param_dict
         
-        err = f'KEYS SEEN: {param_dict.keys()}'
+        err = f'KEYS SEEN: {self.param_dict.keys()}'
         assert 'lambda' in self.param_dict.keys(), err
         assert 'mu' in self.param_dict.keys(), err
         
@@ -661,6 +663,8 @@ class TKF91TransitionLogprobsFromFile(TKF91TransitionLogprobs):
         
         matrix_dict = self.return_all_matrices(offset=offset,
                                                joint_matrix=joint_matrix)
+        matrix_dict['corr_start_to_ins'] = 0
+        matrix_dict['corr_ins_to_end'] = 0
         return matrix_dict, None
         
     
@@ -844,6 +848,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
                                          offs_min_val = self.offs_min_val,
                                          offs_max_val = self.offs_max_val)
         mu, offset = out
+        lam = mu * (1-offset)
         del out
         
         # r_extend is of size (C,)
@@ -914,6 +919,16 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
                                                class_probs=class_probs,
                                                r_ext_prob = r_extend,
                                                joint_matrix=joint_matrix)
+        
+        # if starting with start -> I, will be missing a 1 / (lambda/mu) term;
+        #   fix this by multiplying total by (mu/lambda)
+        #   if ending with I -> end, will have extra (1/nu) term; fix this by
+        #   multiplying total by (nu)
+        #   add these correction factors; use them when scoring with the 
+        #   conditional matrix
+        matrix_dict['corr_start_to_ins'] = jnp.log(mu/lam)
+        matrix_dict['corr_ins_to_end'] = jnp.log( r_extend + (1-r_extend)*(lam/mu) )
+        
         return matrix_dict, approx_flags_dict
         
     
@@ -1137,7 +1152,7 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
             param_dict['r_extend'] = jnp.array(r_extend)
             self.param_dict = param_dict
         
-        err = f'KEYS SEEN: {param_dict.keys()}'
+        err = f'KEYS SEEN: {self.param_dict.keys()}'
         assert 'lambda' in self.param_dict.keys(), err
         assert 'mu' in self.param_dict.keys(), err
         assert 'r_extend' in self.param_dict.keys(), err
@@ -1208,4 +1223,14 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
                                                class_probs=class_probs,
                                                r_ext_prob=r_extend,
                                                joint_matrix=joint_matrix)
+        
+        # if starting with start -> I, will be missing a 1 / (lambda/mu) term;
+        #   fix this by multiplying total by (mu/lambda)
+        #   if ending with I -> end, will have extra (1/nu) term; fix this by
+        #   multiplying total by (nu)
+        #   add these correction factors; use them when scoring with the 
+        #   conditional matrix
+        matrix_dict['corr_start_to_ins'] = jnp.log(mu/lam)
+        matrix_dict['corr_ins_to_end'] = jnp.log( r_extend + (1-r_extend)*(lam/mu) )
+        
         return matrix_dict, None

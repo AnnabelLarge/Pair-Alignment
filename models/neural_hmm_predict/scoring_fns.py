@@ -191,8 +191,6 @@ def preproc_emissions( samples: jnp.array,
     return samples_adj
     
 
-
-
 ###############################################################################
 ### score transitions   #######################################################
 ###############################################################################
@@ -259,7 +257,6 @@ def score_transitions(staggered_alignment_state: jnp.array,
     
     # move all positions down
     alignment_state_adj = alignment_state_adj - token_offset
-    
     
     ### Score, mask, return
     if unique_time_per_sample:
@@ -413,9 +410,24 @@ def score_f81_substitutions_marg_over_times(true_alignment_without_start: jnp.ar
     A = logprob_scoring_mat.shape[-2]
     
     # create masks BEFORE remapping tokens
-    match_pos = true_alignment_without_start[...,0] == true_alignment_without_start[...,1] #(B, L_align-1)
+    anc_toks = true_alignment_without_start[...,0] #(B, L_align-1)
     desc_toks = true_alignment_without_start[...,1] #(B, L_align-1)
+
+    anc_valid_tok = ~( (anc_toks == padding_idx) | 
+                       (anc_toks == gap_idx) |
+                       (anc_toks == start_idx) |
+                       (anc_toks == end_idx) ) #(B, L-align-1)
+    
+    desc_valid_tok = ~( (desc_toks == padding_idx) | 
+                        (desc_toks == gap_idx) |
+                        (desc_toks == start_idx) |
+                        (desc_toks == end_idx) )  #(B, L-align-1)
+    
+    match_pos = anc_valid_tok & desc_valid_tok & (anc_toks==desc_toks) #(B, L-align-1)
+    sub_pos =   anc_valid_tok & desc_valid_tok & (anc_toks!=desc_toks) #(B, L-align-1)
+    
     padding_mask = ~( (desc_toks == padding_idx) | 
+                      (anc_toks == gap_idx) |
                       (desc_toks == gap_idx) |
                       (desc_toks == start_idx) |
                       (desc_toks == end_idx) )  #(B, L-align-1)
@@ -446,10 +458,15 @@ def score_f81_substitutions_marg_over_times(true_alignment_without_start: jnp.ar
     score_if_subs = jnp.take_along_axis(logprob_matrix_subs, desc_toks_adj, axis=3)[...,0]  # (T, B, L_align-1)
     
     # use previous masking to select
-    raw_logprob = jnp.where( match_pos,
-                             score_if_match,
-                             score_if_subs )  # (T, B, L_align-1)
+    raw_logprob_match = jnp.where( match_pos,
+                                   score_if_match,
+                                   0 )  # (T, B, L_align-1)
     
+    raw_logprob_subs = jnp.where( sub_pos,
+                                  score_if_subs,
+                                  0 )  # (T, B, L_align-1)
+    
+    raw_logprob = raw_logprob_match + raw_logprob_subs
     final_logprob = raw_logprob * padding_mask[None,...]
     return final_logprob # (T, B, L_align-1)
         
@@ -500,9 +517,27 @@ def score_f81_substitutions_t_per_samp(true_alignment_without_start: jnp.array,
     A = logprob_scoring_mat.shape[-2]
     
     # create masks BEFORE remapping tokens
-    match_pos = true_alignment_without_start[...,0] == true_alignment_without_start[...,1] #(B, L_align-1)
+    anc_toks = true_alignment_without_start[...,0] #(B, L_align-1)
     desc_toks = true_alignment_without_start[...,1] #(B, L_align-1)
-    padding_mask = (desc_toks != padding_idx) #(B, L_align-1)
+
+    anc_valid_tok = ~( (anc_toks == padding_idx) | 
+                       (anc_toks == gap_idx) |
+                       (anc_toks == start_idx) |
+                       (anc_toks == end_idx) ) #(B, L-align-1)
+    
+    desc_valid_tok = ~( (desc_toks == padding_idx) | 
+                        (desc_toks == gap_idx) |
+                        (desc_toks == start_idx) |
+                        (desc_toks == end_idx) )  #(B, L-align-1)
+    
+    match_pos = anc_valid_tok & desc_valid_tok & (anc_toks==desc_toks) #(B, L-align-1)
+    sub_pos =   anc_valid_tok & desc_valid_tok & (anc_toks!=desc_toks) #(B, L-align-1)
+    
+    padding_mask = ~( (desc_toks == padding_idx) | 
+                      (anc_toks == gap_idx) |
+                      (desc_toks == gap_idx) |
+                      (desc_toks == start_idx) |
+                      (desc_toks == end_idx) )  #(B, L-align-1)
     
     # remap
     desc_toks_adj = preproc_emissions( samples = desc_toks,
@@ -531,10 +566,15 @@ def score_f81_substitutions_t_per_samp(true_alignment_without_start: jnp.array,
     score_if_subs = logprob_matrix_subs[batch_idx, pos_idx, desc_toks_adj] #(B,L_align-1)
     
     # use previous masking to select
-    raw_logprob = jnp.where( match_pos,
-                             score_if_match,
-                             score_if_subs )  # (B, L_align-1)
+    raw_logprob_match = jnp.where( match_pos,
+                                   score_if_match,
+                                   0 )  # (T, B, L_align-1)
     
+    raw_logprob_subs = jnp.where( sub_pos,
+                                  score_if_subs,
+                                  0 )  # (T, B, L_align-1)
+    
+    raw_logprob = raw_logprob_match + raw_logprob_subs
     final_logprob = raw_logprob * padding_mask  # (B, L_align-1)
     return final_logprob # (B, L_align-1)
 
@@ -596,6 +636,7 @@ def score_gtr_substitutions(true_alignment_without_start: jnp.array,
     # padding mask, before transforming input, remap
     padding_mask = ~( (true_alignment_without_start[...,0] == padding_idx) | 
                       (true_alignment_without_start[...,0] == gap_idx) |
+                      (true_alignment_without_start[...,1] == gap_idx) |
                       (true_alignment_without_start[...,0] == start_idx) |
                       (true_alignment_without_start[...,0] == end_idx) )  #(B, L-align-1)
     

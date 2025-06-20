@@ -27,8 +27,8 @@ class TestTKF92(unittest.TestCase):
         
         # for global models
         self.mu_glob = jnp.array(0.06)
-        self.offset_glob = jnp.array(0.01)
-        self.r_glob = jnp.array(0.3)
+        self.offset_glob = jnp.array(0.1)
+        self.r_glob = jnp.array(0.9)
         
         # for local models
         self.mu_loc = jnp.array([[0.06, 0.05, 0.04],

@@ -417,7 +417,7 @@ class GTRGlobalExchGlobalRateMult(neuralTKFModuleBase):
                                                    max_val = self.exchange_max_val,
                                                    param_name = 'exchangeabilities',
                                                    sow_intermediates = sow_intermediates)
-            
+
         cond_logprobs = logprob_gtr( exch_upper_triag_values = exch_upper_triag_values,
                             equilibrium_distributions = jnp.exp(log_equl),
                             rate_multiplier = self.global_rate_multiplier,

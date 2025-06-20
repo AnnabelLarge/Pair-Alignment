@@ -17,8 +17,8 @@ modules:
  'EqulDistLogprobsFromCounts',
  'EqulDistLogprobsFromFile',
  'EqulDistLogprobsPerClass',
- 'F81LogProbs',
- 'F81LogProbsFromFile',
+ 'F81Logprobs',
+ 'F81LogprobsFromFile',
  'GTRRateMat',
  'GTRRateMatFromFile',
  'HKY85RateMat',
@@ -835,7 +835,7 @@ class HKY85RateMatFromFile(GTRRateMatFromFile):
 ###############################################################################
 ### PROBABILITY MATRICES: F81   ###############################################
 ###############################################################################
-class F81LogProbs(ModuleBase):
+class F81Logprobs(ModuleBase):
     """
     Get the conditional and joint logprobs for an F81 model
     
@@ -920,9 +920,10 @@ class F81LogProbs(ModuleBase):
                                                jnp.float32)
         
     def __call__(self,
-                 logprob_equl,
-                 log_class_probs,
-                 t_array,
+                 logprob_equl: jnp.array,
+                 log_class_probs: jnp.array,
+                 t_array: jnp.array,
+                 return_cond: bool,
                  *args,
                  **kwargs):
         """
@@ -999,7 +1000,8 @@ class F81LogProbs(ModuleBase):
         
         joint_logprob = self._fill_f81(equl = prob_equl, 
                                       rate_multiplier = rate_multiplier, 
-                                      t_array = t_array) #(T,C,A,A)
+                                      t_array = t_array,
+                                      return_cond = return_cond) #(T,C,A,A)
         return joint_logprob
         
     
@@ -1010,9 +1012,6 @@ class F81LogProbs(ModuleBase):
                   return_cond = False):
         """
         return logP(emission at match) directly
-    
-        return_cond is only used in debugging and unit tests; most of the time,
-          return the joint
         """
         T = t_array.shape[0]
         C = rate_multiplier.shape[0]
@@ -1038,15 +1037,15 @@ class F81LogProbs(ModuleBase):
             # P(x) P(y|x,t) for all T, C
             equl_reshaped = equl[..., None] #(1, C, A, 1)
             joint_probs = cond_probs * equl_reshaped # (T, C, A, A)
-            return jnp.log( joint_probs ) # (T, C, A, A)
+            return safe_log( joint_probs ) # (T, C, A, A)
         
         elif return_cond:
-            return jnp.log( cond_probs ) # (T, C, A, A)
+            return safe_log( cond_probs ) # (T, C, A, A)
         
 
-class F81LogProbsFromFile(F81LogProbs):
+class F81LogprobsFromFile(F81Logprobs):
     """
-    like F81LogProbs, but load rates from file as-is
+    like F81Logprobs, but load rates from file as-is
     
     If only one model (no mixtures), then the rate multiplier is automatically 
         set to one
@@ -1069,7 +1068,7 @@ class F81LogProbsFromFile(F81LogProbs):
     setup
     __call__
     
-    Inherited from F81LogProbs
+    Inherited from F81Logprobs
     --------------------------
     _fill_f81
     
@@ -1098,9 +1097,10 @@ class F81LogProbsFromFile(F81LogProbs):
             self.rate_multiplier = jnp.array([1])
     
     def __call__(self,
-                 logprob_equl,
-                 log_class_probs,
-                 t_array,
+                 logprob_equl: jnp.array,
+                 log_class_probs: jnp.array,
+                 t_array: jnp.array,
+                 return_cond: bool,
                  *args,
                  **kwargs):
         """
@@ -1137,7 +1137,8 @@ class F81LogProbsFromFile(F81LogProbs):
         
         return self._fill_f81(equl = equl, 
                               rate_multiplier = rate_multiplier, 
-                              t_array = t_array)
+                              t_array = t_array,
+                              return_cond = return_cond)
 
     
 ###############################################################################

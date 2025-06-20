@@ -22,7 +22,7 @@ import numpy as np
 import numpy.testing as npt
 import unittest
 
-from models.simple_site_class_predict.emission_models import F81LogProbs
+from models.simple_site_class_predict.emission_models import F81Logprobs
 
 from models.simple_site_class_predict.model_functions import (upper_tri_vector_to_sym_matrix,
                                                               rate_matrix_from_exch_equl,
@@ -71,11 +71,12 @@ class TestF81(unittest.TestCase):
         
         ### by my formula
         # unit_norm_rate_multiplier = 1 / ( 1 - np.square(self.equl).sum(axis=(-1)) )
-        my_model = F81LogProbs(config={'num_mixtures': 1},
+        my_model = F81Logprobs(config={'num_mixtures': 1},
                                name='mymod')
         cond_prob_pred = my_model._fill_f81(equl = self.equl,
                                             rate_multiplier = normed_rate, 
-                                            t_array = self.t_array)
+                                            t_array = self.t_array,
+                                            return_cond=True)
         cond_prob_pred = np.exp(cond_prob_pred)
         npt.assert_allclose(cond_prob_true, cond_prob_pred, atol=THRESHOLD)
         
@@ -90,11 +91,12 @@ class TestF81(unittest.TestCase):
         unit_norm_rate_multiplier = 1 / ( 1 - np.square(self.equl).sum(axis=(-1)) )
         
         # by f81
-        my_model = F81LogProbs(config={'num_mixtures': 1},
+        my_model = F81Logprobs(config={'num_mixtures': 1},
                                name='mymod')
         cond_prob_f81 = my_model._fill_f81(equl = self.equl,
                                            rate_multiplier = unit_norm_rate_multiplier, 
-                                           t_array = self.t_array)
+                                           t_array = self.t_array,
+                                           return_cond=True)
         del my_model
         
         # by gtr, with uniform exchangeabilities
@@ -139,11 +141,12 @@ class TestF81(unittest.TestCase):
                 cond_prob_true[t_idx, c, ...] = mat
         
         ### by my formula
-        my_model = F81LogProbs(config={'num_mixtures': C},
+        my_model = F81Logprobs(config={'num_mixtures': C},
                                name='mymod')
         cond_prob_pred = my_model._fill_f81(equl = self.equl_multiclass,
                                             rate_multiplier = rate, 
-                                            t_array = self.t_array)
+                                            t_array = self.t_array,
+                                            return_cond=True)
         cond_prob_pred = np.exp(cond_prob_pred)
         npt.assert_allclose(cond_prob_true, cond_prob_pred, atol=THRESHOLD)
     
@@ -164,11 +167,12 @@ class TestF81(unittest.TestCase):
             rate = self.rate_mult_multiclass
         
         # by f81
-        my_model = F81LogProbs(config={'num_mixtures': C},
+        my_model = F81Logprobs(config={'num_mixtures': C},
                                 name='mymod')
         cond_prob_f81 = my_model._fill_f81(equl = self.equl_multiclass,
                                             rate_multiplier = rate, 
-                                            t_array = self.t_array)
+                                            t_array = self.t_array,
+                                            return_cond=True)
         del my_model
         
         # by gtr, with uniform exchangeabilities

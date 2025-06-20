@@ -280,6 +280,7 @@ class GlobalTKF91(transitionModuleBase):
         # (B, 1, 4, 4)
         cond_logprob =  self.cond_logprob_fn( tkf_params_dict = tkf_params_dict,
                                               r_extend = r_extend,
+                                              offset = offset,
                                               unique_time_per_sample = unique_time_per_sample ) 
         
         intermed_params_dict = {'lambda': mu * (1-offset),
@@ -555,6 +556,7 @@ class TKF92GlobalRateLocalFragSize(GlobalTKF91):
         # (B, L_align, 4, 4)
         cond_logprob =  self.cond_logprob_fn( tkf_params_dict = tkf_params_dict,
                                               r_extend = r_extend,
+                                              offset = offset,
                                               unique_time_per_sample = unique_time_per_sample ) 
         
         intermed_params_dict = {'lambda': mu * (1-offset),
@@ -695,6 +697,7 @@ class GlobalTKF91FromFile(neuralTKFModuleBase):
         # (B, 1, 4, 4)
         cond_logprob =  self.cond_logprob_fn( tkf_params_dict = tkf_params_dict,
                                               r_extend = r_extend,
+                                              offset = offset,
                                               unique_time_per_sample = unique_time_per_sample ) 
         
         return cond_logprob, None, None
@@ -908,6 +911,7 @@ class LocalTKF91(transitionModuleBase):
         # (B, L_align, 4, 4)
         cond_logprob =  self.cond_logprob_fn( tkf_params_dict = tkf_params_dict,
                                               r_extend = r_extend,
+                                              offset = offset,
                                               unique_time_per_sample = unique_time_per_sample ) 
         
         intermed_params_dict = {'lambda': mu * (1-offset),
