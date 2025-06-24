@@ -45,6 +45,7 @@ from utils.sequence_length_helpers import determine_alignlen_bin
 from utils.tensorboard_recording_utils import (write_times,
                                                write_optional_outputs_during_training_hmms)
 from utils.write_timing_file import write_timing_file
+from utils.write_approx_dict import write_approx_dict
 
 # specific to training this model
 from models.simple_site_class_predict.initializers import init_pairhmm_frag_and_site_classes as init_pairhmm
@@ -157,7 +158,8 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
     
     ### init sizes
     # (B, L, 3)
-    max_dim1 = test_dset.global_align_max_length 
+    max_dim1 = max([training_dset.global_seq_max_length,
+                    test_dset.global_seq_max_length])
     largest_aligns = jnp.empty( (args.batch_size, max_dim1, 3), dtype=int )
     del max_dim1
     
@@ -278,19 +280,11 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
             ### check if any approximations were used; just return sums for 
             ###   now, and in separate debugging scripts, extract these flags
             if train_metrics['used_approx'] is not None:
-                used_approx = False
-                to_write = ''
-                for key, val in train_metrics['used_approx'].items():
-                    if val.any():
-                        used_approx = True
-                        approx_count = val.sum()
-                        to_write += f'{key}: {approx_count}\n'
-                
-                if used_approx:
-                    with open(f'{args.out_arrs_dir}/TRAIN_tkf_approx.tsv','a') as g:
-                        g.write(f'epoch {epoch_idx}, batch {batch_idx}:\n')
-                        g.write(to_write + '\n')
-                del used_approx, to_write, key, val
+                subline = f'epoch {epoch_idx}, batch {batch_idx}:'
+                write_approx_dict( approx_dict = train_metrics['used_approx'], 
+                                   out_arrs_dir = args.out_arrs_dir,
+                                   out_file = 'TRAIN_tkf_approx.tsv',
+                                   subline = subline )
                     
             
 #__4___8__12: batch level (three tabs)

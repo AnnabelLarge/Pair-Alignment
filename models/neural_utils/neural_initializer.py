@@ -57,7 +57,7 @@ def create_seq_model_tstate(embedding_which,
     ### Sequence embedding imports #
     ################################
     ### Masking-based
-    if model_type == 'Masking':
+    if model_type == 'masking':
         # initialize
         from models.sequence_embedders.no_params.embedders import MaskingEmb
         seq_model_instance = MaskingEmb(config = model_config,
@@ -68,7 +68,7 @@ def create_seq_model_tstate(embedding_which,
         
     
     ### oneHot
-    elif model_type == 'OneHot':
+    elif model_type == 'onehot':
         # initialize
         from models.sequence_embedders.no_params.embedders import OneHotEmb
         seq_model_instance = OneHotEmb(config = model_config,
@@ -79,7 +79,7 @@ def create_seq_model_tstate(embedding_which,
     
     
     ### CNN (only one block type: ConvnetBlock)
-    elif model_type == 'CNN':
+    elif model_type == 'cnn':
         # import blocks to use (only one type)
         from models.sequence_embedders.cnn.blocks_fns import ConvnetBlock
         
@@ -97,7 +97,7 @@ def create_seq_model_tstate(embedding_which,
     
     
     ### LSTM
-    elif model_type == 'LSTM':
+    elif model_type == 'lstm':
         # import blocks to use 
         from models.sequence_embedders.lstm import blocks_fns
         first_block_module = getattr(blocks_fns, 
@@ -136,7 +136,7 @@ def create_seq_model_tstate(embedding_which,
     
     ### Transformer
     # come back here
-    elif model_type == 'Transformer':
+    elif model_type == 'transformer':
         # import blocks to use 
         from models.sequence_embedders.transformer import blocks_fns
         first_block_module = getattr(blocks_fns, 
@@ -158,7 +158,7 @@ def create_seq_model_tstate(embedding_which,
         
     
     ### Mamba 
-    elif model_type == 'Mamba':
+    elif model_type == 'mamba':
         # import blocks to use 
         from models.sequence_embedders.mamba import blocks_fns
         first_block_module = getattr(blocks_fns, 
@@ -201,12 +201,12 @@ def create_seq_model_tstate(embedding_which,
         
     ### error if value not in list
     else:
-        valid_types = ["Masking", 
-                       "OneHot", 
-                       "CNN", 
-                       "LSTM",
-                       "Transformer", 
-                       "Mamba",
+        valid_types = ["masking", 
+                       "onehot", 
+                       "cnn", 
+                       "lstm",
+                       "transformer", 
+                       "mamba",
                        "null/None"]
         to_write = ", ".join(valid_types)
         raise RuntimeError(f'Pick valid model type for {model_type}: {to_write}')
@@ -255,7 +255,7 @@ def prediction_head_instance( pred_model_type: str,
                               tx: Dict,
                               model_init_rngkey: jnp.array, 
                               tabulate_file_loc: str,
-                              t_array: Optional[jnp.array],
+                              t_array_for_all_samples: Optional[jnp.array],
                               model_config: Dict = dict() ):
     #############
     ### imports #
@@ -275,9 +275,9 @@ def prediction_head_instance( pred_model_type: str,
     ### initialize   #
     ##################
     dummy_mat_lst = [jnp.empty(s) for s in datamat_lst_shapes]
-    dim0 = dummy_mat_lst[0].shape[0]
-    dim1 = dummy_mat_lst[0].shape[1]
-    dummy_masking_mat = jnp.empty( (dim0, dim1) )
+    dim0 = dummy_mat_lst[0].shape[0] #(B)
+    dim1 = dummy_mat_lst[0].shape[1] #(L)
+    dummy_masking_mat = jnp.empty( (dim0, dim1) ) #(B,L)
     
     
     ### tabulate and save the model
@@ -296,8 +296,8 @@ def prediction_head_instance( pred_model_type: str,
             "sow_intermediates": False
         }
     
-        if pred_model_type == 'neural_hmm':
-            tabulate_kwargs["t_array"] = jnp.zeros(t_array.shape)
+        if (pred_model_type == 'neural_hmm'):
+            tabulate_kwargs["t_array_for_all_samples"] = t_array_for_all_samples
     
         str_out = tab_fn(**tabulate_kwargs)
         with open(f'{tabulate_file_loc}/OUT-PROJ_tabulate.txt','w') as g:
@@ -312,7 +312,7 @@ def prediction_head_instance( pred_model_type: str,
                     "mutable": ['params'] }
     
     if pred_model_type == 'neural_hmm':
-        init_kwargs["t_array"] = jnp.zeros(t_array.shape)
+        init_kwargs["t_array_for_all_samples"] = t_array_for_all_samples
     
     # Initialize with conditional arguments
     init_params = finalpred_instance.init(rngs=model_init_rngkey, **init_kwargs)
@@ -333,8 +333,12 @@ def create_all_tstates(seq_shapes,
                        anc_enc_config: dict, 
                        desc_dec_config: dict, 
                        pred_config: dict,
-                       t_array: Optional[jax.array]
+                       t_array_for_all_samples: Optional[jnp.array]
                        ):
+    
+    # largest_seqs is (B, max_seq_len)
+    # largest_aligns is (B, max_align_len)
+    # max_seq_len != max_align_len
     largest_seqs, largest_aligns = seq_shapes
     
     # keep track of dim3 size
@@ -377,7 +381,7 @@ def create_all_tstates(seq_shapes,
     ### final prediction network
     # set output shape
     if pred_config['add_prev_alignment_info']:
-        prev_state_size = (largest_seqs[0], largest_aligns[1], 6)
+        prev_state_size = (largest_seqs[0], largest_aligns[1], 5)
         list_of_shapes.append(prev_state_size)
     
     # init
@@ -386,7 +390,7 @@ def create_all_tstates(seq_shapes,
                                    tx = tx,
                                    model_init_rngkey = outproj_rngkey, 
                                    tabulate_file_loc = tabulate_file_loc,
-                                   t_array = t_array,
+                                   t_array_for_all_samples = t_array_for_all_samples,
                                    model_config = pred_config)
     
     finalpred_trainstate, finalpred_instance = out

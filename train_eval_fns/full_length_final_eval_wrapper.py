@@ -13,6 +13,7 @@ import pandas as pd
 from tqdm import tqdm
 import pgzip
 import pickle
+from typing import Optional
 
 # jax
 from jax import numpy as jnp
@@ -29,7 +30,7 @@ def final_eval_wrapper(dataloader,
                        jitted_determine_seqlen_bin,
                        jitted_determine_alignlen_bin,
                        eval_fn_jitted,
-                       out_alph_size: int, 
+                       out_alph_size: Optional[int], 
                        save_arrs: bool,
                        save_per_sample_losses: bool,
                        interms_for_tboard: dict, 
@@ -44,7 +45,6 @@ def final_eval_wrapper(dataloader,
     return_anc_embs = interms_for_tboard['ancestor_embeddings']
     return_desc_embs = interms_for_tboard['descendant_embeddings']
     return_forward_pass_outputs = interms_for_tboard['forward_pass_outputs']
-    return_final_logprobs = interms_for_tboard['final_logprobs']
     
     # just in case: during final eval, won't have gradient info; overwrite
     interms_for_tboard['gradients'] = False
@@ -71,16 +71,25 @@ def final_eval_wrapper(dataloader,
         ### unpack briefly to get max len and number of samples in the 
         ### batch; place in some bin (this controls how many jit 
         ### compilations you do)
-        batch_max_seqlen = jitted_determine_seqlen_bin(batch = batch)
-        batch_max_seqlen = batch_max_seqlen.item()
-        batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch)
-        batch_max_alignlen = batch_max_alignlen.item()
+        batch_max_seqlen = jitted_determine_seqlen_bin(batch = batch).item()
+        batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch).item()
             
         # eval
         eval_metrics = eval_fn_jitted(batch=batch, 
                                       all_trainstates=best_trainstates,
                                       max_seq_len=batch_max_seqlen,
                                       max_align_len=batch_max_alignlen)
+        
+        # check if any TKF approximations were used
+        write_approx_dict_flag = eval_metrics.get('used_approx', None)
+        if write_approx_dict_flag is not None:
+            subline = f'batch {batch_idx}:'
+            write_approx_dict( approx_dict = eval_metrics['used_approx'], 
+                               out_arrs_dir = args.out_arrs_dir,
+                               out_file = 'FINAL-EVAL_tkf_approx.tsv',
+                               subline = subline,
+                               calc_sum = False )
+        del write_approx_dict_flag
          
         # always returned from eval_metrics:
         #     - loss; float
@@ -93,6 +102,9 @@ def final_eval_wrapper(dataloader,
         #     - acc_perSamp; (B,)
         #     - cm_perSamp; (B, out_alph_size-1, out_alph_size-1)
         
+        # returned, if using neural TKF prediction head
+        #     - used_approx
+        
         # returned if flag active:
         #     - anc_layer_metrics
         #     - desc_layer_metrics
@@ -101,8 +113,7 @@ def final_eval_wrapper(dataloader,
         #     - desc_attn_weights 
         #     - final_ancestor_embeddings
         #     - final_descendant_embeddings
-        #     - any outputs from forward_pass_outputs (only relevant for neural TKF92)
-        #     - final_logprobs 
+        #     - any outputs from forward_pass_outputs
         
         
         #########################################
@@ -172,7 +183,7 @@ def final_eval_wrapper(dataloader,
             out_file = f'{out_arrs_dir}/{outfile_prefix}_pt{batch_idx}_ARRS.gz'
             to_write = {}
             def add_to_out_dict(value_to_write, flag, file_suffix):
-                if (flag) and (value_to_write != None):
+                if (flag) and (value_to_write is not None):
                     to_write[file_suffix] = value_to_write
             
             ### save confusion matrix
@@ -191,17 +202,16 @@ def final_eval_wrapper(dataloader,
                             flag = return_desc_embs,
                             file_suffix = 'DESC-SEQ-CAUSAL-EMBEDDINGS')
             
-            add_to_out_dict(value_to_write = eval_metrics.get('final_logprobs',None), 
-                            flag = return_final_logprobs,
-                            file_suffix = 'FINAL-LOGPROBS')
-            
             if return_forward_pass_outputs:
                 for key in eval_metrics.keys():
-                    if key.startswith('FPO_'):
+                    # scoring matrices for neural TKF models
+                    if key.startswith('scormat_'):
                         value_to_save = eval_metrics[key]
                         add_to_out_dict(value_to_write = value_to_save, 
                                         flag = return_forward_pass_outputs,
-                                        file_suffix = key.replace('FPO_','').upper())
+                                        file_suffix = key.replace('scormat_','').upper())
+                        
+                    # TODO: outputs from feedforward prediction head
             
             if 'anc_attn_weights' in eval_metrics.keys():
                 add_to_out_dict(value_to_write = eval_metrics['anc_attn_weights'], 
@@ -214,7 +224,7 @@ def final_eval_wrapper(dataloader,
                                 file_suffix = f'DESC-SEQ-CAUSAL-ATTN-WEIGHTS')
             
             ### finally, output a compressed dictionary of arrays with pgzip
-            with pgzip.open(out_file, "wb", thread=0) as g:
+            with pgzip.open(out_file, "wb") as g:
                 pickle.dump(to_write, g)
             del to_write, out_file
         

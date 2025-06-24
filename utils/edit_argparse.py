@@ -45,15 +45,8 @@ def fill_with_default_values(args):
         if 'chunk_length' not in provided_args:
             args.chunk_length = 512
         
-        indel_config_keys = list( args.pred_config['indels_config'].keys() )
-        if 'tkf_err' not in indel_config_keys:
-            args.pred_config['indels_config']['tkf_err '] = 1e-4
-    
-    
     elif args.pred_model_type in ['pairhmm_indp_sites',
                                   'pairhmm_frag_and_site_classes']:
-        if 'tkf_err' not in args.pred_config.keys():
-            args.pred_config['tkf_err '] = 1e-4
     
         if args.pred_model_type == 'pairhmm_indp_sites':
             args.pred_config['num_tkf_fragment_classes'] = 1

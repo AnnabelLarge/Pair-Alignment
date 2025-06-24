@@ -37,11 +37,11 @@ from utils.sequence_length_helpers import selective_squeeze
 def train_one_batch(batch, 
                     training_rngkey,
                     all_trainstates,
-                    encoder_update_fn,
                     max_seq_len,
                     max_align_len,
+                    encoder_update_fn,
                     interms_for_tboard, 
-                    t_array,  
+                    t_array_for_all_samples,  
                     concat_fn, 
                     norm_loss_by_for_reporting: str='desc_len',
                     update_grads: bool = True,
@@ -58,14 +58,16 @@ def train_one_batch(batch,
         > batch: batch from a pytorch dataloader
         > training_rngkey: the rng key
         > all_trainstates: the models + parameters
-    
-    static inputs:
-        > encoder_update_fn: updates the encoder trainstate; defined by 
-          encoder_instance.update_seq_embedder_tstate
+
+    static inputs, trigger different jit-compilations
         > max_seq_len: max length of unaligned seqs matrix (used to control 
                        number of jit-compiled versions of this function)
         > max_align_len: max length of alignment matrix (used to control 
                          number of jit-compiled versions of this function) 
+
+    static inputs, provided by partial    
+        > encoder_update_fn: updates the encoder trainstate; defined by 
+          encoder_instance.update_seq_embedder_tstate
         > norm_loss_by_for_reporting: when reporting loss, normalize by some
                     sequence length; default is desc_len
         > interms_for_tboard: decide whether or not to output intermediate 
@@ -74,18 +76,19 @@ def train_one_batch(batch,
         > concat_fn: what function to use to concatenate embedded seq inputs
 
     static inputs, specific to neural hmm:
-        > t_array: one time array for all samples (T,), or None
+        > t_array_for_all_samples: one time array for all samples, if 
+          applicable; either a jax array of size (T,) or None
     
     outputs:
         > metrics_outputs: dictionary of metrics and outputs                                  
         
     """
     # which times to use 
-    if t_array is None:
+    if t_array_for_all_samples is None:
         times_for_matrices = batch[2] #(B,)
     
-    else:
-        times_for_matrices = t_array #(T,)
+    elif t_array_for_all_samples is not None:
+        times_for_matrices = t_array_for_all_samples #(T,)
         
         
     #########################
@@ -148,16 +151,16 @@ def train_one_batch(batch,
     # need three things: gapped ancestor, gapped descendant, and 
     # state transitions (a -> b transitions)
     gapped_anc_desc = aligned_mats_suffixes[...,:2] #(B, L_align-1, 2)
-    from_states = aligned_mats_prefixes[...,2][..., None] #(B, L_align-1, 1)
-    to_states = aligned_mats_suffixes[...,2][..., None] #(B, L_align-1, 1)
+    from_states = aligned_mats_prefixes[...,2] #(B, L_align-1)
+    to_states = aligned_mats_suffixes[...,2] #(B, L_align-1)
     true_out = jnp.concatenate( [ gapped_anc_desc,
-                                  from_states,
-                                  to_states ],
+                                  from_states[..., None],
+                                  to_states[..., None] ],
                                 axis = -1 ) #(B, L_align-1, 4)
     
     # when reporting, normalize the loss by a length (but this is NOT the 
     #   objective function)
-    length_for_normalization_for_reporting = true_out[...,1] != seq_padding_idx.sum(axis=1)
+    length_for_normalization_for_reporting = (true_out[...,1] != seq_padding_idx).sum(axis=1)
     
     if norm_loss_by_for_reporting == 'desc_len':
         num_gaps = (true_out[...,1] == gap_tok).sum(axis=1)
@@ -169,8 +172,7 @@ def train_one_batch(batch,
     ############################################
     def apply_model(encoder_params, 
                     decoder_params, 
-                    finalpred_params, 
-                    t_for_training):
+                    finalpred_params):
         ### embed with ancestor encoder
         # anc_embeddings is (B, L_seq-1, H)
         out = encoder_trainstate.apply_fn( variables = encoder_params,
@@ -220,14 +222,20 @@ def train_one_batch(batch,
         datamat_lst, padding_mask = out
         del out
         
-        # add previous alignment state
-        datamat_lst.append( from_states ) #(B, L_align-1, 1)
+        # add previous alignment state, one-hot encoded
+        align_padding_mask = ( from_states != seq_padding_idx ) #(B, L_align-1)
+        from_states_raw_enc = nn.one_hot( from_states, 6, axis=-1 ) #(B, L_align-1, 6)
+        from_states_one_hot = from_states_raw_enc * align_padding_mask[...,None] #(B, L_align-1, 6)
+        from_states_one_hot = from_states_one_hot[...,1:] #(B, L_align-1, 5)
+        datamat_lst.append( from_states_one_hot ) 
+        del align_padding_mask, from_states_raw_enc
+        
         
         ### forward pass through prediction head, to get scoring matrices
         mut = ['histograms','scalars'] if finalpred_sow_outputs else []
         out = finalpred_trainstate.apply_fn(variables = finalpred_params,
                                             datamat_lst = datamat_lst,
-                                            t_array = t_for_training,
+                                            t_array = times_for_matrices,
                                             padding_mask = padding_mask,
                                             training = True,
                                             sow_intermediates = finalpred_sow_outputs,
@@ -265,7 +273,7 @@ def train_one_batch(batch,
         out = finalpred_trainstate.apply_fn( variables = finalpred_params,
                                              logprob_perSamp_perTime = logprob_perSamp_perTime,
                                              length_for_normalization_for_reporting = length_for_normalization_for_reporting,
-                                             t_array = t_array,
+                                             t_array = times_for_matrices,
                                              padding_idx = seq_padding_idx,
                                              method = 'evaluate_loss_after_scan' )
         loss, aux_dict = out
@@ -276,8 +284,8 @@ def train_one_batch(batch,
         aux_dict['embeddings_aux_dict'] = embeddings_aux_dict
         aux_dict['pred_layer_metrics'] = pred_layer_metrics
         
-        for key, val in forward_pass_scoring_matrices.items():
-            aux_dict[f'scormat_{key}'] = val
+        # during training, only return the approximation dictionary
+        aux_dict['used_approx'] = approx_flags_dict
         
         return (loss, aux_dict)
     
@@ -289,8 +297,7 @@ def train_one_batch(batch,
     
     (batch_loss, aux_dict), all_grads = grad_fn(encoder_trainstate.params, 
                                                 decoder_trainstate.params, 
-                                                finalpred_trainstate.params,
-                                                t_array = times_for_matrices)
+                                                finalpred_trainstate.params)
     
     enc_gradient, dec_gradient, finalpred_gradient = all_grads
     del all_grads
@@ -300,10 +307,6 @@ def train_one_batch(batch,
     batch_ave_perpl = finalpred_trainstate.apply_fn( variables = finalpred_trainstate.params,
                                                      loss_fn_dict = aux_dict,
                                                      method = 'get_perplexity_per_sample' ).mean()
-    
-    ece = finalpred_trainstate.apply_fn( variables = finalpred_trainstate.params,
-                                         loss = batch_loss,
-                                         method = 'get_ece' )
     
     
     ###########################
@@ -365,11 +368,9 @@ def train_one_batch(batch,
                 'sum_neg_logP': aux_dict['sum_neg_logP'],
                 'neg_logP_length_normed': aux_dict['neg_logP_length_normed'],
                 'batch_loss': batch_loss,
-                'batch_ave_perpl': batch_ave_perpl
+                'batch_ave_perpl': batch_ave_perpl,
+                'used_approx': aux_dict['used_approx']
                 }
-    for key, val in aux_dict.items():
-        if key.startswith('scormat_'):
-            out_dict[key] = val
     
     ### controlled by boolean flag
     def save_to_out_dict(value_to_save, flag, varname_to_write):
@@ -413,7 +414,7 @@ def train_one_batch(batch,
     #     - batch_ave_perpl; float
     #     - sum_neg_logP (B,); the loss per sample
     #     - neg_logP_length_normed (B,); the loss per sample, normalized by seq length
-    #     - all scoring matrices from forward pass
+    #     - used_approx; dictionary of counts of how many times tkf approximations were made
     
     # returned if flag active:
     #     - anc_layer_metrics
@@ -438,7 +439,7 @@ def eval_one_batch(batch,
                     max_seq_len,
                     max_align_len,
                     interms_for_tboard, 
-                    t_array,  
+                    t_array_for_all_samples,  
                     concat_fn, 
                     norm_loss_by_for_reporting: str='desc_len',
                     update_grads: bool = True,
@@ -455,11 +456,13 @@ def eval_one_batch(batch,
         > batch: batch from a pytorch dataloader
         > all_trainstates: the models + parameters
     
-    static inputs:
+    static inputs, trigger different jit-compilations:
         > max_seq_len: max length of unaligned seqs matrix (used to control 
                        number of jit-compiled versions of this function)
         > max_align_len: max length of alignment matrix (used to control 
                          number of jit-compiled versions of this function) 
+    
+    static inputs, provided by partial:
         > norm_loss_by_for_reporting: when reporting loss, normalize by some
                     sequence length; default is desc_len
         > interms_for_tboard: decide whether or not to output intermediate 
@@ -469,17 +472,18 @@ def eval_one_batch(batch,
         > extra_args_for_eval: extra inputs for custom eval functions
 
     static inputs, specific to neural hmm:
-        > t_array: one time array for all samples (T,), or None
+        > t_array_for_all_samples: one time array for all samples, if 
+          applicable; either a jax array of size (T,) or None
     
     outputs:
         > metrics_outputs: dictionary of metrics and outputs 
     """
     # which times to use 
-    if t_array is None:
+    if t_array_for_all_samples is None:
         times_for_matrices = batch[2] #(B,)
     
-    else:
-        times_for_matrices = t_array #(T,)
+    elif t_array_for_all_samples is not None:
+        times_for_matrices = t_array_for_all_samples #(T,)
     
     #########################
     ### UNPACK FLAGS, FNS   #
@@ -549,7 +553,7 @@ def eval_one_batch(batch,
     
     # when reporting, normalize the loss by a length (but this is NOT the 
     #   objective function)
-    length_for_normalization_for_reporting = true_out[...,1] != seq_padding_idx.sum(axis=1)
+    length_for_normalization_for_reporting = (true_out[...,1] != seq_padding_idx).sum(axis=1)
     
     if norm_loss_by_for_reporting == 'desc_len':
         num_gaps = (true_out[...,1] == gap_tok).sum(axis=1)
@@ -564,8 +568,7 @@ def eval_one_batch(batch,
     # anc_embeddings is (B, L_seq-1, H)
     out = encoder_trainstate.apply_fn( variables = encoder_trainstate.params,
                                        seqs = anc_seqs,
-                                       rng_key = enc_key,
-                                       params_for_apply = encoder_params,
+                                       params_for_apply = encoder_trainstate.params,
                                        seq_emb_trainstate = encoder_trainstate,
                                        sow_outputs = encoder_sow_outputs,
                                        method = 'apply_seq_embedder_in_eval' )
@@ -578,8 +581,7 @@ def eval_one_batch(batch,
     # desc_embeddings is (B, L_seq-1, H)
     out = decoder_trainstate.apply_fn( variables = decoder_trainstate.params,
                                     seqs = desc_seqs,
-                                    rng_key = dec_key,
-                                    params_for_apply = decoder_params,
+                                    params_for_apply = decoder_trainstate.params,
                                     seq_emb_trainstate = decoder_trainstate,
                                     sow_outputs = decoder_sow_outputs,
                                     method = 'apply_seq_embedder_in_eval' )
@@ -609,8 +611,13 @@ def eval_one_batch(batch,
     datamat_lst, alignment_padding_mask = out
     del out
     
-    # add previous alignment state
-    datamat_lst.append( from_states ) #(B, L_align-1, 1)
+    # add previous alignment state, one-hot encoded
+    align_padding_mask = ( from_states != seq_padding_idx ) #(B, L_align-1)
+    from_states_raw_enc = nn.one_hot( from_states, 6, axis=-1 ) #(B, L_align-1, 6)
+    from_states_one_hot = from_states_raw_enc * align_padding_mask[...,None] #(B, L_align-1, 6)
+    from_states_one_hot = from_states_one_hot[...,1:] #(B, L_align-1, 5)
+    datamat_lst.append( from_states_one_hot ) 
+    del align_padding_mask, from_states_raw_enc
     
         
     ### forward pass through prediction head, to get scoring matrices
@@ -654,7 +661,7 @@ def eval_one_batch(batch,
     out = finalpred_trainstate.apply_fn( variables = finalpred_trainstate.params,
                                          logprob_perSamp_perTime = logprob_perSamp_perTime,
                                          length_for_normalization_for_reporting = length_for_normalization_for_reporting,
-                                         t_array = t_array,
+                                         t_array = times_for_matrices,
                                          padding_idx = seq_padding_idx,
                                          method = 'evaluate_loss_after_scan' )
     loss, loss_fn_dict = out
@@ -666,10 +673,6 @@ def eval_one_batch(batch,
                                                      loss_fn_dict = loss_fn_dict,
                                                      method = 'get_perplexity_per_sample' )
     
-    ece = finalpred_trainstate.apply_fn( variables = finalpred_trainstate.params,
-                                         loss = loss,
-                                         method = 'get_ece' )
-    
     
     ##########################################
     ### COMPILE FINAL DICTIONARY TO RETURN   #
@@ -679,7 +682,7 @@ def eval_one_batch(batch,
                 'sum_neg_logP': loss_fn_dict['sum_neg_logP'],
                 'neg_logP_length_normed': loss_fn_dict['neg_logP_length_normed'],
                 'perplexity_perSamp': perplexity_perSamp,
-                'ece': ece}
+                'used_approx': forward_pass_scoring_matrices['approx_flags_dict']}
     
     
     ### optional things to add
@@ -720,17 +723,18 @@ def eval_one_batch(batch,
                            flag = return_desc_embs,
                            varname_to_write = 'final_descendant_embeddings')
     
-    # instead of "final_logits," write whatever comes out of forward_pass_outputs
+    # write whatever comes out of forward_pass_outputs
     if return_forward_pass_outputs:
-        for key, val in aux_dict.items():
-            if key.startswith('scormat_'):
-                out_dict[key] = val
+        for key, val in forward_pass_scoring_matrices.items():
+            if key != 'approx_flags_dict':
+                out_dict[f'scormat_{key}'] = val
     
     # always returned from out_dict:
     #     - loss; float
     #     - sum_neg_logP; (B,)
     #     - neg_logP_length_normed; (B,)
     #     - perplexity_perSamp; (B,)
+    #     - used_approx; dictionary of counts of how many times tkf approximations were made
     
     # returned if flag active:
     #     - anc_layer_metrics
@@ -740,10 +744,10 @@ def eval_one_batch(batch,
     #     - desc_attn_weights 
     #     - final_ancestor_embeddings
     #     - final_descendant_embeddings
-    #     - any outputs from forward_pass_outputs (like final_logits)
-    #     - final_logprobs (i.e. AFTER log_softmax)
-         
-    
-    # DEBUG: add extra values
-    # out_dict = {**out_dict, **loss_fn_dict}
+    #     - all other outputs in forward_pass_scoring_matrices
+    #       > logprob_emit_match
+    #       > logprob_emit_indel
+    #       > logprob_transits
+    #       > subs_model_params
+    #       > indel_model_params
     return out_dict

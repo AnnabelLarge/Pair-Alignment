@@ -45,20 +45,12 @@ from utils.tensorboard_recording_utils import (write_times,
 from utils.write_timing_file import write_timing_file
 
 # specific to training this model
-# from dloaders.init_full_len_dset import init_full_len_dset
-from models.neural_utils.neural_initializer import create_all_tstates 
-from train_eval_fns.neural_tkf_train_eval import ( train_one_batch,
-                                                   eval_one_batch )
+from dloaders.init_full_len_dset import init_full_len_dset
+from models.neural_hmm_predict.initializers import create_all_tstates 
+from train_eval_fns.neural_hmm_training_fns import ( train_one_batch,
+                                                      eval_one_batch )
 from train_eval_fns.full_length_final_eval_wrapper import final_eval_wrapper
 
-
-def _save_to_pickle(out_file, obj):
-    with open(out_file, 'wb') as g:
-        pickle.dump(obj, g)
-
-def _save_trainstate(out_file, tstate_obj):
-    model_state_dict = flax.serialization.to_state_dict(tstate_obj)
-    _save_to_pickle(out_file, model_state_dict)
 
 
 def train_neural_hmm(args, dataloader_dict: dict):
@@ -94,23 +86,12 @@ def train_neural_hmm(args, dataloader_dict: dict):
     
     # create a new logfile
     with open(args.logfile_name,'w') as g:
-        if not args.update_grads:
-            g.write('DEBUG MODE: DISABLING GRAD UPDATES\n\n')
-            
-        g.write(f'Neural sequence embedders with Markovian alignment assumption\n')
-        g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )
-        g.write( f'Indel model: {args.pred_config["indel_model_type"]}\n' )
-        g.write( f' when reporting, normalizing losses by: {args.norm_loss_by}\n' )
-        
-        g.write( f'Evolutionary model parameters (global vs local):\n' )
-        for key, val in args.pred_config["global_or_local"].items():
-            g.write(f'{key}: {val}\n')
-        g.write('\n')
-        
-        g.write(f'Ancestor sequence embedder (FULL-CONTEXT): {args.anc_model_type}\n')
-        g.write(f'Descendant sequence embedder (CAUSAL): {args.desc_model_type}\n\n')
-        
-        
+        g.write(f'Neural TKF92 with markovian site classes over emissions\n')
+        g.write(f'  - preset name: {args.pred_config["preset_name"]} \n')
+        g.write(f'  - Loss function: {args.loss_type}\n')
+        g.write(f'  - Normalizing losses by: {args.norm_loss_by}\n')
+    
+    
     ### save updated config, provide filename for saving model parameters
     encoder_save_model_filename = args.model_ckpts_dir + '/'+ f'ANC_ENC.pkl'
     decoder_save_model_filename = args.model_ckpts_dir + '/'+ f'DESC_DEC.pkl'
@@ -125,8 +106,6 @@ def train_neural_hmm(args, dataloader_dict: dict):
     training_dl = dataloader_dict['training_dl']
     test_dset = dataloader_dict['test_dset']
     test_dl = dataloader_dict['test_dl']
-    t_array_for_all_samples = dataloader_dict['t_array_for_all_samples']
-    
     args.pred_config['equilibr_config']['training_dset_aa_counts'] = training_dset.emit_counts
     
     
@@ -138,18 +117,22 @@ def train_neural_hmm(args, dataloader_dict: dict):
         g.write('\n')
         g.write(f'2: model init\n')
     
-    # init the optimizer, split a new rng key
+    # init the optimizer
     tx = build_optimizer(args)
+    
+    # initialize dummy array of times
+    num_timepoints = test_dset.retrieve_num_timepoints(times_from = args.pred_config['times_from'])
+    dummy_t_array = jnp.empty( (num_timepoints, 1) ) #(T, B=1)
+    
+    # split a new rng key
     rngkey, model_init_rngkey = jax.random.split(rngkey, num=2)
     
     
-    ### determine shapes for init
-    # unaligned sequences sizes
+    ### init sizes
     global_seq_max_length = max([training_dset.global_seq_max_length,
                                  test_dset.global_seq_max_length])
     largest_seqs = (args.batch_size, global_seq_max_length)
     
-    # aligned datasets sizes
     if args.use_scan_fns:
         max_dim1 = args.chunk_length
     
@@ -160,43 +143,10 @@ def train_neural_hmm(args, dataloader_dict: dict):
     largest_aligns = (args.batch_size, max_dim1)
     del max_dim1
     
-    # time
-    if t_array_for_all_samples is not None:
-        dummy_t_array_for_all_samples = jnp.empty( (t_array_for_all_samples.shape[0], ) )
-        dummy_t_for_each_sample = None
-    
-    else:
-        dummy_t_array_for_all_samples = None
-        dummy_t_for_each_sample = jnp.empty( (args.batch_size,) )
-    
-    # batch provided to train/eval functions consist of:
-    # 1.) unaligned sequences (B, L_seq, 2)
-    # 2.) aligned data matrices (B, L_align, 5)
-    # 3.) time per sample (if applicable) (B,)
-    # 4, not used.) sample index (B,)
-    seq_shapes = [largest_seqs, largest_aligns, dummy_t_for_each_sample]
+    seq_shapes = [largest_seqs, largest_aligns]
     
     
-    ### initialize trainstate objects, concat_fn
-    out = create_all_tstates( seq_shapes = seq_shapes, 
-                              tx = tx, 
-                              model_init_rngkey = model_init_rngkey,
-                              tabulate_file_loc = args.model_ckpts_dir,
-                              anc_model_type = args.anc_model_type, 
-                              desc_model_type = args.desc_model_type, 
-                              pred_model_type = args.pred_model_type, 
-                              anc_enc_config = args.anc_enc_config, 
-                              desc_dec_config = args.desc_dec_config, 
-                              pred_config = args.pred_config,
-                              t_array_for_all_samples = dummy_t_array_for_all_samples,
-                              )  
-    all_trainstates, all_model_instances, concat_fn = out
-    del out
-    
-    
-    ### jit-compilations
-    # helpers to determine when to jit-compile (according to seq/align length 
-    #   combination)
+    ### fn to handle jit-compiling according to alignment length
     parted_determine_alignlen_bin = partial(determine_alignlen_bin,  
                                             chunk_length = args.chunk_length,
                                             seq_padding_idx = args.seq_padding_idx)
@@ -209,15 +159,36 @@ def train_neural_hmm(args, dataloader_dict: dict):
     jitted_determine_seqlen_bin = jax.jit(parted_determine_seqlen_bin)
     del parted_determine_seqlen_bin
     
-    # training function
-    encoder_update_fn = all_model_instances[0].update_seq_embedder_tstate
+    
+    ### initialize functions, determine concat_fn
+    out = create_all_tstates( seq_shapes = seq_shapes, 
+                              dummy_t_array = dummy_t_array,
+                              tx = tx, 
+                              model_init_rngkey = model_init_rngkey,
+                              tabulate_file_loc = args.model_ckpts_dir,
+                              anc_model_type = args.anc_model_type, 
+                              desc_model_type = args.desc_model_type, 
+                              pred_model_type = args.pred_model_type, 
+                              anc_enc_config = args.anc_enc_config, 
+                              desc_dec_config = args.desc_dec_config, 
+                              pred_config = args.pred_config,
+                              )  
+    all_trainstates, all_model_instances, concat_fn = out
+    del out
+    
+    
+    ### parted and jit-compiled training_fn
+    t_array = training_dset.return_time_array()
     parted_train_fn = partial( train_one_batch,
-                               encoder_update_fn = encoder_update_fn,
-                               interms_for_tboard = args.interms_for_tboard,
-                               t_array_for_all_samples = t_array_for_all_samples,
-                               concat_fn = concat_fn,
-                               norm_loss_by_for_reporting = args.norm_loss_by,
-                               update_grads = args.update_grads )
+                                all_model_instances = all_model_instances,
+                                norm_loss_by = args.norm_loss_by,
+                                interms_for_tboard = args.interms_for_tboard,
+                                loss_type = args.loss_type,
+                                exponential_dist_param = args.pred_config['exponential_dist_param'],
+                                t_array = t_array,
+                                concat_fn = concat_fn,
+                                update_grads = args.update_grads
+                              )
     
     train_fn_jitted = jax.jit(parted_train_fn, 
                               static_argnames = ['max_seq_len',
@@ -235,7 +206,8 @@ def train_neural_hmm(args, dataloader_dict: dict):
                   'weights': False,
                   'ancestor_embeddings': False,
                   'descendant_embeddings': False,
-                  'forward_pass_outputs': False}
+                  'forward_pass_outputs': False,
+                  'final_logprobs': False}
     extra_args_for_eval = dict()
     
     # if this is a transformer model, will have extra arguments for eval funciton
@@ -243,15 +215,18 @@ def train_neural_hmm(args, dataloader_dict: dict):
         extra_args_for_eval['output_attn_weights'] = False
     
     parted_eval_fn = partial( eval_one_batch,
+                              all_model_instances = all_model_instances,
+                              norm_loss_by = args.norm_loss_by,
                               interms_for_tboard = no_returns,
-                              t_array_for_all_samples = t_array_for_all_samples,  
+                              t_array = t_array,  
+                              loss_type = args.loss_type,
+                              exponential_dist_param = args.pred_config['exponential_dist_param'],
                               concat_fn = concat_fn,
-                              norm_loss_by_for_reporting = args.norm_loss_by,                  
-                              extra_args_for_eval = extra_args_for_eval )
-    del no_returns, extra_args_for_eval
+                              extra_args_for_eval = extra_args_for_eval
+                              )
     
     # jit compile this eval function
-    eval_fn_jitted = jax.jit( parted_eval_fn, 
+    eval_fn_jitted = jax.jit(parted_eval_fn, 
                               static_argnames = ['max_seq_len',
                                                  'max_align_len'])
     del parted_eval_fn
@@ -271,7 +246,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
     best_trainstates = all_trainstates
     
     # quit training if test loss increases for X epochs in a row
-    prev_test_loss = jnp.finfo(jnp.float32).max
+    prev_test_loss = 999999
     early_stopping_counter = 0
     
     # rng key for train
@@ -304,8 +279,10 @@ def train_neural_hmm(args, dataloader_dict: dict):
             # unpack briefly to get max len and number of samples in the 
             #   batch; place in some bin (this controls how many jit 
             #   compilations you do)
-            batch_max_seqlen = jitted_determine_seqlen_bin(batch = batch).item()
-            batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch).item()
+            batch_max_seqlen = jitted_determine_seqlen_bin(batch = batch)
+            batch_max_seqlen = batch_max_seqlen.item()
+            batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch)
+            batch_max_alignlen = batch_max_alignlen.item()
             
             # I've had so much trouble with this ugh
             if args.use_scan_fns:
@@ -314,6 +291,17 @@ def train_neural_hmm(args, dataloader_dict: dict):
                        f', which is not divisible by length for scan '+
                        f'({args.chunk_length})')
                 assert (batch_max_alignlen - 1) % args.chunk_length == 0, err
+            
+            # # !!!!!!!!!!!!!!! BELOW IS FOR DEBUG-ONLY !!!!!!!!!!!!!!! 
+            # # record values before gradient update
+            # if batch_epoch_idx > 0:
+            #     for key, val in train_metrics.items():
+            #         if key.startswith('FPO_'):
+            #             out_filename = (f'{args.out_arrs_dir}/'+
+            #                             f'{key.replace("FPO_","BEFORE-UPDATE_")}.npy')
+            #             with open(out_filename,'wb') as g:
+            #                 np.save(g, val)
+            # # !!!!!!!!!!!!!!! ABOVE IS FOR DEBUG-ONLY !!!!!!!!!!!!!!! 
             
             
             ### run function to train on one batch of samples
@@ -328,14 +316,29 @@ def train_neural_hmm(args, dataloader_dict: dict):
             train_metrics, all_trainstates = out
             del out
             
-            # check if any approximations were used; sum is returned by default
-            if train_metrics['used_approx'] is not None:
-                subline = f'epoch {epoch_idx}, batch {batch_idx}:'
-                write_approx_dict( approx_dict = train_metrics['used_approx'], 
-                                   out_arrs_dir = args.out_arrs_dir,
-                                   out_file = 'TRAIN_tkf_approx.tsv',
-                                   subline = subline,
-                                   calc_sum = False )
+            
+            # # !!!!!!!!!!!!!!! BELOW IS FOR DEBUG-ONLY !!!!!!!!!!!!!!! 
+            # ### DEBUG: log loss per batch in a text file
+            # batch_samples = training_dset.retrieve_sample_names(batch[-1])
+            # with open(f'{args.logfile_dir}/LOSSES.tsv','a') as g:
+            #     g.write( (f'{epoch_idx}' + '\t' +
+            #               f'train_set' + '\t' +
+            #               f'{batch_idx}' + '\t' +
+            #               f"{train_metrics['batch_loss']}" + '\t' +
+            #               f"{train_metrics['batch_ave_perpl']}" + '\t' +
+            #               f"{np.exp(train_metrics['batch_loss'])}" + '\t' +
+            #               f'none' + '\n' )
+            #             )
+            
+            # ### DEBUG: record output after gradient update
+            # # save any forward-pass outputs
+            # for key, val in train_metrics.items():
+            #     if key.startswith('FPO_'):
+            #         out_filename = (f'{args.out_arrs_dir}/'+
+            #                         f'{key.replace("FPO_","AFTER-UPDATE_")}.npy')
+            #         with open(out_filename,'wb') as g:
+            #             np.save(g, val)
+            # # !!!!!!!!!!!!!!! ABOVE IS FOR DEBUG-ONLY !!!!!!!!!!!!!!! 
             
             
 #__4___8__12: batch level (three tabs)
@@ -364,12 +367,18 @@ def train_neural_hmm(args, dataloader_dict: dict):
                                                        interms_for_tboard = args.interms_for_tboard, 
                                                        write_histograms_flag = False)
                 
+                # save the batch elements itself
+                for i, mat in enumerate( batch[:-1] ):
+                    with open( f'{args.out_arrs_dir}/NAN-BATCH_matrix{i}.npy','wb' ) as g:
+                        np.save(g, mat)
+                    
                 # record timing so far (if any)
                 write_timing_file( outdir = args.logfile_dir,
                                    train_times = all_train_set_times,
                                    eval_times = all_eval_set_times,
                                    total_times = all_epoch_times )
                 
+                ### rage quit
                 raise RuntimeError( ('NaN loss detected; saved intermediates '+
                                     'and quit training') )
                 
@@ -431,8 +440,10 @@ def train_neural_hmm(args, dataloader_dict: dict):
             # unpack briefly to get max len and number of samples in the 
             #   batch; place in some bin (this controls how many jit 
             #   compilations you do)
-            batch_max_seqlen = jitted_determine_seqlen_bin(batch = batch).item()
-            batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch).item()
+            batch_max_seqlen = jitted_determine_seqlen_bin(batch = batch)
+            batch_max_seqlen = batch_max_seqlen.item()
+            batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch)
+            batch_max_alignlen = batch_max_alignlen.item()
             
             # I've had so much trouble with this ugh
             if args.use_scan_fns:
@@ -507,6 +518,10 @@ def train_neural_hmm(args, dataloader_dict: dict):
         ###      save the model params and args for later eval   #
         ##########################################################
         if ave_epoch_test_loss < best_test_loss:
+            # ### !!!!!!!!!!!!!!! BELOW IS FOR DEBUG-ONLY !!!!!!!!!!!!!!! 
+            # note = 'best_epoch'
+            # ### !!!!!!!!!!!!!!! ABOVE IS FOR DEBUG-ONLY !!!!!!!!!!!!!!! 
+            
             with open(args.logfile_name,'a') as g:
                 g.write((f'New best test loss at epoch {epoch_idx}: ') +
                         (f'{ave_epoch_test_loss}\n'))
@@ -523,6 +538,36 @@ def train_neural_hmm(args, dataloader_dict: dict):
                     model_state_dict = flax.serialization.to_state_dict(all_trainstates[i])
                     pickle.dump(model_state_dict, g)
                     
+            
+        # ### !!!!!!!!!!!!!!! BELOW IS FOR DEBUG-ONLY !!!!!!!!!!!!!!! 
+        # else:
+        #     note = 'none'
+        # ### !!!!!!!!!!!!!!! ABOVE IS FOR DEBUG-ONLY !!!!!!!!!!!!!!! 
+        
+
+#__4___8: epoch level (two tabs) 
+        # ### !!!!!!!!!!!!!!! BELOW IS FOR DEBUG-ONLY !!!!!!!!!!!!!!!
+        # ### also write losses to text file
+        # with open(f'{args.logfile_dir}/LOSSES.tsv','a') as g:
+        #     g.write( (f'{epoch_idx}' + '\t' +
+        #               f'train_dset' + '\t' +
+        #               f'DSET_AVE' + '\t' +
+        #               f"{ave_epoch_train_loss.item()}" + '\t' +
+        #               f"{ave_epoch_train_perpl.item()}" + '\t' +
+        #               f"{np.exp( ave_epoch_train_loss.item() )}" + '\t' +
+        #               f"{note}" +'\n') 
+        #             )
+            
+        #     g.write( (f'{epoch_idx}' + '\t' +
+        #               f'test_dset' + '\t' +
+        #               f'DSET_AVE' + '\t' +
+        #               f"{ave_epoch_test_loss.item()}" + '\t' +
+        #               f"{ave_epoch_test_perpl.item()}" + '\t' +
+        #               f"{np.exp( ave_epoch_test_loss.item() )}" + '\t' +
+        #               f"{note}" +'\n') 
+        #             )
+        # ### !!!!!!!!!!!!!!! ABOVE IS FOR DEBUG-ONLY !!!!!!!!!!!!!!! 
+            
         
 #__4___8: epoch level (two tabs) 
         ###########################
@@ -532,8 +577,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
         ###              to previous epoch's test loss
         cond1 = jnp.allclose (prev_test_loss, 
                               jnp.minimum (prev_test_loss, ave_epoch_test_loss), 
-                              atol=args.early_stop_cond1_atol,
-                              rtol=0)
+                              atol=args.early_stop_cond1_atol)
 
         ### condition 2: if test loss is substatially worse than best test loss
         cond2 = (ave_epoch_test_loss - best_test_loss) > args.early_stop_cond2_gap
@@ -636,21 +680,25 @@ def train_neural_hmm(args, dataloader_dict: dict):
     ### jit compile new eval function
     # if this is a transformer model, will have extra arguments for eval funciton
     extra_args_for_eval = dict()
-    if (args.anc_model_type == 'transformer' and args.desc_model_type == 'transformer'):
+    if (args.anc_model_type == 'Transformer' and args.desc_model_type == 'Transformer'):
         flag = (args.anc_enc_config.get('output_attn_weights',False) or 
                 args.desc_dec_config.get('output_attn_weights',False))
         extra_args_for_eval['output_attn_weights'] = flag
     
     parted_eval_fn = partial( eval_one_batch,
+                              all_model_instances = all_model_instances,
+                              norm_loss_by = args.norm_loss_by,
                               interms_for_tboard = args.interms_for_tboard,
-                              t_array_for_all_samples = t_array_for_all_samples,  
+                              t_array = t_array,  
+                              loss_type = args.loss_type,
+                              exponential_dist_param = args.pred_config['exponential_dist_param'],
                               concat_fn = concat_fn,
-                              norm_loss_by_for_reporting = args.norm_loss_by,  
-                              extra_args_for_eval = extra_args_for_eval )
-    del extra_args_for_eval
+                              extra_args_for_eval = extra_args_for_eval
+                              )
+    del no_returns, extra_args_for_eval
     
     # jit compile this eval function
-    eval_fn_jitted = jax.jit( parted_eval_fn, 
+    eval_fn_jitted = jax.jit(parted_eval_fn, 
                               static_argnames = ['max_seq_len',
                                                  'max_align_len'])
     del parted_eval_fn
@@ -706,16 +754,12 @@ def train_neural_hmm(args, dataloader_dict: dict):
     ### update the logfile with final losses  #
     ###########################################
     to_write = {'RUN': args.training_wkdir,
-                
-                f'train_ave_loss': train_summary_stats['final_ave_loss'],
-                f'train_ave_loss_seqlen_normed': train_summary_stats['final_ave_loss_seqlen_normed'],
-                f'train_perplexity': train_summary_stats['final_perplexity'],
-                f'train_ece': train_summary_stats['final_ece'] ,
-                
-                f'test_ave_loss': test_summary_stats['final_ave_loss'],
-                f'test_ave_loss_seqlen_normed': test_summary_stats['final_ave_loss_seqlen_normed'],
-                f'test_perplexity': test_summary_stats['final_perplexity'],
-                f'test_ece': test_summary_stats['final_ece']
+                f'train_ave_{args.loss_type}_loss_seqlen_normed': train_summary_stats['final_ave_loss_seqlen_normed'],
+                'train_perplexity': train_summary_stats['final_perplexity'],
+                'train_ece': train_summary_stats['final_ece'] ,
+                f'test_ave_{args.loss_type}_loss_seqlen_normed': test_summary_stats['final_ave_loss_seqlen_normed'],
+                'test_perplexity': test_summary_stats['final_perplexity'],
+                'test_ece': test_summary_stats['final_ece']
                 }
     
     with open(f'{args.logfile_dir}/AVE-LOSSES.tsv','w') as g:

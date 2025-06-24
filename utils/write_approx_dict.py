@@ -9,7 +9,8 @@ Created on Fri May 30 18:23:14 2025
 def write_approx_dict(approx_dict, 
                       out_arrs_dir,
                       out_file,
-                      subline):
+                      subline,
+                      calc_sum = True):
     used_approx = False
     to_write = ''
     
@@ -18,14 +19,16 @@ def write_approx_dict(approx_dict,
         val = approx_dict[key]
         if val.any():
             used_approx = True
-            approx_count = val.sum()
-            to_write += f'{key}: {approx_count}\n'
+            if calc_sum:
+                approx_count = val.sum()
+                to_write += f'{key}: {approx_count}\n'
+            else:
+                to_write += f'{key}: {val}\n'
             
     if used_approx:
         t_to_write = approx_dict['t_array']
         t_to_write = t_to_write[t_to_write != -1.]
         t_to_write = ', '.join( list(set([str(t) for t in t_to_write])) )
-        # with open(f'{out_arrs_dir}/TRAIN_tkf_approx.tsv','a') as g:
         with open(f'{out_arrs_dir}/{out_file}','a') as g:
             g.write(f'{subline}\n')
             g.write(f'times: {t_to_write}\n')

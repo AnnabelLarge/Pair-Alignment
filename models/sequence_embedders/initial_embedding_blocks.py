@@ -28,7 +28,7 @@ class PlaceholderEmbedding(nn.Module):
     """
     config: dict
     name: str
-    causal: bool
+    causal: None
     
     @nn.compact
     def __call__(self, datamat, training: bool = None):
@@ -72,7 +72,7 @@ class EmbeddingWithPadding(ModuleBase):
     """
     config: dict
     name: str
-    causal: bool
+    causal: None
     
     def setup(self):
         ### unpack config
@@ -89,7 +89,7 @@ class EmbeddingWithPadding(ModuleBase):
         
         
     def __call__(self, datamat, training: bool = None):
-        padding_mask_template = jnp.where(datamat == self.padding_idx, False, True)[:,:,None]
+        padding_mask_template = (datamat != self.padding_idx)[...,None] #(B, L, 1)
         
         # (B,L) -> (B, L, H)
         datamat = self.initial_embedding(datamat)
@@ -129,7 +129,7 @@ class TAPEEmbedding(ModuleBase):
     """
     config: dict
     name: str
-    causal: bool
+    causal: None
     
     def setup(self):
         ### unpack config
@@ -153,7 +153,7 @@ class TAPEEmbedding(ModuleBase):
         
         
     def __call__(self, datamat, training):
-        padding_mask_template = jnp.where(datamat == self.padding_idx, False, True)[:,:,None]
+        padding_mask_template = (datamat != self.padding_idx)[...,None]
     
         ### create a position matrix
         datamat_batch_size, datamat_max_len = datamat.shape
@@ -246,7 +246,7 @@ class ConvEmbedding(ModuleBase):
         
     def __call__(self, datamat, training):
         ### use this for building padding masks
-        padding_mask_template = jnp.where(datamat == self.padding_idx, False, True)[:,:,None]
+        padding_mask_template = (datamat != self.padding_idx)[:,:,None]
         
         
         ### one-hot encode
@@ -261,11 +261,12 @@ class ConvEmbedding(ModuleBase):
         padding_mask_for_OH = jnp.broadcast_to(padding_mask_template, new_shape)
         del new_shape
         
-        datamat = jnp.multiply(datamat, padding_mask_for_OH)
+        datamat = jnp.multiply(datamat, padding_mask_for_OH) #(B, L, base_alphabet_size)
+        datamat = datamat[..., 1:] #(B, L, base_alphabet_size - 1)
         
         
         ### conv to full hidden dimension
-        # (B, L, base_alphabet_size) -> (B, L, H)
+        # (B, L, base_alphabet_size - 1) -> (B, L, H)
         datamat = self.conv(datamat)
         
         # mask positions with padding tokens

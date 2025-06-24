@@ -10,6 +10,8 @@ ABOUT:
 Sequence embedders with no params: one-hot encoding and a placeholder class
 
 """
+from typing import Optional
+
 from flax import linen as nn
 import jax
 from jax import numpy as jnp
@@ -96,13 +98,31 @@ class OneHotEmb(SeqEmbBase):
     
     def setup(self):
         self.base_alphabet_size = self.config.get('base_alphabet_size', 23)
+        self.seq_padding_idx = self.config.get('seq_padding_idx', 0)
     
     def __call__(self, 
                  datamat, 
-                 sow_intermediates: bool=False, 
-                 training: bool=False):
-        # (B,L) -> (B, L, 23)
-        return nn.one_hot(datamat, self.base_alphabet_size)
+                 *args,
+                 **kwargs):
+        """
+        Arguments
+        ----------
+        datamat : ArrayLike, (B, L)
+            > encoded with tokens from 1 to base_alphabet_size; padding is 
+              assumed to be zero
+        """
+        padding_mask = (datamat != self.seq_padding_idx) #(B,L)
+        
+        # flax's one-hot will start one-hot encoding at token 0 (padding)
+        #   run the one-hot encoding with an extra class, mask it, then remove 
+        #   the empty leading column
+        raw_one_hot = nn.one_hot(datamat, 
+                                 n_classes = self.base_alphabet_size,
+                                 axis=-1) #(B, L, base_alphabet_size)
+        one_hot_masked = raw_one_hot * padding_mask  #(B, L, base_alphabet_size)
+        one_hot_final = one_hot_masked[..., 1:] #(B, L, base_alphabet_size - 1)
+        return one_hot_final
+        
 
 
 class MaskingEmb(SeqEmbBase):
@@ -150,10 +170,8 @@ class MaskingEmb(SeqEmbBase):
                  sow_intermediates: bool=False, 
                  training: bool=False):
         
-        out_mat = jnp.where(datamat != self.seq_padding_idx,
-                            True,
-                            False)
-        out_mat = out_mat[:,:,None]
+        out_mat = (datamat != self.seq_padding_idx)
+        out_mat = out_mat[..., None]
         return out_mat
     
     
