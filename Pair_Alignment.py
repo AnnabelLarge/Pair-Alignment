@@ -22,9 +22,6 @@ from dloaders.init_dataloader import init_dataloader
 
 
 def main():
-    if 'RESULTS' in os.listdir():
-        shutil.rmtree('RESULTS')
-    
     ### for now, running models on single GPU
     err_ms = 'SELECT GPU TO RUN THIS COMPUTATION ON with CUDA_VISIBLE_DEVICES=DEVICE_NUM'
     assert len(jax.devices()) == 1, err_ms
@@ -43,44 +40,44 @@ def main():
                    'batched_eval',
                    'prep_datasets']
     
-    parser.add_argument('-task',
-                        type=str,
-                        required=True,
-                        choices = valid_tasks,
-                        help='What do you want to do? Pick from: {valid_tasks}')
+    # parser.add_argument('-task',
+    #                     type=str,
+    #                     required=True,
+    #                     choices = valid_tasks,
+    #                     help='What do you want to do? Pick from: {valid_tasks}')
     
-    parser.add_argument('-configs',
-                        type = str,
-                        required=True,
-                        help='Load configs from file or folder of files, in json format.')
+    # parser.add_argument('-configs',
+    #                     type = str,
+    #                     required=True,
+    #                     help='Load configs from file or folder of files, in json format.')
     
-    # optional: might have pre-processed some dataloaders
-    parser.add_argument('-load_dset_pkl',
-                        type = str,
-                        default=False,
-                        help='name of the pre-computed pytorch dataset pickle object')
+    # # optional: might have pre-processed some dataloaders
+    # parser.add_argument('-load_dset_pkl',
+    #                     type = str,
+    #                     default=False,
+    #                     help='name of the pre-computed pytorch dataset pickle object')
     
-    # only needed when continuing training
-    parser.add_argument('-new_training_wkdir',
-                        type = str,
-                        help='FOR CONTINUE_TRAIN OPTION; Name for a new training working dir')
+    # # only needed when continuing training
+    # parser.add_argument('-new_training_wkdir',
+    #                     type = str,
+    #                     help='FOR CONTINUE_TRAIN OPTION; Name for a new training working dir')
     
-    parser.add_argument('-prev_model_ckpts_dir',
-                        type = str,
-                        help='FOR CONTINUE_TRAIN OPTION; Path to previous trainstate, argparse object')
+    # parser.add_argument('-prev_model_ckpts_dir',
+    #                     type = str,
+    #                     help='FOR CONTINUE_TRAIN OPTION; Path to previous trainstate, argparse object')
     
-    parser.add_argument('-tstate_to_load',
-                        type = str,
-                        help='FOR CONTINUE_TRAIN OPTION; The name of the tstate object to load')
+    # parser.add_argument('-tstate_to_load',
+    #                     type = str,
+    #                     help='FOR CONTINUE_TRAIN OPTION; The name of the tstate object to load')
     
     # parse the arguments
     top_level_args = parser.parse_args()
     
     
-    # ## UNCOMMENT TO RUN IN SPYDER IDE
-    # top_level_args.task = 'train'
-    # top_level_args.configs = 'example_config_fragment_site_class_model.json'
-    # top_level_args.load_dset_pkl = False
+    ## UNCOMMENT TO RUN IN SPYDER IDE
+    top_level_args.task = 'train'
+    top_level_args.configs = 'example_config_neural_tkf.json'
+    top_level_args.load_dset_pkl = False
     
     
     ### helper functions 
@@ -137,7 +134,6 @@ def main():
             from dloaders.FullLenDset import jax_collator as collate_fn
 
         elif args.pred_model_type == 'neural_hmm':
-            raise NotImplementedError('not ready')
             from cli.train_neural_hmm import train_neural_hmm as train_fn
             from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
             from dloaders.FullLenDset import jax_collator as collate_fn
@@ -190,7 +186,6 @@ def main():
             from dloaders.FullLenDset import jax_collator as collate_fn
 
         elif first_args.pred_model_type == 'neural_hmm':
-            raise NotImplementedError('not ready')
             from cli.train_neural_hmm import train_neural_hmm as train_fn
             from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
             from dloaders.FullLenDset import jax_collator as collate_fn

@@ -136,14 +136,14 @@ def logprob_f81(equl,
     normalizing_factor = 1 / ( 1 - jnp.square(equl).sum(axis=-1) ) #(B, L_align)
     
     # expand to compatible dims
-    if unique_time_per_sample:
-        t_array = t_array[..., None] #(B, 1)
-    
-    elif not unique_time_per_sample:
+    if not unique_time_per_sample:
         normalizing_factor = normalizing_factor[None, ...] #(1, B, L_align) 
         rate_multiplier = rate_multiplier[None, ...] #(1, B, L_align) 
         t_array = t_array[..., None, None] #(T, 1, 1)
         equl = equl[None,...] #(1, B, L_align, A) 
+    
+    elif unique_time_per_sample:
+        t_array = t_array[..., None] #(B, 1)
     
     ### calculate probs
     # shapes of exp_term:
@@ -349,7 +349,7 @@ def logprob_gtr( exch_upper_triag_values,
     rate_mat = rate_multiplier[..., None, None] * normed_rate_mat #(B, L_align, A, A) 
     
     # adjust dims
-    if unique_time_per_sample:
+    if not unique_time_per_sample:
         T = t_array.shape[0]
         B = max( [exch_upper_triag_values.shape[0],
                   equilibrium_distributions.shape[0],
@@ -360,7 +360,7 @@ def logprob_gtr( exch_upper_triag_values,
         t_array = jnp.expand_dims(t_array, (1,2,3,4)) #(T, 1, 1, 1, 1)
         rate_mat = rate_mat[None, ...] #(1, B, L_align, A, A) 
     
-    elif not unique_time_per_sample:
+    elif unique_time_per_sample:
         B = max( [exch_upper_triag_values.shape[0],
                   equilibrium_distributions.shape[0],
                   rate_multiplier.shape[0],
@@ -875,10 +875,6 @@ def logprob_tkf91(tkf_params_dict,
         contains values for calculating matrix terms: 
         alpha, beta, gamma, 1 - alpha, 1 - beta, 1 - gamma
         (all in log space)
-    
-    unique_time_per_sample : Bool
-        whether there's one time per sample, or a grid of times you'll 
-        marginalize over
       
     Returns
     -------

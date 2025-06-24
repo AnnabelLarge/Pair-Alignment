@@ -382,11 +382,9 @@ class TKF91TransitionLogprobs(ModuleBase):
                                         label=f'{self.name}/tkf_gamma', 
                                         which='scalars')
             
-            lam = mu * (1-offset)
             self.sow_histograms_scalars(mat= lam, 
                                         label=f'{self.name}/lam', 
                                         which='scalars')
-            del lam
             
             self.sow_histograms_scalars(mat= mu, 
                                         label=f'{self.name}/mu', 
@@ -883,11 +881,9 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         
         # record values
         if sow_intermediates:
-            lam = mu * (1-offset)
             self.sow_histograms_scalars(mat= lam, 
                                         label=f'{self.name}/lam', 
                                         which='scalars')
-            del lam
             
             self.sow_histograms_scalars(mat= mu, 
                                         label=f'{self.name}/mu', 

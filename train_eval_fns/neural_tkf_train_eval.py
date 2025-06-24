@@ -31,15 +31,29 @@ import optax
 from utils.sequence_length_helpers import selective_squeeze
 
 
+def _one_hot_pad_with_zeros( mat: jnp.array,
+                             num_classes: int,
+                             axis: int = -1 ):
+    """
+    assumes zero is the padding fill!
+    """
+    pad_mask = ( mat != 0 ) 
+    mat_raw_enc = nn.one_hot( x=mat, num_classes=num_classes, axis=axis ) 
+    mat_oh_extra_class = mat_raw_enc * pad_mask[...,None] 
+    mat_oh = mat_oh_extra_class[...,1:] 
+    return mat_oh
+
+
+
 ###############################################################################
 ### TRAIN ON ONE BATCH    #####################################################
 ###############################################################################
 def train_one_batch(batch, 
                     training_rngkey,
                     all_trainstates,
+                    all_model_instances,
                     max_seq_len,
                     max_align_len,
-                    encoder_update_fn,
                     interms_for_tboard, 
                     t_array_for_all_samples,  
                     concat_fn, 
@@ -66,8 +80,9 @@ def train_one_batch(batch,
                          number of jit-compiled versions of this function) 
 
     static inputs, provided by partial    
-        > encoder_update_fn: updates the encoder trainstate; defined by 
-          encoder_instance.update_seq_embedder_tstate
+        > all_model_instances: the object instances; contain some useful 
+          functions that, unfortunately, cannot be called with 
+          trainstate.apply_fn
         > norm_loss_by_for_reporting: when reporting loss, normalize by some
                     sequence length; default is desc_len
         > interms_for_tboard: decide whether or not to output intermediate 
@@ -109,7 +124,8 @@ def train_one_batch(batch,
     ##############################
     # unpack
     encoder_trainstate, decoder_trainstate, finalpred_trainstate = all_trainstates
-    del all_trainstates
+    encoder_instance, decoder_instance, _ = all_model_instances
+    del all_trainstates, all_model_instances
     
     # clip to max lengths, split into prefixes and suffixes
     batch_unaligned_seqs = batch[0] #(B, L, 2)
@@ -175,13 +191,11 @@ def train_one_batch(batch,
                     finalpred_params):
         ### embed with ancestor encoder
         # anc_embeddings is (B, L_seq-1, H)
-        out = encoder_trainstate.apply_fn( variables = encoder_params,
-                                           seqs = anc_seqs,
-                                           rng_key = enc_key,
-                                           params_for_apply = encoder_params,
-                                           seq_emb_trainstate = encoder_trainstate,
-                                           sow_outputs = encoder_sow_outputs,
-                                           method = 'apply_seq_embedder_in_training' )
+        out = encoder_instance.apply_seq_embedder_in_training( seqs = anc_seqs,
+                                                               tstate = encoder_trainstate,
+                                                               rng_key = enc_key,
+                                                               params_for_apply = encoder_params,
+                                                               sow_intermediates = encoder_sow_outputs )
         
         anc_embeddings, embeddings_aux_dict = out
         del out
@@ -189,13 +203,11 @@ def train_one_batch(batch,
         
         ### embed with descendant decoder
         # desc_embeddings is (B, L_seq-1, H)
-        out = decoder_trainstate.apply_fn( variables = decoder_params,
-                                        seqs = desc_seqs,
-                                        rng_key = dec_key,
-                                        params_for_apply = decoder_params,
-                                        seq_emb_trainstate = decoder_trainstate,
-                                        sow_outputs = decoder_sow_outputs,
-                                        method = 'apply_seq_embedder_in_training' )
+        out = decoder_instance.apply_seq_embedder_in_training( seqs = desc_seqs,
+                                                               tstate = decoder_trainstate,
+                                                               rng_key = dec_key,
+                                                               params_for_apply = decoder_params,
+                                                               sow_intermediates = decoder_sow_outputs )
         desc_embeddings, to_add = out
         del out
         
@@ -223,12 +235,11 @@ def train_one_batch(batch,
         del out
         
         # add previous alignment state, one-hot encoded
-        align_padding_mask = ( from_states != seq_padding_idx ) #(B, L_align-1)
-        from_states_raw_enc = nn.one_hot( from_states, 6, axis=-1 ) #(B, L_align-1, 6)
-        from_states_one_hot = from_states_raw_enc * align_padding_mask[...,None] #(B, L_align-1, 6)
-        from_states_one_hot = from_states_one_hot[...,1:] #(B, L_align-1, 5)
+        from_states_one_hot = _one_hot_pad_with_zeros( mat=from_states,
+                                                       num_classes=6,
+                                                       axis=-1 ) #(B, L_align-1, 5)
         datamat_lst.append( from_states_one_hot ) 
-        del align_padding_mask, from_states_raw_enc
+        del from_states_one_hot
         
         
         ### forward pass through prediction head, to get scoring matrices
@@ -285,7 +296,7 @@ def train_one_batch(batch,
         aux_dict['pred_layer_metrics'] = pred_layer_metrics
         
         # during training, only return the approximation dictionary
-        aux_dict['used_approx'] = approx_flags_dict
+        aux_dict['used_approx'] = forward_pass_scoring_matrices['approx_flags_dict']
         
         return (loss, aux_dict)
     
@@ -328,20 +339,19 @@ def train_one_batch(batch,
         
         ### apply updates to parameter, trainstate object
         # wrapper for encoder, in case I ever use batch norm
-        # encoder_update_fn = encoder_instance.update_seq_embedder_tstate
-        new_encoder_trainstate = encoder_update_fn(tstate = encoder_trainstate,
-                                                   new_opt_state = new_encoder_opt_state,
-                                                   optim_updates = encoder_updates)
+        new_encoder_trainstate = encoder_instance.update_seq_embedder_tstate(tstate = encoder_trainstate,
+                                                                             new_opt_state = new_encoder_opt_state,
+                                                                             optim_updates = encoder_updates)
         del new_encoder_opt_state
         
-        # standard update for decoder
+        # standard update recipe for decoder
         new_decoder_params = optax.apply_updates(decoder_trainstate.params, 
                                                  decoder_updates)
         new_decoder_trainstate = decoder_trainstate.replace(params = new_decoder_params,
                                                             opt_state = new_decoder_opt_state)
         del new_decoder_opt_state
         
-        # standard update for prediction head
+        # standard update recipe for prediction head
         new_finalpred_params = optax.apply_updates(finalpred_trainstate.params, 
                                                    finalpred_updates)
         new_finalpred_trainstate = finalpred_trainstate.replace(params = new_finalpred_params,
@@ -436,6 +446,7 @@ def train_one_batch(batch,
 ###############################################################################
 def eval_one_batch(batch, 
                     all_trainstates,
+                    all_model_instances,
                     max_seq_len,
                     max_align_len,
                     interms_for_tboard, 
@@ -463,6 +474,9 @@ def eval_one_batch(batch,
                          number of jit-compiled versions of this function) 
     
     static inputs, provided by partial:
+        > all_model_instances: the object instances; contain some useful 
+          functions that, unfortunately, cannot be called with 
+          trainstate.apply_fn
         > norm_loss_by_for_reporting: when reporting loss, normalize by some
                     sequence length; default is desc_len
         > interms_for_tboard: decide whether or not to output intermediate 
@@ -506,7 +520,8 @@ def eval_one_batch(batch,
     ####################
     # unpack
     encoder_trainstate, decoder_trainstate, finalpred_trainstate = all_trainstates
-    del all_trainstates
+    encoder_instance, decoder_instance, _ = all_model_instances
+    del all_trainstates, all_model_instances
     
     # clip to max lengths, split into prefixes and suffixes
     batch_unaligned_seqs = batch[0] #(B, L, 2)
@@ -566,25 +581,18 @@ def eval_one_batch(batch,
     #######################
     ### embed with ancestor encoder
     # anc_embeddings is (B, L_seq-1, H)
-    out = encoder_trainstate.apply_fn( variables = encoder_trainstate.params,
-                                       seqs = anc_seqs,
-                                       params_for_apply = encoder_trainstate.params,
-                                       seq_emb_trainstate = encoder_trainstate,
-                                       sow_outputs = encoder_sow_outputs,
-                                       method = 'apply_seq_embedder_in_eval' )
-    
+    out = encoder_instance.apply_seq_embedder_in_eval( seqs = anc_seqs,
+                                                       tstate = encoder_trainstate,
+                                                       sow_intermediates = encoder_sow_outputs )
     anc_embeddings, embeddings_aux_dict = out
     del out
     
     
     ### embed with descendant decoder
     # desc_embeddings is (B, L_seq-1, H)
-    out = decoder_trainstate.apply_fn( variables = decoder_trainstate.params,
-                                    seqs = desc_seqs,
-                                    params_for_apply = decoder_trainstate.params,
-                                    seq_emb_trainstate = decoder_trainstate,
-                                    sow_outputs = decoder_sow_outputs,
-                                    method = 'apply_seq_embedder_in_eval' )
+    out = decoder_instance.apply_seq_embedder_in_eval( seqs = desc_seqs,
+                                                       tstate = decoder_trainstate,
+                                                       sow_intermediates = decoder_sow_outputs )
     desc_embeddings, to_add = out
     del out
     
@@ -608,16 +616,15 @@ def eval_one_batch(batch,
                     idx_lst = align_idxes,
                     seq_padding_idx = seq_padding_idx,
                     align_idx_padding = align_idx_padding)
-    datamat_lst, alignment_padding_mask = out
+    datamat_lst, padding_mask = out
     del out
     
     # add previous alignment state, one-hot encoded
-    align_padding_mask = ( from_states != seq_padding_idx ) #(B, L_align-1)
-    from_states_raw_enc = nn.one_hot( from_states, 6, axis=-1 ) #(B, L_align-1, 6)
-    from_states_one_hot = from_states_raw_enc * align_padding_mask[...,None] #(B, L_align-1, 6)
-    from_states_one_hot = from_states_one_hot[...,1:] #(B, L_align-1, 5)
+    from_states_one_hot = _one_hot_pad_with_zeros( mat=from_states,
+                                                   num_classes=6,
+                                                   axis=-1 ) #(B, L_align-1, 5)
     datamat_lst.append( from_states_one_hot ) 
-    del align_padding_mask, from_states_raw_enc
+    del from_states_one_hot
     
         
     ### forward pass through prediction head, to get scoring matrices
@@ -625,7 +632,7 @@ def eval_one_batch(batch,
     out = finalpred_trainstate.apply_fn( variables = finalpred_trainstate.params,
                                          datamat_lst = datamat_lst,
                                          t_array = times_for_matrices,
-                                         padding_mask = alignment_padding_mask,
+                                         padding_mask = padding_mask,
                                          training = False,
                                          sow_intermediates = finalpred_sow_outputs,
                                          mutable=mut
@@ -670,8 +677,8 @@ def eval_one_batch(batch,
     
     ### evaluate metrics
     perplexity_perSamp = finalpred_trainstate.apply_fn( variables = finalpred_trainstate.params,
-                                                     loss_fn_dict = loss_fn_dict,
-                                                     method = 'get_perplexity_per_sample' )
+                                                        loss_fn_dict = loss_fn_dict,
+                                                        method = 'get_perplexity_per_sample' )
     
     
     ##########################################

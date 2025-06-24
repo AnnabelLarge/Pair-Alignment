@@ -358,7 +358,7 @@ class NeuralCondTKF(ModuleBase):
         elif self.subst_model_type == 'gtr':
             score_substitutions = score_gtr_substitutions
             
-        # match positiosn: score
+        # match positions: score
         e = e + jnp.where( curr_state == 1,
                            score_substitutions( true_alignment_without_start = true_alignment_without_start,
                                                 logprob_scoring_mat = logprob_emit_match,
@@ -450,7 +450,7 @@ class NeuralCondTKF(ModuleBase):
         # collect loss and intermediate values
         loss = -jnp.mean(logprob_perSamp)
         intermediate_vals = { 'sum_neg_logP': -logprob_perSamp,
-                              'neg_logP_length_normed': -logprob_perSamp/length_for_normalization}
+                              'neg_logP_length_normed': -logprob_perSamp/length_for_normalization_for_reporting}
         
         return loss, intermediate_vals
     

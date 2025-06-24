@@ -43,6 +43,7 @@ from utils.sequence_length_helpers import (determine_seqlen_bin,
 from utils.tensorboard_recording_utils import (write_times,
                                                write_optional_outputs_during_training)
 from utils.write_timing_file import write_timing_file
+from utils.write_approx_dict import write_approx_dict
 
 # specific to training this model
 # from dloaders.init_full_len_dset import init_full_len_dset
@@ -100,7 +101,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
         g.write(f'Neural sequence embedders with Markovian alignment assumption\n')
         g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )
         g.write( f'Indel model: {args.pred_config["indel_model_type"]}\n' )
-        g.write( f' when reporting, normalizing losses by: {args.norm_loss_by}\n' )
+        g.write( f'when reporting, normalizing losses by: {args.norm_loss_by}\n\n' )
         
         g.write( f'Evolutionary model parameters (global vs local):\n' )
         for key, val in args.pred_config["global_or_local"].items():
@@ -127,7 +128,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
     test_dl = dataloader_dict['test_dl']
     t_array_for_all_samples = dataloader_dict['t_array_for_all_samples']
     
-    args.pred_config['equilibr_config']['training_dset_aa_counts'] = training_dset.emit_counts
+    args.pred_config['training_dset_emit_counts'] = training_dset.emit_counts
     
     
     ###########################################################################
@@ -210,9 +211,8 @@ def train_neural_hmm(args, dataloader_dict: dict):
     del parted_determine_seqlen_bin
     
     # training function
-    encoder_update_fn = all_model_instances[0].update_seq_embedder_tstate
     parted_train_fn = partial( train_one_batch,
-                               encoder_update_fn = encoder_update_fn,
+                               all_model_instances = all_model_instances,
                                interms_for_tboard = args.interms_for_tboard,
                                t_array_for_all_samples = t_array_for_all_samples,
                                concat_fn = concat_fn,
@@ -243,6 +243,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
         extra_args_for_eval['output_attn_weights'] = False
     
     parted_eval_fn = partial( eval_one_batch,
+                              all_model_instances = all_model_instances,
                               interms_for_tboard = no_returns,
                               t_array_for_all_samples = t_array_for_all_samples,  
                               concat_fn = concat_fn,
@@ -627,8 +628,8 @@ def train_neural_hmm(args, dataloader_dict: dict):
             g.write(f'Regular stopping after {epoch_idx} full epochs:\n\n')
         
         # finish up logfile, regardless of early stopping or not
-        g.write(f'Epoch with lowest average test loss ("best epoch"): {best_epoch}\n\n')
-        g.write(f'RE-EVALUATING ALL DATA WITH BEST PARAMS:\n\n')
+        g.write(f'Epoch with lowest average test loss ("best epoch"): {best_epoch}\n')
+        g.write(f'RE-EVALUATING ALL DATA WITH BEST PARAMS\n\n')
     
     del epoch_idx
     
@@ -642,6 +643,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
         extra_args_for_eval['output_attn_weights'] = flag
     
     parted_eval_fn = partial( eval_one_batch,
+                              all_model_instances = all_model_instances,
                               interms_for_tboard = args.interms_for_tboard,
                               t_array_for_all_samples = t_array_for_all_samples,  
                               concat_fn = concat_fn,
@@ -660,7 +662,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
     ### score with best params                #
     ###########################################
     with open(args.logfile_name,'a') as g:
-        g.write(f'SCORING ALL TRAIN SEQS\n\n')
+        g.write(f'SCORING ALL TRAIN SEQS\n')
         
     train_summary_stats = final_eval_wrapper(dataloader = training_dl, 
                                              dataset = training_dset, 
@@ -683,7 +685,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
     ### score with best params                #
     ###########################################
     with open(args.logfile_name,'a') as g:
-        g.write(f'SCORING ALL TEST SEQS\n\n')
+        g.write(f'SCORING ALL TEST SEQS\n')
         
     # output_attn_weights also controlled by cond1 and cond2
     test_summary_stats = final_eval_wrapper(dataloader = test_dl, 

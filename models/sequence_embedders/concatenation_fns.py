@@ -61,7 +61,7 @@ def extract_embs(anc_encoded,
     desc_selected = jnp.take_along_axis(desc_encoded, desc_idxes, axis=1)
     desc_selected = desc_selected * masking_vec
     
-    return [anc_selected, desc_selected]
+    return [anc_selected, desc_selected], masking_vec
     
 
 

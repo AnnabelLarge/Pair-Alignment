@@ -60,7 +60,8 @@ def create_seq_model_tstate(embedding_which,
     if model_type == 'masking':
         # initialize
         from models.sequence_embedders.no_params.embedders import MaskingEmb
-        seq_model_instance = MaskingEmb(config = model_config,
+        seq_model_instance = MaskingEmb(embedding_which = embedding_which.lower(),
+                                        config = model_config,
                                         name = f'ONE-HOT {model_name_suffix}')
         
         # adjust dim3 size
@@ -71,8 +72,9 @@ def create_seq_model_tstate(embedding_which,
     elif model_type == 'onehot':
         # initialize
         from models.sequence_embedders.no_params.embedders import OneHotEmb
-        seq_model_instance = OneHotEmb(config = model_config,
-                                     name = f'ONE-HOT {model_name_suffix}')
+        seq_model_instance = OneHotEmb(embedding_which = embedding_which.lower(),
+                                       config = model_config,
+                                       name = f'ONE-HOT {model_name_suffix}')
         
         # adjust dim3 size
         expected_dim3_size = model_config['base_alphabet_size']
@@ -85,12 +87,13 @@ def create_seq_model_tstate(embedding_which,
         
         # initialize
         from models.sequence_embedders.cnn.embedders import CNNSeqEmb
-        seq_model_instance = CNNSeqEmb(initial_embed_module = initial_embed_module,                          
-                                     first_block_module = ConvnetBlock,
-                                     subsequent_block_module = ConvnetBlock,
-                                     causal = causal,
-                                     config = model_config,
-                                     name =f'CNN {model_name_suffix}')
+        seq_model_instance = CNNSeqEmb(embedding_which = embedding_which.lower(),
+                                        initial_embed_module = initial_embed_module,                          
+                                        first_block_module = ConvnetBlock,
+                                        subsequent_block_module = ConvnetBlock,
+                                        causal = causal,
+                                        config = model_config,
+                                        name =f'CNN {model_name_suffix}')
         
         # adjust dim3 size
         expected_dim3_size = model_config['hidden_dim']
@@ -118,12 +121,13 @@ def create_seq_model_tstate(embedding_which,
 
         # initialize
         from models.sequence_embedders.lstm.embedders import LSTMSeqEmb
-        seq_model_instance = LSTMSeqEmb(initial_embed_module = initial_embed_module,                          
-                                      first_block_module = first_block_module,
-                                      subsequent_block_module = subsequent_block_module,
-                                      causal = causal,
-                                      config = model_config,
-                                      name= f'LSTM {model_name_suffix}')
+        seq_model_instance = LSTMSeqEmb(embedding_which = embedding_which.lower(),
+                                        initial_embed_module = initial_embed_module,                          
+                                        first_block_module = first_block_module,
+                                        subsequent_block_module = subsequent_block_module,
+                                        causal = causal,
+                                        config = model_config,
+                                        name= f'LSTM {model_name_suffix}')
         
         # adjust dim3 size; might have different size for ancestor embeddings
         if embedding_which == 'anc':
@@ -146,12 +150,13 @@ def create_seq_model_tstate(embedding_which,
         
         # initialize
         from models.sequence_embedders.transformer.embedders import TransfSeqEmb
-        seq_model_instance = TransfSeqEmb(initial_embed_module = initial_embed_module,                          
-                                        first_block_module = first_block_module,
-                                        subsequent_block_module = subsequent_block_module,
-                                        causal = causal,
-                                        config = model_config,
-                                        name =f'TRANSFORMER {model_name_suffix}')
+        seq_model_instance = TransfSeqEmb(embedding_which = embedding_which.lower(),
+                                          initial_embed_module = initial_embed_module,                          
+                                          first_block_module = first_block_module,
+                                          subsequent_block_module = subsequent_block_module,
+                                          causal = causal,
+                                          config = model_config,
+                                          name =f'TRANSFORMER {model_name_suffix}')
         
         # adjust dim3 size
         expected_dim3_size = model_config['hidden_dim']
@@ -178,12 +183,13 @@ def create_seq_model_tstate(embedding_which,
 
         # initialize
         from models.sequence_embedders.mamba.embedders import MambaSeqEmb
-        seq_model_instance = MambaSeqEmb(initial_embed_module = initial_embed_module,                          
-                                       first_block_module = first_block_module,
-                                       subsequent_block_module = subsequent_block_module,
-                                       causal = causal,
-                                       config = model_config,
-                                       name =f'MAMBA {model_name_suffix}')
+        seq_model_instance = MambaSeqEmb(embedding_which = embedding_which.lower(),
+                                         initial_embed_module = initial_embed_module,                          
+                                         first_block_module = first_block_module,
+                                         subsequent_block_module = subsequent_block_module,
+                                         causal = causal,
+                                         config = model_config,
+                                         name =f'MAMBA {model_name_suffix}')
         
         # adjust dim3 size
         expected_dim3_size = model_config['hidden_dim']
@@ -192,8 +198,9 @@ def create_seq_model_tstate(embedding_which,
     ### Placeholder (ignore seq)
     elif model_type is None:
         from models.sequence_embedders.no_params.embedders import EmptyEmb
-        seq_model_instance = EmptyEmb(config = model_config,
-                                     name = f'PLACEHOLDER {model_name_suffix}')
+        seq_model_instance = EmptyEmb(embedding_which = embedding_which.lower(),
+                                      config = model_config,
+                                      name = f'PLACEHOLDER {model_name_suffix}')
         
         # adjust dim3 size
         expected_dim3_size = 0
@@ -255,7 +262,7 @@ def prediction_head_instance( pred_model_type: str,
                               tx: Dict,
                               model_init_rngkey: jnp.array, 
                               tabulate_file_loc: str,
-                              t_array_for_all_samples: Optional[jnp.array],
+                              t_array: Optional[jnp.array],
                               model_config: Dict = dict() ):
     #############
     ### imports #
@@ -297,7 +304,7 @@ def prediction_head_instance( pred_model_type: str,
         }
     
         if (pred_model_type == 'neural_hmm'):
-            tabulate_kwargs["t_array_for_all_samples"] = t_array_for_all_samples
+            tabulate_kwargs["t_array"] = t_array
     
         str_out = tab_fn(**tabulate_kwargs)
         with open(f'{tabulate_file_loc}/OUT-PROJ_tabulate.txt','w') as g:
@@ -312,7 +319,7 @@ def prediction_head_instance( pred_model_type: str,
                     "mutable": ['params'] }
     
     if pred_model_type == 'neural_hmm':
-        init_kwargs["t_array_for_all_samples"] = t_array_for_all_samples
+        init_kwargs["t_array"] = t_array
     
     # Initialize with conditional arguments
     init_params = finalpred_instance.init(rngs=model_init_rngkey, **init_kwargs)
@@ -339,7 +346,13 @@ def create_all_tstates(seq_shapes,
     # largest_seqs is (B, max_seq_len)
     # largest_aligns is (B, max_align_len)
     # max_seq_len != max_align_len
-    largest_seqs, largest_aligns = seq_shapes
+    largest_seqs, largest_aligns, t_per_sample = seq_shapes
+    
+    if t_array_for_all_samples is None:
+        t_array_for_init = jnp.zeros( t_per_sample.shape )
+    elif t_array_for_all_samples is not None:
+        t_array_for_init = t_array_for_all_samples
+        
     
     # keep track of dim3 size
     expected_dim3_size = 0
@@ -390,7 +403,7 @@ def create_all_tstates(seq_shapes,
                                    tx = tx,
                                    model_init_rngkey = outproj_rngkey, 
                                    tabulate_file_loc = tabulate_file_loc,
-                                   t_array_for_all_samples = t_array_for_all_samples,
+                                   t_array = t_array_for_init,
                                    model_config = pred_config)
     
     finalpred_trainstate, finalpred_instance = out

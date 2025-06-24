@@ -128,17 +128,19 @@ class neuralTKFModuleBase(ModuleBase):
 class SeqEmbBase(ModuleBase):
     def apply_seq_embedder_in_training(self,
                                        seqs,
+                                       tstate,
                                        rng_key,
                                        params_for_apply,
-                                       seq_emb_trainstate,
-                                       sow_outputs):
+                                       sow_intermediates,
+                                       *args,
+                                       **kwargs):
         # embed the sequence
-        out_embeddings, out_aux_dict = seq_emb_trainstate.apply_fn(variables = params_for_apply,
-                                                                   datamat = seqs,
-                                                                   training = True,
-                                                                   sow_intermediates = sow_outputs,
-                                                                   mutable = ['histograms','scalars'] if sow_outputs else [],
-                                                                   rngs={'dropout': rng_key})
+        out_embeddings, out_aux_dict = tstate.apply_fn(variables = params_for_apply,
+                                                       datamat = seqs,
+                                                       training = True,
+                                                       sow_intermediates = sow_intermediates,
+                                                       mutable = ['histograms','scalars'] if sow_intermediates else [],
+                                                       rngs={'dropout': rng_key})
         
         # pack up all the auxilary data
         metrics_dict_name = f'{self.embedding_which}_layer_metrics' 
@@ -158,13 +160,14 @@ class SeqEmbBase(ModuleBase):
     def update_seq_embedder_tstate(self, 
                                    tstate,
                                    new_opt_state,
-                                   optim_updates):
+                                   optim_updates,
+                                   *args,
+                                   **kwargs):
         """
         If you apply batch norm ever, you'll need a new one of these
         """
         new_params = optax.apply_updates(tstate.params, 
                                          optim_updates)
-        
         
         new_tstate = tstate.replace(params = new_params,
                                     opt_state = new_opt_state)
@@ -175,15 +178,16 @@ class SeqEmbBase(ModuleBase):
     
     def apply_seq_embedder_in_eval(self,
                                    seqs,
-                                   final_trainstate,
-                                   sow_outputs,
+                                   tstate,
+                                   sow_intermediates,
+                                   *args,
                                    **kwargs):
         # embed the sequence
-        out_embeddings, out_aux_dict = final_trainstate.apply_fn(variables = final_trainstate.params,
-                                                                 datamat = seqs,
-                                                                 training = False,
-                                                                 sow_intermediates = sow_outputs,
-                                                                 mutable = ['histograms','scalars'] if sow_outputs else [])
+        out_embeddings, out_aux_dict = tstate.apply_fn(variables = tstate.params,
+                                                       datamat = seqs,
+                                                       training = False,
+                                                       sow_intermediates = sow_intermediates,
+                                                       mutable = ['histograms','scalars'] if sow_intermediates else [])
         
         # pack up all the auxilary data 
         metrics_dict_name = f'{self.embedding_which}_layer_metrics'

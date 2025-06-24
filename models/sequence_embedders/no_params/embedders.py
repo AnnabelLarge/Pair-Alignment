@@ -23,6 +23,7 @@ class Placeholder(SeqEmbBase):
     """
     Returns nothing
     """
+    embedding_which: str
     config: dict
     name: str
     
@@ -53,6 +54,7 @@ class EmptyEmb(SeqEmbBase):
     datamat (altered matrix): placeholder matrix: size (B, L, 0)
     
     """
+    embedding_which: str
     config: dict
     name: str
     
@@ -92,6 +94,7 @@ class OneHotEmb(SeqEmbBase):
     datamat (altered matrix): one-hot encodings for all sequences 
                               (B, L, base_alphabet_size)
     """
+    embedding_which: str
     config: dict
     name: str
     
@@ -158,6 +161,7 @@ class MaskingEmb(SeqEmbBase):
     datamat (altered matrix): indicator for all sequences 
                               (B, L, 1)
     """
+    embedding_which: str
     config: dict
     name: str
     

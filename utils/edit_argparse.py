@@ -94,8 +94,6 @@ def share_top_level_args(args):
         args.desc_dec_config['seq_padding_idx'] = args.seq_padding_idx
         
         args.pred_config['emission_alphabet_size'] = args.emission_alphabet_size
-        args.pred_config['exchang_config']['emission_alphabet_size'] = args.emission_alphabet_size
-        args.pred_config['equilibr_config']['emission_alphabet_size'] = args.emission_alphabet_size
         args.pred_config['full_alphabet_size'] = args.full_alphabet_size
 
     elif args.pred_model_type in ['pairhmm_indp_sites',

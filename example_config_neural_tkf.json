@@ -3,10 +3,10 @@
     "rng_seednum": 0,
 
     "data_dir": "example_data",
-    "train_dset_splits": ["twoSamp"],
-    "test_dset_splits": ["twoSamp"],
+    "train_dset_splits": ["sevenSamp"],
+    "test_dset_splits": ["sevenSamp"],
     "toss_alignments_longer_than": null,
-    "batch_size": 2,
+    "batch_size": 7,
     "chunk_length": 512,
     "emission_alphabet_size": 20,
     "norm_loss_by": "desc_len",
@@ -25,33 +25,52 @@
     "early_stop_cond2_gap": 3,
     "patience": 1000,
     "update_grads": true,
+    "use_scan_fns": false,
 
     "interms_for_tboard": {
+        "encoder_sow_outputs": true,
+        "ancestor_embeddings": true,
+        "decoder_sow_outputs": true,
+        "descendant_embeddings": true,
         "finalpred_sow_outputs": true,
         "forward_pass_outputs": true,
-        "gradients": true
+        "gradients": true,
+        "optimizer": true
     },
     "save_arrs": true,
     "save_per_sample_losses": true,
     "histogram_output_freq": 500,
 
-    "pred_model_type": "pairhmm_frag_and_site_classes",
+    "anc_model_type": null,
+    "anc_enc_config": {},
+
+    "desc_model_type": null,
+    "desc_dec_config": {},
+
+    "pred_model_type": "neural_hmm",
     "pred_config": {
         "load_all": false,
-        "num_mixtures": 2,
-        "random_init_exchanges": true,
-        "norm_loss_by_length": false,
-
         "subst_model_type": "gtr",
-        "norm_rate_matrix": true,
-        "norm_rate_mults": true,
-        "rate_mult_activation": "bound_sigmoid",
+        "indel_model_type": "tkf91",
+
+        "global_or_local": {"equl_dist": "global",
+                            "exch": "global",
+                            "rate_mult": "global",
+                            "tkf_rates": "global",
+                            "tkf92_frag_size": "global"},
+
+        "use_which_emb": {"preproc_equl": [true, true, true], 
+                          "preproc_subs": [true, true, true], 
+                          "preproc_trans": [true, true, true]},
+
+        "add_prev_alignment_info": true,
 
         "times_from": "geometric",
         "t_grid_center": 0.03,
         "t_grid_step": 1.1,
         "t_grid_num_steps": 5,
         "exponential_dist_param": 1.1
+
     }
     
 }

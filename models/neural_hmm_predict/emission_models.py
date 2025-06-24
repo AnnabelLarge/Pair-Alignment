@@ -411,7 +411,6 @@ class GTRGlobalExchGlobalRateMult(neuralTKFModuleBase):
                  sow_intermediates: bool,
                  *args,
                  **kwargs):
-    
         exch_upper_triag_values = self.apply_bound_sigmoid_activation( logits = self.exch_logits,
                                                    min_val = self.exchange_min_val,
                                                    max_val = self.exchange_max_val,

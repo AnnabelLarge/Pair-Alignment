@@ -237,7 +237,7 @@ class TestNeuralLoglikeVsPairhmmLoglike(unittest.TestCase):
             
             _, pred_scores = jitted_apply( variables=init_params,
                                            logprob_perSamp_perTime=raw_scores,
-                                           length_for_normalization=jnp.ones(raw_scores.shape),
+                                           length_for_normalization_for_reporting=jnp.ones(raw_scores.shape),
                                            t_array=t_array,
                                            method='evaluate_loss_after_scan')
         
@@ -252,7 +252,7 @@ class TestNeuralLoglikeVsPairhmmLoglike(unittest.TestCase):
         
             _, pred_scores = neural.apply( variables=init_params,
                                            logprob_perSamp_perTime=raw_scores,
-                                           length_for_normalization=jnp.ones(raw_scores.shape),
+                                           length_for_normalization_for_reporting=jnp.ones(raw_scores.shape),
                                            t_array=t_array,
                                            method='evaluate_loss_after_scan')
         pred_cond_neg_logP = pred_scores['sum_neg_logP']

@@ -19,6 +19,7 @@ from typing import Optional
 from jax import numpy as jnp
 
 # custom imports
+from utils.write_approx_dict import write_approx_dict
 from utils.tensorboard_recording_utils import (calc_stats_during_final_eval,
                                                update_stats_dict,
                                                write_stats_to_tabular)
@@ -85,7 +86,7 @@ def final_eval_wrapper(dataloader,
         if write_approx_dict_flag is not None:
             subline = f'batch {batch_idx}:'
             write_approx_dict( approx_dict = eval_metrics['used_approx'], 
-                               out_arrs_dir = args.out_arrs_dir,
+                               out_arrs_dir = out_arrs_dir,
                                out_file = 'FINAL-EVAL_tkf_approx.tsv',
                                subline = subline,
                                calc_sum = False )

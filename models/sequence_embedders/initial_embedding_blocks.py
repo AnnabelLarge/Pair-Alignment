@@ -26,6 +26,7 @@ class PlaceholderEmbedding(nn.Module):
     for debugging; take in a (B,L) matrix and repeat entries
       to (B, L, hidden_dim)
     """
+    embedding_which: str
     config: dict
     name: str
     causal: None
@@ -70,6 +71,7 @@ class EmbeddingWithPadding(ModuleBase):
                                   (20 for amino acids, 4 for DNA)
                               
     """
+    embedding_which: str
     config: dict
     name: str
     causal: None
@@ -127,6 +129,7 @@ class TAPEEmbedding(ModuleBase):
                                   (20 for amino acids, 4 for DNA)
                               
     """
+    embedding_which: str
     config: dict
     name: str
     causal: None
@@ -223,6 +226,7 @@ class ConvEmbedding(ModuleBase):
                                   (20 for amino acids, 4 for DNA)
        
     """
+    embedding_which: str
     config: dict
     causal: bool
     name: str

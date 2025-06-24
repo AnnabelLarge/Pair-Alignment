@@ -26,13 +26,20 @@ def write_approx_dict(approx_dict,
                 to_write += f'{key}: {val}\n'
             
     if used_approx:
-        t_to_write = approx_dict['t_array']
-        t_to_write = t_to_write[t_to_write != -1.]
-        t_to_write = ', '.join( list(set([str(t) for t in t_to_write])) )
+        
+        # for pairHMMs, also record time
+        if 't_array' in approx_dict.keys():
+            t_to_write = approx_dict['t_array']
+            t_to_write = t_to_write[t_to_write != -1.]
+            t_to_write = ', '.join( list(set([str(t) for t in t_to_write])) )
+            with open(f'{out_arrs_dir}/{out_file}','a') as g:
+                g.write(f'{subline}\n')
+                g.write(f'times: {t_to_write}\n')
+                g.write(f'({len(t_to_write)} times)\n\n')
+                
+        # for neural TKF, only have sums
         with open(f'{out_arrs_dir}/{out_file}','a') as g:
-            g.write(f'{subline}\n')
-            g.write(f'times: {t_to_write}\n')
-            g.write(f'({len(t_to_write)} times)\n\n')
             g.write(to_write + '\n')
+        
     del used_approx, to_write, key, val
     

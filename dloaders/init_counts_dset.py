@@ -18,50 +18,8 @@ import numpy as np
 from dloaders.CountsDset import CountsDset 
 from dloaders.CountsDset import jax_collator as collator
 from dloaders.init_dataloader import init_dataloader
+from dloaders.init_time_array import init_time_array
 
-
-def init_time_array(args):
-    ### use one time per sample, returned in the dataloader
-    if args.pred_config['times_from'] == 't_per_sample':
-        return None
-    
-    
-    ### init from geometric grid, like in cherryML
-    elif args.pred_config['times_from'] == 'geometric':
-        t_grid_center = args.pred_config['t_grid_center']
-        t_grid_step = args.pred_config['t_grid_step']
-        t_grid_num_steps = args.pred_config['t_grid_num_steps']
-        
-        quantization_grid = range( -(t_grid_num_steps-1), 
-                                   t_grid_num_steps, 
-                                   1
-                                  )
-        t_array = [ (t_grid_center * t_grid_step**q_i) for q_i in quantization_grid ]
-        
-        return np.array(t_array)
-    
-    
-    ### read times from flat text file
-    elif args.pred_config['times_from'] == 't_array_from_file':
-        times_file = args.pred_config['filenames']['times']
-        
-        # read file
-        t_array = []
-        with open(f'{times_file}','r') as f:
-            for line in f:
-                t_array.append( float( line.strip() ) )
-        
-        # postproc
-        t_array = np.array(t_array)
-        t_array_filtered = t_array[t_array >= args.pred_config['min_time']]
-        return t_array_filtered
-    
-    
-    ### figure out time quantization per sample... later
-    elif args.pred_config['times_from'] == 't_quantized_per_sample':
-        raise NotImplementedError
-        
-        
    
 def init_counts_dset( args, 
                       task, 
