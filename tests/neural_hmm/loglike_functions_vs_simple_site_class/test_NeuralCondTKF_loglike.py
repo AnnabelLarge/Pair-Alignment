@@ -66,13 +66,13 @@ class TestNeuralLoglikeVsPairhmmLoglike(unittest.TestCase):
                              'r_extend': np.array([0.06])}
         
         # save params to files to load
-        with open('./tests/neural_hmm/vs_simple_site_class/req_files/equl_dist.npy','wb') as g:
+        with open('./tests/neural_hmm/loglike_functions_vs_simple_site_class/req_files/equl_dist.npy','wb') as g:
             np.save(g, training_dset_emit_counts/training_dset_emit_counts.sum())
         
-        with open('./tests/neural_hmm/vs_simple_site_class/req_files/tkf91_params_file.pkl','wb') as g:
+        with open('./tests/neural_hmm/loglike_functions_vs_simple_site_class/req_files/tkf91_params_file.pkl','wb') as g:
             pickle.dump(tkf91_params, g)
             
-        with open('./tests/neural_hmm/vs_simple_site_class/req_files/tkf92_params_file.pkl','wb') as g:
+        with open('./tests/neural_hmm/loglike_functions_vs_simple_site_class/req_files/tkf92_params_file.pkl','wb') as g:
             pickle.dump(self.tkf92_params, g)
         
         # declare dims
@@ -85,8 +85,8 @@ class TestNeuralLoglikeVsPairhmmLoglike(unittest.TestCase):
         self.common_config = {'training_dset_emit_counts': training_dset_emit_counts,
                               'emission_alphabet_size': self.A,
                               'tkf_function_name': 'regular',
-                              'filenames': {'exch': './tests/neural_hmm/vs_simple_site_class/req_files/LG08_exchangeability_vec.npy',
-                                            'equl_dist': './tests/neural_hmm/vs_simple_site_class/req_files/equl_dist.npy'}}
+                              'filenames': {'exch': './tests/neural_hmm/loglike_functions_vs_simple_site_class/req_files/LG08_exchangeability_vec.npy',
+                                            'equl_dist': './tests/neural_hmm/loglike_functions_vs_simple_site_class/req_files/equl_dist.npy'}}
     
     def _run_test(self,
                   subst_model_type,
@@ -99,7 +99,7 @@ class TestNeuralLoglikeVsPairhmmLoglike(unittest.TestCase):
         ##################
         self.common_config['subst_model_type'] = subst_model_type
         self.common_config['indel_model_type'] = indel_model_type
-        self.common_config['filenames']['tkf_params_file']= f'./tests/neural_hmm/vs_simple_site_class/req_files/{indel_model_type}_params_file.pkl'
+        self.common_config['filenames']['tkf_params_file']= f'./tests/neural_hmm/loglike_functions_vs_simple_site_class/req_files/{indel_model_type}_params_file.pkl'
     
         ### determine t_array
         if unique_t_per_samp:
@@ -396,7 +396,7 @@ class TestNeuralLoglikeVsPairhmmLoglike(unittest.TestCase):
             'tkf91_params_file.pkl',
             'tkf92_params_file.pkl'
         ]:
-            path = f'./tests/neural_hmm/vs_simple_site_class/req_files/{fname}'
+            path = f'./tests/neural_hmm/loglike_functions_vs_simple_site_class/req_files/{fname}'
             if os.path.exists(path):
                 os.remove(path)
     

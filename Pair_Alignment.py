@@ -18,7 +18,7 @@ from dloaders.init_dataloader import init_dataloader
 
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update("jax_debug_infs", True)
-# jax.config.update("jax_enable_x64", True)
+jax.config.update("jax_enable_x64", True)
 
 
 def main():
@@ -75,8 +75,8 @@ def main():
     
     
     ## UNCOMMENT TO RUN IN SPYDER IDE
-    top_level_args.task = 'train'
-    top_level_args.configs = 'example_config_neural_tkf.json'
+    top_level_args.task = 'batched_train'
+    top_level_args.configs = 'configs_t-per-samp'
     top_level_args.load_dset_pkl = False
     
     

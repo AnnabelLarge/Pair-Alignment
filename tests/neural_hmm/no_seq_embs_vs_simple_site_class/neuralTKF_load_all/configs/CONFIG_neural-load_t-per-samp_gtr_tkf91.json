@@ -1,0 +1,68 @@
+{
+    "training_wkdir": "RESULTS_t-per-samp_gtr_tkf91",
+    "rng_seednum": 0,
+
+    "data_dir": "example_data",
+    "train_dset_splits": ["sevenSamp", "twoSamp"],
+    "test_dset_splits": ["sevenSamp", "twoSamp"],
+    "toss_alignments_longer_than": null,
+    "batch_size": 9,
+    "chunk_length": 512,
+    "emission_alphabet_size": 20,
+    "norm_loss_by": "desc_len",
+    "gap_idx": 43,
+
+    "num_epochs": 1,
+    "optimizer_config": {
+        "init_value": 0.005,
+        "peak_value": 0.005,
+        "end_value": 0.005,
+        "warmup_steps": 0,
+        "weight_decay": 0,
+        "every_k_schedule": 1
+    },
+    "early_stop_cond1_atol": 1e-3,
+    "early_stop_cond2_gap": 3,
+    "patience": 10,
+    "update_grads": false,
+    "use_scan_fns": false,
+
+    "interms_for_tboard": {
+        "encoder_sow_outputs": false,
+        "ancestor_embeddings": false,
+        "decoder_sow_outputs": false,
+        "descendant_embeddings": false,
+        "finalpred_sow_outputs": false,
+        "forward_pass_outputs": false,
+        "gradients": false,
+        "optimizer": false
+    },
+    "save_arrs": false,
+    "save_per_sample_losses": true,
+    "histogram_output_freq": 500,
+
+    "anc_model_type": null,
+    "anc_enc_config": {},
+
+    "desc_model_type": null,
+    "desc_dec_config": {},
+
+    "pred_model_type": "neural_hmm",
+    "pred_config": {
+        "load_all": true,
+        "add_prev_alignment_info": false,
+        
+        "subst_model_type": "gtr",
+
+        "indel_model_type": "tkf91",
+        "tkf_function": "regular_tkf",
+
+        "times_from": "t_per_sample",
+
+        "filenames": {"equl_dist":"TRUE_t-per-samp_gtr_tkf91/out_arrs/test-set_pt0_prob_emit_at_indel.npy",
+                      "exch":"TRUE_t-per-samp_gtr_tkf91/out_arrs/PARAMS_exchangeabilities.npy",
+                      "tkf_params_file":"TRUE_t-per-samp_gtr_tkf91/out_arrs/tkf91_indel_params.pkl"}
+
+    }
+    
+}

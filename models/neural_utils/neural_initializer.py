@@ -268,7 +268,11 @@ def prediction_head_instance( pred_model_type: str,
     ### imports #
     #############
     if pred_model_type == 'neural_hmm':
-        from models.neural_hmm_predict.NeuralCondTKF import NeuralCondTKF as Model
+        if not model_config['load_all']:
+            from models.neural_hmm_predict.NeuralCondTKF import NeuralCondTKF as Model
+        elif model_config['load_all']:
+            from models.neural_hmm_predict.NeuralCondTKF import NeuralCondTKFLoadAll as Model
+                
         model_name = 'FEEDFORWARD PREDICT'
     
     elif pred_model_type == 'feedforward':

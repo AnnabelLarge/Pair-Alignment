@@ -495,7 +495,7 @@ def switch_tkf( mu,
         final_shape = (T, B, L_align)
     
     elif unique_time_per_sample:
-        B = max( [mu.shape[0], t_array.shape[0]] )
+        B = t_array.shape[0]
         t_array = t_array[:,None] #(B, 1)
         final_shape = (B, L_align)
     
@@ -665,7 +665,6 @@ def regular_tkf( mu,
     approx_flags_dict: None (placeholder)
     
     """
-    B = mu.shape[0]
     L_align = mu.shape[1]
     
     # mu: (B, L_align)
@@ -673,6 +672,7 @@ def regular_tkf( mu,
     # t_array: either (B,) or (T,)
     if not unique_time_per_sample:
         T = t_array.shape[0]
+        B = mu.shape[0]
         
         mu = mu[None,...] #(1, B, L_align)
         offset = offset[None,...] #(1, B, L_align)
@@ -680,6 +680,7 @@ def regular_tkf( mu,
         final_shape = (T, B, L_align)
     
     elif unique_time_per_sample:
+        B = t_array.shape[0]
         t_array = t_array[:,None] #(B, 1)
         final_shape = (B, L_align)
         
@@ -768,7 +769,6 @@ def approx_tkf( mu,
     approx_flags_dict: None (placeholder)
     
     """
-    B = mu.shape[0]
     L_align = mu.shape[1]
     
     # mu: (B, L_align)
@@ -776,6 +776,7 @@ def approx_tkf( mu,
     # t_array: either (B,) or (T,)
     if not unique_time_per_sample:
         T = t_array.shape[0]
+        B = mu.shape[0]
         
         mu = mu[None,...] #(1, B, L_align)
         offset = offset[None,...] #(1, B, L_align)
@@ -783,6 +784,7 @@ def approx_tkf( mu,
         final_shape = (T, B, L_align)
     
     elif unique_time_per_sample:
+        B = t_array.shape[0]
         t_array = t_array[:,None] #(B, 1)
         final_shape = (B, L_align)
         

@@ -478,21 +478,22 @@ class IndpSites(ModuleBase):
         out = self._get_scoring_matrices(t_array=t_array,
                                         sow_intermediates=False)
         
-        # final joint prob of match (after LSE over classes)
-        mat = np.exp(out['joint_logprob_emit_at_match'])
-        new_key = 'joint_logprob_emit_at_match'.replace('logprob','prob')
-        
-        with open(f'{out_folder}/{prefix}_{new_key}.npy', 'wb') as g:
-            np.save(g, mat)
-        
-        mat = np.squeeze(mat)
-        if len(mat.shape) <= 2:
-            np.savetxt( f'{out_folder}/{prefix}_ASCII_{new_key}.tsv', 
-                        np.array(mat), 
-                        fmt = '%.4f',
-                        delimiter= '\t' )
-        
-        del new_key, mat, g
+        # final conditional and joint prob of match (after LSE over classes)
+        for loss_type in ['joint', 'cond']:
+            mat = np.exp(out[f'{loss_type}_logprob_emit_at_match'])
+            new_key = f'{loss_type}_logprob_emit_at_match'.replace('logprob','prob')
+            
+            with open(f'{out_folder}/{prefix}_{new_key}.npy', 'wb') as g:
+                np.save(g, mat)
+            
+            mat = np.squeeze(mat)
+            if len(mat.shape) <= 2:
+                np.savetxt( f'{out_folder}/{prefix}_ASCII_{new_key}.tsv', 
+                            np.array(mat), 
+                            fmt = '%.4f',
+                            delimiter= '\t' )
+            
+            del new_key, mat, g
     
         # joint transition matrix
         if self.indel_model_type is not None:

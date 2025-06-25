@@ -51,6 +51,8 @@ tkf92, pred_config entries:
 - (OPTIONAL) pred_config['tkf_function']
 
 """
+import pickle
+
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
@@ -618,7 +620,7 @@ class GlobalTKF91FromFile(neuralTKFModuleBase):
                 self.param_dict = pickle.load(f)
                 
         elif in_file.endswith('.txt') or in_file.endswith('.tsv'):
-            param_dict = {}
+            self.param_dict = {}
             with open(in_file,'r') as f:
                 for line in f:
                     if not line.startswith('#'):
@@ -626,13 +628,21 @@ class GlobalTKF91FromFile(neuralTKFModuleBase):
                         param_dict[param_name] = jnp.array( float(value) )
             self.param_dict = param_dict
         
+        # check keys
         err = f'KEYS SEEN: {self.param_dict.keys()}'
         assert 'lambda' in self.param_dict.keys(), err
         assert 'mu' in self.param_dict.keys(), err
         
-        
-        ### declare the logprob function
+
+        ### finish setup 
+        # declare the logprob function
         self.cond_logprob_fn = logprob_tkf91
+        
+        # get the tkf function
+        tkf_fn_registry = {'regular_tkf': regular_tkf,
+                           'approx_tkf': approx_tkf,
+                           'switch_tkf': switch_tkf}
+        self.tkf_function = tkf_fn_registry[tkf_function_name]
     
     
     def __call__(self,
@@ -674,6 +684,15 @@ class GlobalTKF91FromFile(neuralTKFModuleBase):
         # get r_extend
         r_extend = self.get_r_ext_prob() #placeholder
         
+        # reshape if needed
+        lam = jnp.reshape(lam, (1,1)) #(B, L)
+        mu = jnp.reshape(mu, (1,1)) #(B, L)
+        offset = jnp.reshape(offset, (1,1)) #(B, L)
+        
+        if r_extend is not None:
+            r_extend = jnp.reshape(r_extend, (1,1)) #(B, L)
+        
+        
         ### get tkf alpha, beta, gamma
         # contents of out_dict ( all ArrayLike[float32], (T,B,L_align) or (B,L_align) ):
         #   out_dict['log_alpha']
@@ -700,7 +719,11 @@ class GlobalTKF91FromFile(neuralTKFModuleBase):
                                               offset = offset,
                                               unique_time_per_sample = unique_time_per_sample ) 
         
-        return cond_logprob, None, None
+        intermed_params_dict = {'lambda': lam,
+                                'mu': mu,
+                                'r_extend': r_extend}
+        
+        return cond_logprob, None, intermed_params_dict
     
     def get_r_ext_prob(self):
         return None

@@ -104,8 +104,11 @@ def train_neural_hmm(args, dataloader_dict: dict):
         g.write( f'when reporting, normalizing losses by: {args.norm_loss_by}\n\n' )
         
         g.write( f'Evolutionary model parameters (global vs local):\n' )
-        for key, val in args.pred_config["global_or_local"].items():
-            g.write(f'{key}: {val}\n')
+        
+        if not args.pred_config['load_all']:
+            for key, val in args.pred_config["global_or_local"].items():
+                g.write(f'{key}: {val}\n')
+                
         g.write('\n')
         
         g.write(f'Ancestor sequence embedder (FULL-CONTEXT): {args.anc_model_type}\n')

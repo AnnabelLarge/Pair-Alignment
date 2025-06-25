@@ -186,7 +186,6 @@ class NeuralCondTKF(ModuleBase):
         ### module for transition probabilities   #
         ###########################################
         if self.indel_model_type == 'tkf91':
-            
             if global_or_local_dict['tkf_rates'].lower() == 'global':
                 self.preproc_trans = lambda *args, **kwargs: None
                 self.trans_module = GlobalTKF91(config = self.config,
@@ -287,17 +286,19 @@ class NeuralCondTKF(ModuleBase):
         ### correction to conditional logprob
         # if tkf91, no corrections needed
         if self.indel_model_type == 'tkf91':
-            out_dict['corr'] = ( jnp.zeros( indel_model_params['lambda'].shape ), #(T,B) or (B,)
-                                 jnp.zeros( indel_model_params['lambda'].shape ) ) #(T,B) or (B,)
+            corr_shape = (1,1) if not self.unique_time_per_sample else (1,)
+            out_dict['corr'] = ( jnp.zeros( corr_shape ), #(T,B) or (B,)
+                                 jnp.zeros( corr_shape ) ) #(T,B) or (B,)
             
         # if tkf92, include correction factor for starting with s->ins transition, 
         # and ending with ins->e
         elif self.indel_model_type == 'tkf92':
-            lam = indel_model_params['lambda'] #(T,B) or (B,)
-            mu = indel_model_params['mu'] #(T,B) or (B,)
-            r_extend = indel_model_params['r_extend'] #(T,B) or (B,)
-            out_dict['corr'] = ( jnp.log(mu/lam), #(T,B) or (B,)
-                                 jnp.log( r_extend + (1-r_extend)*(lam/mu) ) ) #(T,B) or (B,)
+            lam = indel_model_params['lambda'] #(B, length_for_scan-1) or (1,1)
+            mu = indel_model_params['mu'] #(B, length_for_scan-1) or (1,1)
+            r_extend = indel_model_params['r_extend'] #(B, length_for_scan-1) or (1,1)
+            
+            out_dict['corr'] = ( jnp.log(mu/lam), #(B, length_for_scan-1) or (1,1)
+                                 jnp.log( r_extend + (1-r_extend)*(lam/mu) ) ) #(B, length_for_scan-1) or (1,1)
         
         return out_dict
         
@@ -325,9 +326,9 @@ class NeuralCondTKF(ModuleBase):
         L = logprob_emit_indel.shape[1]
         
         # unpack inputs
-        staggered_alignment_state = true_out[...,2:] #(B, L_align-1, 2)
-        curr_state = true_out[...,3] #(B,L_align-1)
-        true_alignment_without_start = true_out[...,:2] #(B, L_align-1, 2)
+        staggered_alignment_state = true_out[...,2:] #(B, length_for_scan, 2)
+        curr_state = true_out[...,3] #(B,length_for_scan)
+        true_alignment_without_start = true_out[...,:2] #(B, length_for_scan, 2)
         
         
         ### score transitions
@@ -388,28 +389,40 @@ class NeuralCondTKF(ModuleBase):
         # elif not unique_time_per_sample, logprob_perSamp_perPos_perTime is (T, B, length_for_scan)
         logprob_perSamp_perPos_perTime = tr + e
         
+        # extra correction factors, if needed: positional masks
+        include_s_i_corr_mask = jnp.all( staggered_alignment_state == jnp.array([4, 2]), axis=-1 ) #(B, length_for_scan)
+        include_i_e_corr_mask = jnp.all( staggered_alignment_state == jnp.array([2, 5]), axis=-1 ) #(B, length_for_scan)
+        
+        if len(logprob_perSamp_perPos_perTime.shape) == 3:
+            include_s_i_corr_mask = jnp.broadcast_to( include_s_i_corr_mask[None,:],
+                                                      logprob_perSamp_perPos_perTime.shape ) #(T, B, length_for_scan)
+            include_i_e_corr_mask = jnp.broadcast_to( include_i_e_corr_mask[None,:],
+                                                      logprob_perSamp_perPos_perTime.shape ) #(T, B, length_for_scan)
+            s_i_correction = jnp.broadcast_to( corr[0][None,:],
+                                               logprob_perSamp_perPos_perTime.shape ) #(T, B, length_for_scan)
+            i_e_correction = jnp.broadcast_to( corr[1][None,:],
+                                               logprob_perSamp_perPos_perTime.shape ) #(T, B, length_for_scan)
+        
+        elif len(logprob_perSamp_perPos_perTime.shape) == 2:
+            s_i_correction = jnp.broadcast_to( corr[0],
+                                               logprob_perSamp_perPos_perTime.shape ) #(B, length_for_scan)
+            i_e_correction = jnp.broadcast_to( corr[1],
+                                               logprob_perSamp_perPos_perTime.shape ) #(B, length_for_scan)
+            
+        # make corrections selectively, per sample and per position
+        logprob_perSamp_perPos_perTime = jnp.where( include_s_i_corr_mask,
+                                                    logprob_perSamp_perPos_perTime + s_i_correction,
+                                                    logprob_perSamp_perPos_perTime ) #(T, B, length_for_scan) or (B, length_for_scan)
+        
+        # make selective corrections
+        logprob_perSamp_perPos_perTime = jnp.where( include_i_e_corr_mask,
+                                                    logprob_perSamp_perPos_perTime + i_e_correction,
+                                                    logprob_perSamp_perPos_perTime ) #(T, B, length_for_scan) or (B, length_for_scan)
+        
         # take the SUM down the length to get logprob_perSamp_perTime:
         # if unique_time_per_sample, logprob_perSamp_perTime is (B)
         # elif not unique_time_per_sample, logprob_perSamp_perTime is (T, B)
         logprob_perSamp_perTime = logprob_perSamp_perPos_perTime.sum(axis=-1)
-        
-        # extra correction factors, if needed
-        include_s_i_corr_mask = jnp.all(staggered_alignment_state[:,0,:] == jnp.array([4, 2]), axis=-1) #(B,)
-        include_i_e_corr_mask = jnp.any( jnp.all(staggered_alignment_state == jnp.array([2, 5]), axis=-1), axis=-1 ) #(B,)
-
-        if len(logprob_perSamp_perTime.shape) == 2:
-            include_s_i_corr_mask = jnp.broadcast_to(include_s_i_corr_mask[None,:],
-                                                      logprob_perSamp_perTime.shape) #(T,B)
-            include_i_e_corr_mask = jnp.broadcast_to(include_i_e_corr_mask[None,:],
-                                                      logprob_perSamp_perTime.shape) #(T,B)
-        
-        logprob_perSamp_perTime = jnp.where( include_s_i_corr_mask,
-                                             logprob_perSamp_perTime + corr[0],
-                                             logprob_perSamp_perTime ) #(T,B) or (B,)
-        
-        logprob_perSamp_perTime = jnp.where( include_i_e_corr_mask,
-                                             logprob_perSamp_perTime + corr[1],
-                                             logprob_perSamp_perTime ) #(T,B) or (B,)
         
         return logprob_perSamp_perTime
         
@@ -515,7 +528,7 @@ class NeuralCondTKFLoadAll(NeuralCondTKF):
         # required
         self.subst_model_type = self.config['subst_model_type'].lower()
         times_from = self.config['times_from'].lower()
-        indel_model_type = self.config['indel_model_type'].lower()
+        self.indel_model_type = self.config['indel_model_type'].lower()
         
         # optional
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)

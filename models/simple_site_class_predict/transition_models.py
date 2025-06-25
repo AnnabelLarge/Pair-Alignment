@@ -340,6 +340,7 @@ class TKF91TransitionLogprobs(ModuleBase):
                                          offs_min_val = self.offs_min_val,
                                          offs_max_val = self.offs_max_val)
         mu, offset = out
+        lam = mu * (1-offset)
         del out
         
         # get alpha, beta, gamma

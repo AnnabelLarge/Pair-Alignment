@@ -69,7 +69,7 @@ def enforce_valid_defaults(args):
     
     ### if you're not updating gradients, don't run any training updates
     if not args.update_grads:
-        args.num_epochs = 0
+        args.num_epochs = 1
     
 
 def share_top_level_args(args):    

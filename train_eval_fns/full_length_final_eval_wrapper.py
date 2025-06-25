@@ -121,6 +121,7 @@ def final_eval_wrapper(dataloader,
         ### start df; record metrics per sample #
         #########################################
         final_loglikes = dataset.retrieve_sample_names(batch[-1])
+        
         final_loglikes['logP'] = eval_metrics['sum_neg_logP']
         final_loglikes['logP/normlength'] = eval_metrics['neg_logP_length_normed']
         final_loglikes['perplexity'] = eval_metrics['perplexity_perSamp']
@@ -181,7 +182,7 @@ def final_eval_wrapper(dataloader,
         ### other arrays to output #
         ############################
         if save_arrs:
-            out_file = f'{out_arrs_dir}/{outfile_prefix}_pt{batch_idx}_ARRS.gz'
+            out_file = f'{out_arrs_dir}/{outfile_prefix}_pt{batch_idx}_ARRS.pkl.gz'
             to_write = {}
             def add_to_out_dict(value_to_write, flag, file_suffix):
                 if (flag) and (value_to_write is not None):

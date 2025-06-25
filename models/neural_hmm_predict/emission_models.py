@@ -100,7 +100,7 @@ class GlobalEqul(neuralTKFModuleBase):
             scoring matrix for emissions from indels, from observed frequencies
         """
         return self.logprob_equilibr  #(1,1,A)
-    
+
     
 class LocalEqul(GlobalEqul):
     """
@@ -592,7 +592,7 @@ class GTRFromFile(neuralTKFModuleBase):
         #   triangular values
         if correct:
             self.exch_upper_triag_values = exch_from_file
-            if len(exch_upper_triag_values.shape) < 3:
+            if len(self.exch_upper_triag_values.shape) < 3:
                 final_shape = (1, 1, self.exch_upper_triag_values.shape[-1])
                 self.exch_upper_triag_values = jnp.reshape( self.exch_upper_triag_values, 
                                                             final_shape ) #(1,1,n)
@@ -607,7 +607,7 @@ class GTRFromFile(neuralTKFModuleBase):
             
         
         ### rate multiplier: automatically set to one
-        self.rate_multiplier = jnp.ones((1,1)) #(1,1)
+        self.global_rate_multiplier = jnp.ones((1,1)) #(1,1)
     
     def __call__(self, 
                  log_equl,

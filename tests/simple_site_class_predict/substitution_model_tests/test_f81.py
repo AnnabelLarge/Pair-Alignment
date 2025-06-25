@@ -78,6 +78,9 @@ class TestF81(unittest.TestCase):
                                             t_array = self.t_array,
                                             return_cond=True)
         cond_prob_pred = np.exp(cond_prob_pred)
+        assert np.allclose( cond_prob_pred.sum(axis=-1),
+                            np.ones( cond_prob_pred.sum(axis=-1).shape ) )
+        
         npt.assert_allclose(cond_prob_true, cond_prob_pred, atol=THRESHOLD)
         
 
@@ -148,6 +151,9 @@ class TestF81(unittest.TestCase):
                                             t_array = self.t_array,
                                             return_cond=True)
         cond_prob_pred = np.exp(cond_prob_pred)
+        assert np.allclose( cond_prob_pred.sum(axis=-1),
+                            np.ones( cond_prob_pred.sum(axis=-1).shape ) )
+        
         npt.assert_allclose(cond_prob_true, cond_prob_pred, atol=THRESHOLD)
     
     def test_multiclass_f81_hand_calc_norm(self):
