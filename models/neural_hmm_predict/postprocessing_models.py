@@ -57,12 +57,9 @@ class Placeholder(ModuleBase):
         Returns
         --------
         None
-        
-        padding_mask: ArrayLike, (B, L_align)
-            location of padding in alignment
         """
         
-        return (None, padding_mask)
+        return None
     
     
 class SelectMask(ModuleBase):
@@ -97,8 +94,6 @@ class SelectMask(ModuleBase):
             > n=1, if only using ancestor embedding OR descendant embedding
             > n=2, if using both embeddings
             
-        padding_mask: ArrayLike, (B, L_align)
-            location of padding in alignment
         """
         # select (potentially concat) and mask padding
         datamat, padding_mask = process_datamat_lst(datamat_lst,
@@ -107,7 +102,7 @@ class SelectMask(ModuleBase):
                                                     self.use_desc_emb,
                                                     self.use_prev_align_info)
         
-        return datamat, padding_mask[...,0]
+        return datamat
         
 
 class FeedforwardPostproc(SelectMask):
@@ -190,9 +185,6 @@ class FeedforwardPostproc(SelectMask):
             concatenated and post-processed data
             > n=1, if only using ancestor embedding OR descendant embedding
             > n=2, if using both embeddings
-            
-        padding_mask: ArrayLike, (B, L_align)
-            location of padding in alignment
         """
         
         ### select (potentially concat) and mask padding
@@ -274,4 +266,4 @@ class FeedforwardPostproc(SelectMask):
                                             which=['scalars'])
                 del label
         
-        return datamat, padding_mask
+        return datamat

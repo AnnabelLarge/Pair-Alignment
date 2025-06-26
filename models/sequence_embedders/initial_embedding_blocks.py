@@ -10,7 +10,7 @@ modules to project (B, L) -> (B, L, H), before sending to main architecture
 
 """
 # general python
-from typing import Callable
+from typing import Callable, Optional, Any, Dict
 
 # flaxy and jaxy
 from flax import linen as nn
@@ -26,13 +26,15 @@ class PlaceholderEmbedding(nn.Module):
     for debugging; take in a (B,L) matrix and repeat entries
       to (B, L, hidden_dim)
     """
-    embedding_which: str
-    config: dict
+    config: Dict
     name: str
-    causal: None
+    embedding_which: Optional[Any] = None
+    causal: Optional[Any] = None
     
     @nn.compact
-    def __call__(self, datamat, training: bool = None):
+    def __call__(self, 
+                 datamat: jnp.array, 
+                 training: Optional[Any] = None):
         ### unpack
         hidden_dim = self.config['hidden_dim']
         seq_padding_idx = self.config.get('seq_padding_idx', 0)
@@ -72,9 +74,9 @@ class EmbeddingWithPadding(ModuleBase):
                               
     """
     embedding_which: str
-    config: dict
+    config: Dict
     name: str
-    causal: None
+    causal: Optional[Any] = None
     
     def setup(self):
         ### unpack config
@@ -90,7 +92,9 @@ class EmbeddingWithPadding(ModuleBase):
                                           features = self.features)
         
         
-    def __call__(self, datamat, training: bool = None):
+    def __call__(self, 
+                 datamat: jnp.array, 
+                 training: Optional[Any] = None):
         padding_mask_template = (datamat != self.padding_idx)[...,None] #(B, L, 1)
         
         # (B,L) -> (B, L, H)
@@ -130,9 +134,9 @@ class TAPEEmbedding(ModuleBase):
                               
     """
     embedding_which: str
-    config: dict
+    config: Dict
     name: str
-    causal: None
+    causal: Optional[Any] = None
     
     def setup(self):
         ### unpack config
@@ -155,7 +159,9 @@ class TAPEEmbedding(ModuleBase):
         self.final_dropout = nn.Dropout(rate = self.dropout)
         
         
-    def __call__(self, datamat, training):
+    def __call__(self, 
+                 datamat: jnp.array, 
+                 training: bool):
         padding_mask_template = (datamat != self.padding_idx)[...,None]
     
         ### create a position matrix
@@ -227,7 +233,7 @@ class ConvEmbedding(ModuleBase):
        
     """
     embedding_which: str
-    config: dict
+    config: Dict
     causal: bool
     name: str
     
@@ -248,7 +254,9 @@ class ConvEmbedding(ModuleBase):
                             padding = 'CAUSAL' if self.causal else 'SAME')
         
         
-    def __call__(self, datamat, training):
+    def __call__(self, 
+                 datamat: jnp.array, 
+                 training: bool):
         ### use this for building padding masks
         padding_mask_template = (datamat != self.padding_idx)[:,:,None]
         

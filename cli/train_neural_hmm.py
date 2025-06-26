@@ -46,7 +46,6 @@ from utils.write_timing_file import write_timing_file
 from utils.write_approx_dict import write_approx_dict
 
 # specific to training this model
-# from dloaders.init_full_len_dset import init_full_len_dset
 from models.neural_utils.neural_initializer import create_all_tstates 
 from train_eval_fns.neural_tkf_train_eval import ( train_one_batch,
                                                    eval_one_batch )

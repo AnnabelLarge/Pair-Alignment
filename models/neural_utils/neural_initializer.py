@@ -77,7 +77,7 @@ def create_seq_model_tstate(embedding_which,
                                        name = f'ONE-HOT {model_name_suffix}')
         
         # adjust dim3 size
-        expected_dim3_size = model_config['base_alphabet_size']
+        expected_dim3_size = model_config['base_alphabet_size']-1
     
     
     ### CNN (only one block type: ConvnetBlock)
@@ -250,9 +250,6 @@ def create_seq_model_tstate(embedding_which,
     seq_model_trainstate = TrainState.create(apply_fn=seq_model_instance.apply, 
                                              params=init_params,
                                              tx=tx)
-    
-    # add embedding_which as an attribute
-    seq_model_instance.embedding_which = embedding_which
     
     return (seq_model_trainstate, seq_model_instance, expected_dim3_size)
 

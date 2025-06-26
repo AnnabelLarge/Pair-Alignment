@@ -14,6 +14,7 @@ import pickle
 import torch
 from torch.utils.data import DataLoader
 import numpy as np
+from argparse import Namespace
 
 from dloaders.FullLenDset import FullLenDset
 from dloaders.FullLenDset import jax_collator as collator
@@ -21,10 +22,10 @@ from dloaders.init_dataloader import init_dataloader
 from dloaders.init_time_array import init_time_array
 
 
-def init_full_len_dset( args, 
-                        task,
-                        training_argparse=None,
-                        include_dataloader=True ):
+def init_full_len_dset( args: Namespace, 
+                        task: str,
+                        training_argparse: bool = None,
+                        include_dataloader: bool = True ):
     """
     initialize the pytorch datasets and dataloaders (optional)
     """

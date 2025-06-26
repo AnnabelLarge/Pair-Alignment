@@ -114,15 +114,19 @@ class OneHotEmb(SeqEmbBase):
             > encoded with tokens from 1 to base_alphabet_size; padding is 
               assumed to be zero
         """
-        padding_mask = (datamat != self.seq_padding_idx) #(B,L)
+        padding_mask = (datamat != self.seq_padding_idx)[...,None] #(B,L)
         
         # flax's one-hot will start one-hot encoding at token 0 (padding)
         #   run the one-hot encoding with an extra class, mask it, then remove 
         #   the empty leading column
         raw_one_hot = nn.one_hot(datamat, 
-                                 n_classes = self.base_alphabet_size,
+                                 num_classes = self.base_alphabet_size,
                                  axis=-1) #(B, L, base_alphabet_size)
+        
+        padding_mask = jnp.broadcast_to(padding_mask, 
+                                        raw_one_hot.shape) #(B, L, base_alphabet_size)
         one_hot_masked = raw_one_hot * padding_mask  #(B, L, base_alphabet_size)
+        
         one_hot_final = one_hot_masked[..., 1:] #(B, L, base_alphabet_size - 1)
         return one_hot_final
         

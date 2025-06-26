@@ -1,0 +1,76 @@
+{
+    "training_wkdir": "RESULTS",
+    "rng_seednum": 0,
+
+    "data_dir": "example_data",
+    "train_dset_splits": ["sevenSamp"],
+    "test_dset_splits": ["sevenSamp"],
+    "toss_alignments_longer_than": null,
+    "batch_size": 7,
+    "chunk_length": 512,
+    "emission_alphabet_size": 20,
+    "norm_loss_by": "desc_len",
+    "gap_idx": 43,
+
+    "num_epochs": 3,
+    "optimizer_config": {
+        "init_value": 0.005,
+        "peak_value": 0.005,
+        "end_value": 0.005,
+        "warmup_steps": 0,
+        "weight_decay": 0,
+        "every_k_schedule": 1
+    },
+    "early_stop_cond1_atol": 1e-3,
+    "early_stop_cond2_gap": 3,
+    "patience": 1000,
+    "update_grads": true,
+    "use_scan_fns": false,
+
+    "interms_for_tboard": {
+        "encoder_sow_outputs": true,
+        "ancestor_embeddings": true,
+        "decoder_sow_outputs": true,
+        "descendant_embeddings": true,
+        "finalpred_sow_outputs": true,
+        "forward_pass_outputs": true,
+        "gradients": true,
+        "optimizer": true
+    },
+    "save_arrs": true,
+    "save_per_sample_losses": true,
+    "histogram_output_freq": 500,
+
+    "anc_model_type": "onehot",
+    "anc_enc_config": {"base_alphabet_size": 23},
+
+    "desc_model_type": "onehot",
+    "desc_dec_config": {"base_alphabet_size": 23},
+
+    "pred_model_type": "neural_hmm",
+    "pred_config": {
+        "load_all": false,
+        "subst_model_type": "gtr",
+        "indel_model_type": "tkf91",
+
+        "global_or_local": {"equl_dist": "local",
+                            "exch": "local",
+                            "rate_mult": "local",
+                            "tkf_rates": "local",
+                            "tkf92_frag_size": "local"},
+
+        "use_which_emb": {"preproc_equl": [true, true, true], 
+                          "preproc_subs": [true, true, true], 
+                          "preproc_trans": [true, true, true]},
+
+        "add_prev_alignment_info": true,
+
+        "times_from": "geometric",
+        "t_grid_center": 0.03,
+        "t_grid_step": 1.1,
+        "t_grid_num_steps": 5,
+        "exponential_dist_param": 1.1
+
+    }
+    
+}

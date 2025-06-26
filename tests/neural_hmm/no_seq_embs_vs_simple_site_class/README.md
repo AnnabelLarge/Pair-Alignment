@@ -27,7 +27,9 @@ For each config file, follow these steps:
    - Model: `simple_site_class_predict.IndpSites`  
    - Config location: `pairhmm_reference/configs/`
 
-2. **Load Parameters from Reference PairHMM and Run Inference with Neural TKF Code**  
+2. **Load Parameters from Reference PairHMM and run inference with Neural TKF Code**    
+   - Model: `neural_hmm_predict.NeuralCondTKF` 
+     - note: parameter update disabled!
    - Config location: `neuralTKF_load_all/configs/`
 
 3. **Train with Global Parameters Using Neural TKF**  

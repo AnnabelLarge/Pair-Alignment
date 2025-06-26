@@ -128,7 +128,7 @@ class LocalEqul(GlobalEqul):
                                       use_bias = True,
                                       name = name)
     
-    def _call__(self,
+    def __call__(self,
                 datamat,
                 sow_intermediates: bool):
         """
@@ -156,7 +156,8 @@ class LocalEqul(GlobalEqul):
         logits = self.final_project(datamat)
         
         return self.apply_log_softmax_activation(logits = logits,
-                                                 sow_intermediates = sow_intermediates) # (B, L_align, A)
+                                                 sow_intermediates = sow_intermediates,
+                                                 param_name = 'to equilibriums') # (B, L_align, A)
 
 
 class EqulFromFile(neuralTKFModuleBase):

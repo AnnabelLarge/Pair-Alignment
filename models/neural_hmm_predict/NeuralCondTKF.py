@@ -122,10 +122,11 @@ class NeuralCondTKF(ModuleBase):
                                           name = f'{self.name}/get_equl')
         
         elif global_or_local_dict['equl_dist'].lower() == 'local':
-            use_anc_emb, use_desc_emb = use_which_emb_dict['preproc_equl']
+            use_anc_emb, use_desc_emb, use_prev_align_info = use_which_emb_dict['preproc_equl']
             self.preproc_equl = preproc_module(config = self.config,
                                                use_anc_emb = use_anc_emb,
                                                use_desc_emb = use_desc_emb,
+                                               use_prev_align_info = use_prev_align_info,
                                                name = f'{self.name}/{preproc_model_type}_to_equl_module')
             self.equl_module = LocalEqul(config = self.config,
                                           name = f'{self.name}/get_equl')
@@ -141,10 +142,11 @@ class NeuralCondTKF(ModuleBase):
                                               name = f'{self.name}/get_subs')
             
             elif global_or_local_dict['rate_mult'].lower() == 'local':
-                use_anc_emb, use_desc_emb = use_which_emb_dict['preproc_subs']
+                use_anc_emb, use_desc_emb, use_prev_align_info = use_which_emb_dict['preproc_subs']
                 self.preproc_subs =  preproc_module(config = self.config,
                                                     use_anc_emb = use_anc_emb,
                                                     use_desc_emb = use_desc_emb,
+                                                    use_prev_align_info = use_prev_align_info,
                                                     name = f'{self.name}/{preproc_model_type}_to_subs_module')
                 self.subs_module = LocalF81(config = self.config,
                                             name = f'{self.name}/get_subs')
@@ -163,10 +165,11 @@ class NeuralCondTKF(ModuleBase):
                                             name = f'{self.name}/get_subs')
             
             else:
-                use_anc_emb, use_desc_emb = use_which_emb_dict['preproc_subs']
+                use_anc_emb, use_desc_emb, use_prev_align_info = use_which_emb_dict['preproc_subs']
                 self.preproc_subs = preproc_module(config = self.config,
                                                    use_anc_emb = use_anc_emb,
                                                    use_desc_emb = use_desc_emb,
+                                                   use_prev_align_info = use_prev_align_info,
                                                    name = f'{self.name}/{preproc_model_type}_to_subs_module')
             
                 if exch_global and rate_local:
@@ -192,10 +195,11 @@ class NeuralCondTKF(ModuleBase):
                                             name = f'{self.name}/get_trans')
             
             elif global_or_local_dict['tkf_rates'].lower() == 'local':
-                use_anc_emb, use_desc_emb = use_which_emb_dict['preproc_trans']
+                use_anc_emb, use_desc_emb, use_prev_align_info = use_which_emb_dict['preproc_trans']
                 self.preproc_trans =  preproc_module(config = self.config,
                                                      use_anc_emb = use_anc_emb,
                                                      use_desc_emb = use_desc_emb,
+                                                     use_prev_align_info = use_prev_align_info,
                                                      name = f'{self.name}/{preproc_model_type}_to_trans_module')
                 self.trans_module = LocalTKF91(config = self.config,
                                             name = f'{self.name}/get_trans')
@@ -214,10 +218,11 @@ class NeuralCondTKF(ModuleBase):
                                                         name = f'{self.name}/get_trans')
                 
             else:
-                use_anc_emb, use_desc_emb = use_which_emb_dict['preproc_trans']
+                use_anc_emb, use_desc_emb, use_prev_align_info = use_which_emb_dict['preproc_trans']
                 self.preproc_trans =  preproc_module(config = self.config,
                                                      use_anc_emb = use_anc_emb,
                                                      use_desc_emb = use_desc_emb,
+                                                     use_prev_align_info = use_prev_align_info,
                                                      name = f'{self.name}/{preproc_model_type}_to_trans_module')
                 
                 if indel_rates_global and frag_size_local:
@@ -247,7 +252,6 @@ class NeuralCondTKF(ModuleBase):
                                        padding_mask = padding_mask,
                                        training = training,
                                        sow_intermediates = sow_intermediates)
-        
         logprob_emit_indel = self.equl_module(datamat = equl_feats,
                                               sow_intermediates = sow_intermediates)
         

@@ -31,6 +31,10 @@ import optax
 from utils.sequence_length_helpers import selective_squeeze
 
 
+
+###############################################################################
+### HELPERS    ################################################################
+###############################################################################
 def _one_hot_pad_with_zeros( mat: jnp.array,
                              num_classes: int,
                              axis: int = -1 ):
@@ -43,6 +47,45 @@ def _one_hot_pad_with_zeros( mat: jnp.array,
     mat_oh = mat_oh_extra_class[...,1:] 
     return mat_oh
 
+def _preproc( unaligned_seqs: jnp.array, 
+              aligned_mats: jnp.array ):
+    ### unpack features
+    # unaligned sequences used in __call__
+    anc_seqs = unaligned_seqs[...,0] # (B, L_seq)
+    desc_seqs = unaligned_seqs[...,1] # (B, L_seq)
+    
+    # split into prefixes and suffixes, to avoid confusion
+    # prefixes: <s> A  B  C    the "a" in P(b | a, X, Y_{...j})
+    #            |  |  |  |
+    #            v  v  v  v
+    # suffixes:  A  B  C <e>    the "b" in P(b | a, X, Y_{...j})
+    aligned_mats_prefixes = aligned_mats[:,:-1,:]  # (B, L_align-1, 5)
+    aligned_mats_suffixes = aligned_mats[:,1:,:] # (B, L_align-1, 5)
+    
+    # precomputed alignment indices
+    # don't include last token, since it's not used to predict any valid input
+    align_idxes = aligned_mats_prefixes[...,-2:] # (B, L_align-1, 2)
+    
+    
+    ### prepare true_out
+    # need three things: gapped ancestor, gapped descendant, and 
+    # state transitions (a -> b transitions)
+    gapped_anc_desc = aligned_mats_suffixes[...,:2] #(B, L_align-1, 2)
+    from_states = aligned_mats_prefixes[...,2] #(B, L_align-1)
+    to_states = aligned_mats_suffixes[...,2] #(B, L_align-1)
+    true_out = jnp.concatenate( [ gapped_anc_desc,
+                                  from_states[..., None],
+                                  to_states[..., None] ],
+                                axis = -1 ) #(B, L_align-1, 4)
+    
+    out = {'anc_seqs': anc_seqs,
+           'desc_seqs': desc_seqs,
+           'align_idxes': align_idxes,
+           'from_states': from_states,
+           'true_out': true_out}
+    
+    return out
+             
 
 
 ###############################################################################
@@ -144,35 +187,15 @@ def train_one_batch(batch,
     ##########################
     ### PREPARE THE INPUTS   #
     ##########################
-    ### unpack features
-    # unaligned sequences used in __call__
-    anc_seqs = clipped_unaligned_seqs[...,0] # (B, L_seq)
-    desc_seqs = clipped_unaligned_seqs[...,1] # (B, L_seq)
-    
-    # split into prefixes and suffixes, to avoid confusion
-    # prefixes: <s> A  B  C    the "a" in P(b | a, X, Y_{...j})
-    #            |  |  |  |
-    #            v  v  v  v
-    # suffixes:  A  B  C <e>    the "b" in P(b | a, X, Y_{...j})
-    aligned_mats_prefixes = clipped_aligned_mats[:,:-1,:]  # (B, L_align-1, 5)
-    aligned_mats_suffixes = clipped_aligned_mats[:,1:,:] # (B, L_align-1, 5)
-    del clipped_unaligned_seqs, clipped_aligned_mats
-    
-    # precomputed alignment indices
-    # don't include last token, since it's not used to predict any valid input
-    align_idxes = aligned_mats_prefixes[...,-2:] # (B, L_align-1, 2)
-    
-    
-    ### prepare true_out
-    # need three things: gapped ancestor, gapped descendant, and 
-    # state transitions (a -> b transitions)
-    gapped_anc_desc = aligned_mats_suffixes[...,:2] #(B, L_align-1, 2)
-    from_states = aligned_mats_prefixes[...,2] #(B, L_align-1)
-    to_states = aligned_mats_suffixes[...,2] #(B, L_align-1)
-    true_out = jnp.concatenate( [ gapped_anc_desc,
-                                  from_states[..., None],
-                                  to_states[..., None] ],
-                                axis = -1 ) #(B, L_align-1, 4)
+    # preprocess with helper
+    out_dict = _preproc( unaligned_seqs = clipped_unaligned_seqs, 
+                         aligned_mats = clipped_aligned_mats )
+    anc_seqs = out_dict['anc_seqs']
+    desc_seqs = out_dict['desc_seqs']
+    align_idxes = out_dict['align_idxes']
+    from_states = out_dict['from_states']
+    true_out = out_dict['true_out']
+    del out_dict
     
     # when reporting, normalize the loss by a length (but this is NOT the 
     #   objective function)
@@ -453,7 +476,6 @@ def eval_one_batch(batch,
                     t_array_for_all_samples,  
                     concat_fn, 
                     norm_loss_by_for_reporting: str='desc_len',
-                    update_grads: bool = True,
                     gap_tok: int = 43,
                     seq_padding_idx: int = 0,
                     align_idx_padding: int = -9,
@@ -481,7 +503,6 @@ def eval_one_batch(batch,
                     sequence length; default is desc_len
         > interms_for_tboard: decide whether or not to output intermediate 
                              histograms and scalars
-        > update_grads: only turn off when debugging
         > concat_fn: what function to use to concatenate embedded seq inputs
         > extra_args_for_eval: extra inputs for custom eval functions
 
@@ -535,36 +556,15 @@ def eval_one_batch(batch,
     ##########################
     ### PREPARE THE INPUTS   #
     ##########################
-    ### unpack features
-    # unaligned sequences used in __call__
-    anc_seqs = clipped_unaligned_seqs[...,0] # (B, L_seq)
-    desc_seqs = clipped_unaligned_seqs[...,1] # (B, L_seq)
-    
-    # split into prefixes and suffixes, to avoid confusion
-    # prefixes: <s> A  B  C    the "a" in P(b | a, X, Y_{...j})
-    #            |  |  |  |
-    #            v  v  v  v
-    # suffixes:  A  B  C <e>    the "b" in P(b | a, X, Y_{...j})
-    aligned_mats_prefixes = clipped_aligned_mats[:,:-1,:] # (B, L_align-1, 5)
-    aligned_mats_suffixes = clipped_aligned_mats[:,1:,:] # (B, L_align-1, 5)
-    del clipped_unaligned_seqs, clipped_aligned_mats
-    
-    # precomputed alignment indices; final size is (B, max_align_len-1, 2)
-    # don't include last token, since it's not used to predict any valid input
-    align_idxes = aligned_mats_prefixes[...,-2:]
-    
-    
-    ### prepare true_out
-    # need three things: gapped ancestor, gapped descendant, and 
-    # state transitions (a -> b transitions)
-    gapped_anc_desc = aligned_mats_suffixes[...,:2] #(B, L_align-1, 2)
-    from_states = aligned_mats_prefixes[...,2][..., None] #(B, L_align-1, 1)
-    to_states = aligned_mats_suffixes[...,2][..., None] #(B, L_align-1, 1)
-    true_out = jnp.concatenate( [ gapped_anc_desc,
-                                  from_states,
-                                  to_states ],
-                                axis = -1 ) #(B, L_align-1, 4)
-    
+    # preprocess with helper
+    out_dict = _preproc( unaligned_seqs = clipped_unaligned_seqs, 
+                         aligned_mats = clipped_aligned_mats )
+    anc_seqs = out_dict['anc_seqs']
+    desc_seqs = out_dict['desc_seqs']
+    align_idxes = out_dict['align_idxes']
+    from_states = out_dict['from_states']
+    true_out = out_dict['true_out']
+    del out_dict
     
     # when reporting, normalize the loss by a length (but this is NOT the 
     #   objective function)
@@ -573,7 +573,6 @@ def eval_one_batch(batch,
     if norm_loss_by_for_reporting == 'desc_len':
         num_gaps = (true_out[...,1] == gap_tok).sum(axis=1)
         length_for_normalization_for_reporting = length_for_normalization_for_reporting - num_gaps
-    
 
     
     #######################
