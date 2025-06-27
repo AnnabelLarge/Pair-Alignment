@@ -227,15 +227,18 @@ class CountsDset(Dataset):
         
         # equilibrium distribution counts file
         self.emit_counts = np.zeros(emission_alphabet_size, dtype=int)
-            
-        if (emission_alphabet_size == 20) and (~subs_only):
+        
+        if (emission_alphabet_size == 20) and (not subs_only):
             counts_suffix = 'AAcounts'
         
-        elif (emission_alphabet_size == 20) and (~subs_only):
+        elif (emission_alphabet_size == 20) and (subs_only):
             counts_suffix = 'AAcounts_subsOnly'
         
-        elif emission_alphabet_size == 4:
+        elif (emission_alphabet_size == 4) and (not subs_only):
             counts_suffix = 'NuclCounts'
+        
+        elif (emission_alphabet_size == 4) and (subs_only):
+            counts_suffix = 'NuclCounts_subsOnly'
         
         # optionally read times
         if t_per_sample:
@@ -410,5 +413,5 @@ class CountsDset(Dataset):
         return self.names_df.iloc[idxes]
     
     def retrieve_equil_dist(self):
-        return self.emit_counts / self.emit_counts.sum()
+        return self.emit_counts / ( self.emit_counts.sum() )
     

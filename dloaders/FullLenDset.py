@@ -287,7 +287,7 @@ def _load_aligned_mats(data_dir,
     zero_padded_mat = np.concatenate([gapped_seqs, alignment[...,None]], axis=-1)
     
     # these use -9 as padding token: (B, L, 2)
-    neg_nine_padded_mat = mat[...,[2,3]]
+    neg_nine_padded_mat = mat[...,[-2,-1]]
     
     
     ### model-specific transformations
@@ -301,8 +301,8 @@ def _load_aligned_mats(data_dir,
         # toss ancestor
         zero_padded_mat = zero_padded_mat[...,1:]
         
-        # move all tokens down (except <bos> and <pad>)
-        shifted_desc = np.where( np.isin(zero_padded_mat[...,0], np.array([0,1]) ),
+        # move all tokens down (except <bos>, <pad>, and <gap>)
+        shifted_desc = np.where( np.isin(zero_padded_mat[...,0], [0,1, gap_idx] ),
                                  zero_padded_mat[...,0],
                                  zero_padded_mat[...,0] -1 )
         zero_padded_mat[...,0] = shifted_desc
