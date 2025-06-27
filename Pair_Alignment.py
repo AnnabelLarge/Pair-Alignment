@@ -18,7 +18,7 @@ from dloaders.init_dataloader import init_dataloader
 
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update("jax_debug_infs", True)
-jax.config.update("jax_enable_x64", True)
+# jax.config.update("jax_enable_x64", True)
 
 
 def main():
@@ -38,46 +38,48 @@ def main():
                    'continue_train',
                    'eval',
                    'batched_eval',
-                   'prep_datasets']
+                   'prep_datasets',
+                   'validate_neuraltkf_config',
+                   'batched_validate_neuraltkf_config']
     
-    # parser.add_argument('-task',
-    #                     type=str,
-    #                     required=True,
-    #                     choices = valid_tasks,
-    #                     help='What do you want to do? Pick from: {valid_tasks}')
+    parser.add_argument('-task',
+                        type=str,
+                        required=True,
+                        choices = valid_tasks,
+                        help=f'What do you want to do? Pick from: {valid_tasks}')
     
-    # parser.add_argument('-configs',
-    #                     type = str,
-    #                     required=True,
-    #                     help='Load configs from file or folder of files, in json format.')
+    parser.add_argument('-configs',
+                        type = str,
+                        required=True,
+                        help='Load configs from file or folder of files, in json format.')
     
-    # # optional: might have pre-processed some dataloaders
-    # parser.add_argument('-load_dset_pkl',
-    #                     type = str,
-    #                     default=False,
-    #                     help='name of the pre-computed pytorch dataset pickle object')
+    # optional: might have pre-processed some dataloaders
+    parser.add_argument('-load_dset_pkl',
+                        type = str,
+                        default=False,
+                        help='name of the pre-computed pytorch dataset pickle object')
     
-    # # only needed when continuing training
-    # parser.add_argument('-new_training_wkdir',
-    #                     type = str,
-    #                     help='FOR CONTINUE_TRAIN OPTION; Name for a new training working dir')
+    # only needed when continuing training
+    parser.add_argument('-new_training_wkdir',
+                        type = str,
+                        help='FOR CONTINUE_TRAIN OPTION; Name for a new training working dir')
     
-    # parser.add_argument('-prev_model_ckpts_dir',
-    #                     type = str,
-    #                     help='FOR CONTINUE_TRAIN OPTION; Path to previous trainstate, argparse object')
+    parser.add_argument('-prev_model_ckpts_dir',
+                        type = str,
+                        help='FOR CONTINUE_TRAIN OPTION; Path to previous trainstate, argparse object')
     
-    # parser.add_argument('-tstate_to_load',
-    #                     type = str,
-    #                     help='FOR CONTINUE_TRAIN OPTION; The name of the tstate object to load')
+    parser.add_argument('-tstate_to_load',
+                        type = str,
+                        help='FOR CONTINUE_TRAIN OPTION; The name of the tstate object to load')
     
     # parse the arguments
     top_level_args = parser.parse_args()
     
     
-    ## UNCOMMENT TO RUN IN SPYDER IDE
-    top_level_args.task = 'batched_train'
-    top_level_args.configs = 'configs_t-per-samp'
-    top_level_args.load_dset_pkl = False
+    # ## UNCOMMENT TO RUN IN SPYDER IDE
+    # top_level_args.task = 'batched_train'
+    # top_level_args.configs = 'configs_t-per-samp'
+    # top_level_args.load_dset_pkl = False
     
     
     ### helper functions 
@@ -118,7 +120,7 @@ def main():
     ###########################################################################
     if top_level_args.task == 'train':
         # read argparse
-        assert top_level_args.configs.endswith('.json'), print("input is one JSON file")
+        assert top_level_args.configs.endswith('.json'), "input is one JSON file"
         print(f'TRAINING WITH: {top_level_args.configs}')
         args = read_config_file(top_level_args.configs)
         
@@ -206,7 +208,7 @@ def main():
         ### with this dload_dict, train using ALL config files
         for file in file_lst:
             # read argparse
-            assert file.endswith('.json'), print("input is one JSON file")
+            assert file.endswith('.json'), "input is one JSON file"
             this_run_args = read_config_file(f'{top_level_args.configs}/{file}')
             print(f'TRAINING WITH: {top_level_args.configs}/{file}')
             
@@ -217,7 +219,7 @@ def main():
     
     elif top_level_args.task == 'continue_train':
         # read argparse
-        assert top_level_args.configs.endswith('.json'), print("input is one JSON file")
+        assert top_level_args.configs.endswith('.json'), "input is one JSON file"
         print(f'CONTINUE TRAINING WITH: {top_level_args.configs}, IN NEW DIR {top_level_args.new_training_wkdir}')
         args_from_training_config = read_config_file(top_level_args.configs)
         
@@ -255,7 +257,7 @@ def main():
     ###########################################################################
     elif top_level_args.task == 'eval':
         ### read argparse
-        assert top_level_args.configs.endswith('.json'), print("input is one JSON file")
+        assert top_level_args.configs.endswith('.json'), "input is one JSON file"
         print(f'EVALUATING WITH: {top_level_args.configs}')
         args = read_config_file(top_level_args.configs)
         
@@ -347,7 +349,7 @@ def main():
         ### with this dload_dict, train using ALL config files
         for file in file_lst:
             # read argparse
-            assert file.endswith('.json'), print("input is one JSON file")
+            assert file.endswith('.json'), "input is one JSON file"
             this_run_args = read_config_file(f'{top_level_args.configs}/{file}')
             print(f'EVALUATING WITH: {top_level_args.configs}/{file}')
             
@@ -373,7 +375,7 @@ def main():
     elif top_level_args.task == 'label_class_post':
         raise NotImplementedError('not ready yet')
         ### read argparse
-        assert top_level_args.configs.endswith('.json'), print("input is one JSON file")
+        assert top_level_args.configs.endswith('.json'), "input is one JSON file"
         print(f'EVALUATING WITH: {top_level_args.configs}')
         args = read_config_file(top_level_args.configs)
         
@@ -440,7 +442,7 @@ def main():
         ### read every file, then export a raw pickle 
         for file in file_lst:
             # read argparse
-            assert file.endswith('.json'), print("input is one JSON file")
+            assert file.endswith('.json'), "input is one JSON file"
             this_run_args = read_config_file(f'{top_level_args.configs}/{file}')
             print(f'LOADING FROM: {top_level_args.configs}/{file}')
             
@@ -463,7 +465,30 @@ def main():
             del this_run_args, checklist, train_flag, dload_dict, new_file_name
         
         print('done')
+    
+    
+    ###########################################################################
+    ### CONFIG CHECK: Validate Neural TKF config file   #######################
+    ###########################################################################
+    # 'validate_neuraltkf_config',
+    # 'batched_validate_neuraltkf_config'
+    elif top_level_args.task == 'validate_neuraltkf_config':
+        from cli.test_neural_tkf_model_is_causal import test_neural_tkf_model_is_causal 
+        assert top_level_args.configs.endswith('.json'), "input is one JSON file"
+        
+        test_neural_tkf_model_is_causal(top_level_args.configs)
         
     
+    elif top_level_args.task == 'batched_validate_neuraltkf_config':
+        from cli.test_neural_tkf_model_is_causal import test_neural_tkf_model_is_causal 
+        
+        file_lst = [file for file in os.listdir(top_level_args.configs) if not file.startswith('.')
+                    and file.endswith('.json')]
+        assert len(file_lst) > 0, f'{top_level_args.configs} is empty!'
+        
+        for file in file_lst:
+            path = f'{top_level_args.configs}/{file}'
+            test_neural_tkf_model_is_causal(path)
+        
 if __name__ == '__main__':
     main()

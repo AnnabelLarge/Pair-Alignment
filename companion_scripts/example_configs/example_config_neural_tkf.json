@@ -41,11 +41,11 @@
     "save_per_sample_losses": true,
     "histogram_output_freq": 500,
 
-    "anc_model_type": null,
-    "anc_enc_config": {},
+    "anc_model_type": "onehot",
+    "anc_enc_config": {"base_alphabet_size": 23},
 
-    "desc_model_type": null,
-    "desc_dec_config": {},
+    "desc_model_type": "onehot",
+    "desc_dec_config": {"base_alphabet_size": 23},
 
     "pred_model_type": "neural_hmm",
     "pred_config": {
@@ -53,11 +53,11 @@
         "subst_model_type": "gtr",
         "indel_model_type": "tkf91",
 
-        "global_or_local": {"equl_dist": "global",
-                            "exch": "global",
-                            "rate_mult": "global",
-                            "tkf_rates": "global",
-                            "tkf92_frag_size": "global"},
+        "global_or_local": {"equl_dist": "local",
+                            "exch": "local",
+                            "rate_mult": "local",
+                            "tkf_rates": "local",
+                            "tkf92_frag_size": "local"},
 
         "use_which_emb": {"preproc_equl": [true, true, true], 
                           "preproc_subs": [true, true, true], 
