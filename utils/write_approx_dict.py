@@ -39,7 +39,9 @@ def write_approx_dict(approx_dict,
                 
         # for neural TKF, only have sums
         with open(f'{out_arrs_dir}/{out_file}','a') as g:
+            g.write(f'{subline}\n')
             g.write(to_write + '\n')
+            g.write('\n')
         
     del used_approx, to_write, key, val
     
