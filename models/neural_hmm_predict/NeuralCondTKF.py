@@ -316,7 +316,8 @@ class NeuralCondTKF(ModuleBase):
                               gap_idx: int=43,
                               padding_idx: int=0,
                               start_idx: int=1,
-                              end_idx: int=2):
+                              end_idx: int=2,
+                              return_result_before_sum: bool=False):
         """
         loss of alignment path, given by alignment_state
         
@@ -423,12 +424,16 @@ class NeuralCondTKF(ModuleBase):
                                                     logprob_perSamp_perPos_perTime + i_e_correction,
                                                     logprob_perSamp_perPos_perTime ) #(T, B, length_for_scan) or (B, length_for_scan)
         
-        # take the SUM down the length to get logprob_perSamp_perTime:
-        # if unique_time_per_sample, logprob_perSamp_perTime is (B)
-        # elif not unique_time_per_sample, logprob_perSamp_perTime is (T, B)
-        logprob_perSamp_perTime = logprob_perSamp_perPos_perTime.sum(axis=-1)
+        if return_result_before_sum:
+            return logprob_perSamp_perPos_perTime
         
-        return logprob_perSamp_perTime
+        elif not return_result_before_sum:
+            # take the SUM down the length to get logprob_perSamp_perTime:
+            # if unique_time_per_sample, logprob_perSamp_perTime is (B)
+            # elif not unique_time_per_sample, logprob_perSamp_perTime is (T, B)
+            logprob_perSamp_perTime = logprob_perSamp_perPos_perTime.sum(axis=-1)
+            
+            return logprob_perSamp_perTime
         
     
     def evaluate_loss_after_scan(self, 

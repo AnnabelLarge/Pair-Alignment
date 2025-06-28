@@ -9,6 +9,7 @@ import numpy as np
 import argparse
 import json
 from tqdm import tqdm
+from typing import Optional, Any
 
 import jax
 import jax.numpy as jnp
@@ -180,6 +181,7 @@ def test_neural_tkf_model_is_causal(config_file):
                        all_trainstates,
                        all_model_instances,
                        t_array_for_all_samples,  
+                       true_out: Optional[Any] = None,
                        extra_args_for_eval: dict = dict(),
                        gap_tok: int = 43,
                        seq_padding_idx: int = 0,
@@ -221,8 +223,18 @@ def test_neural_tkf_model_is_causal(config_file):
         desc_seqs = out_dict['desc_seqs']
         align_idxes = out_dict['align_idxes']
         from_states = out_dict['from_states']
+        
+        # if this is the first time, generate true_out and return it
+        if true_out is None:
+            del true_out
+            true_out = out_dict['true_out']
+            return_true_out = True
+        
+        elif true_out is not None:
+            return_true_out = False
+        
         del out_dict
-    
+        
         
         #######################
         ### Apply the model   #
@@ -261,12 +273,15 @@ def test_neural_tkf_model_is_causal(config_file):
         datamat_lst.append( from_states_one_hot ) 
         del from_states_one_hot
         
+        # save this
+        input_to_network = np.concatenate( datamat_lst, axis=-1 ) #(B, L_align-1, H)
+        
             
         ### forward pass through prediction head, to get scoring matrices
         # forward_pass_scoring_matrices has the keys:
-        # logprob_emit_match: (T,B,L,A,A) or (B,L,A,A)
-        # logprob_emit_indel: (B,L,A)
-        # logprob_transits: (T,B,L,S,S) or (B,L,S,S)
+        # logprob_emit_match: (T,B,L_align-1,A,A) or (B,L_align-1,A,A)
+        # logprob_emit_indel: (B,L_align-1,A)
+        # logprob_transits: (T,B,L_align-1,S,S) or (B,L_align-1,S,S)
         # corr: a tuple of two arrays; each either (T,B) or (B,)
         # approx_flags_dict: a dictionary of things (see model code)
         # subs_model_params: a dictionary of things (see model code)
@@ -278,16 +293,45 @@ def test_neural_tkf_model_is_causal(config_file):
                                              training = False,
                                              sow_intermediates = False )
         
-        return forward_pass_scoring_matrices
         
+        ### evaluate negative loglike (but don't sum over positions yet)
+        logprob_perSamp_perPos_perTime = finalpred_trainstate.apply_fn(  variables = finalpred_trainstate.params,
+                                             logprob_emit_match = forward_pass_scoring_matrices['logprob_emit_match'],
+                                             logprob_emit_indel = forward_pass_scoring_matrices['logprob_emit_indel'],
+                                             logprob_transits = forward_pass_scoring_matrices['logprob_transits'],
+                                             corr = forward_pass_scoring_matrices['corr'],
+                                             true_out = true_out,
+                                             return_result_before_sum = True,
+                                             method = 'neg_loglike_in_scan_fn') #(T, B, L_align-1) or (B, L_align-1)
         
+        if not return_true_out:
+            out_dict =  {'forward_pass_scoring_matrices': forward_pass_scoring_matrices,
+                         'logprob_perSamp_perPos_perTime': logprob_perSamp_perPos_perTime,
+                         'input_to_network': input_to_network}
+            
+        elif return_true_out:
+            out_dict =  {'forward_pass_scoring_matrices': forward_pass_scoring_matrices,
+                         'logprob_perSamp_perPos_perTime': logprob_perSamp_perPos_perTime,
+                         'input_to_network': input_to_network,
+                         'true_out': true_out}
+        
+        return out_dict
+            
+    
     #####################################################
     ### True output: run eval function on whole input   #
     #####################################################
-    true_score_dict = unit_test_eval(batch = batch, 
-                                     all_trainstates = all_trainstates,
-                                     all_model_instances = all_model_instances,
-                                     t_array_for_all_samples = t_array_for_all_samples)
+    out_dict = unit_test_eval(batch = batch, 
+                              all_trainstates = all_trainstates,
+                              all_model_instances = all_model_instances,
+                              t_array_for_all_samples = t_array_for_all_samples,
+                              true_out = None)
+    
+    true_score_dict = out_dict['forward_pass_scoring_matrices'] # dict to unpack
+    true_logprob_per_pos = out_dict['logprob_perSamp_perPos_perTime'] #(T, B, L_align-1) or (B, L_align-1)
+    true_input_to_network = out_dict['input_to_network']  #(B, L_align-1, H)
+    true_out_from_full_seqs = out_dict['true_out'] #(T, B, L_align-1)
+    del out_dict
     
     true_logprob_emit_match = true_score_dict['logprob_emit_match'] #(T, B, L_align-1, A, A) or (B, L_align-1, A, A)
     true_logprob_emit_indel = true_score_dict['logprob_emit_indel'] #(B, L_align-1, A)
@@ -328,8 +372,23 @@ def test_neural_tkf_model_is_causal(config_file):
     pred_logprob_transits = np.zeros( final_shape )
     del final_shape
     
+    # logprob per position
+    if not unique_t_per_sample:
+        final_shape =  (T, B, L_align-1)
+
+    elif unique_t_per_sample:
+        final_shape =  (B, L_align-1)
+                
+    pred_logprob_per_pos = np.zeros( final_shape )
+    del final_shape
     
-    for l in range(0, L_align-1):
+    # inputs to network
+    pred_input_to_network = np.zeros( true_input_to_network.shape ) #(B, L_align-1, H)
+    
+    
+    # l is the position to be aligned
+    # know the ancestor, but do NOT know the descendant at l
+    for l in range(0, L_align-1): 
         ### adjust inputs
         # clip the aligned inputs; mask everything AFTER l
         clipped_aligned_mats = np.array( aligned_mats )
@@ -347,24 +406,69 @@ def test_neural_tkf_model_is_causal(config_file):
         
         
         ### run eval function
-        scor_dict_up_to_l = unit_test_eval(batch = clipped_batch, 
+        out_dict = unit_test_eval(batch = clipped_batch, 
                                            all_trainstates = all_trainstates,
                                            all_model_instances = all_model_instances,
-                                           t_array_for_all_samples = t_array_for_all_samples)
+                                           t_array_for_all_samples = t_array_for_all_samples,
+                                           true_out = true_out_from_full_seqs)
+        
+        scor_dict_up_to_l = out_dict['forward_pass_scoring_matrices'] # dict to unpack
+        logprob_up_to_l = out_dict['logprob_perSamp_perPos_perTime'] #(T, B, L_align-1) or (B, L_align-1)
+        input_to_network_up_to_l = out_dict['input_to_network']  #(B, L_align-1, H)
+        del out_dict
         
         
         ### take corresponding indices from output_at_l
         logprob_emit_match_to_return = scor_dict_up_to_l['logprob_emit_match'][...,l,:,:] # (T, B, A, A) or (B, A, A)
         logprob_emit_indel_to_return = scor_dict_up_to_l['logprob_emit_indel'][:, l, :] # (B, A)
         logprob_transits_to_return = scor_dict_up_to_l['logprob_transits'][...,l,:,:] # (T, B, S, S) or (B, S, S)
+        loglike_to_return = logprob_up_to_l[...,l] #(T, B) or (B,)
+        i_to_return = input_to_network_up_to_l[...,l,:] #(B, H)
         
+        
+        ### validate that future masking worked
+        # for inputs to network, everything AFTER l should be zero, since
+        #   it's padded
+        assert np.allclose( input_to_network_up_to_l[...,l+1:,:],
+                            np.zeros( input_to_network_up_to_l[...,l+1:,:].shape ) )
+        
+        # for all matrices, make sure all positions AFTER l are the same (they should be, since
+        #   they're information for padding positions)
+        if (L_align-1) - l >= 2:
+            emit_match_ref = scor_dict_up_to_l['logprob_emit_match'][...,l+1,:,:]  # (T, B, A, A) or (B, A, A)
+            emit_indel_ref = scor_dict_up_to_l['logprob_emit_indel'][:, l+1, :] # (B, A)
+            transits_ref = scor_dict_up_to_l['logprob_transits'][...,l+1,:,:] # (T, B, S, S) or (B, S, S)
+            
+            for l_after in range( l+2, L_align-1 ):
+                new_match = scor_dict_up_to_l['logprob_emit_match'][...,l_after,:,:] # (T, B, A, A) or (B, A, A)
+                new_indel = scor_dict_up_to_l['logprob_emit_indel'][:, l_after, :] # (B, A)
+                new_transits = scor_dict_up_to_l['logprob_transits'][...,l_after,:,:] # (T, B, S, S) or (B, S, S)
+                
+                assert np.allclose(new_match, emit_match_ref)
+                assert np.allclose(new_indel, emit_indel_ref)
+                assert np.allclose(new_transits, transits_ref)
+                
+                emit_match_ref = new_match  # (T, B, A, A) or (B, A, A)
+                emit_indel_ref = new_indel # (B, A)
+                transits_ref = new_transits # (T, B, S, S) or (B, S, S)
+                
+                del l_after, new_match, new_indel, new_transits
+            
+            del emit_match_ref, emit_indel_ref, transits_ref
+                
         # update buckets
         pred_logprob_emit_match[...,l,:,:] = logprob_emit_match_to_return
         pred_logprob_emit_indel[...,l,:] = logprob_emit_indel_to_return
         pred_logprob_transits[...,l,:,:] = logprob_transits_to_return
+        pred_logprob_per_pos[...,l] = loglike_to_return
+        pred_input_to_network[...,l,:] = i_to_return
     
+    
+    ### compare to results using full sequence
     assert np.allclose(true_logprob_emit_match, pred_logprob_emit_match)
     assert np.allclose(true_logprob_emit_indel, pred_logprob_emit_indel)
     assert np.allclose(true_logprob_transits, pred_logprob_transits)
+    assert np.allclose(true_logprob_per_pos, pred_logprob_per_pos)
+    assert np.allclose(true_input_to_network, pred_input_to_network)
     
     print('Model in config passes causal test!')
