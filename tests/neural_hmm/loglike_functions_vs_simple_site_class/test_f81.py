@@ -26,15 +26,15 @@ class TestF81(unittest.TestCase):
     """
     def setUp(self):    
         self.equl = np.array([0, 0.3, 0.3, 0.4])
-        normalizing_factor = np.array( [1 / ( 1 - np.square(self.equl).sum() )] )
         self.t_array = np.array([0.1, 0.2, 0.3])
         
         # reference implementation; return the conditional logprob
-        my_model = F81Logprobs(config={'num_mixtures': 1},
+        my_model = F81Logprobs(config={'num_mixtures': 1,
+                                       'norm_rate_mat': True},
                                name='ref')
         self.true_f81 = my_model.apply( variables={},
                                         equl=self.equl[None,...],
-                                        rate_multiplier=normalizing_factor,
+                                        rate_multiplier=jnp.ones((1,)),
                                         t_array = self.t_array,
                                         return_cond = True,
                                         method='_fill_f81' )[:,0,...] #(T, A, A)

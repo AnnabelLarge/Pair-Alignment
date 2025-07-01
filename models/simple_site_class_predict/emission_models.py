@@ -889,13 +889,11 @@ class F81Logprobs(ModuleBase):
         # required
         self.num_mixtures = self.config['num_mixtures']
         
-        # have defaults; may or may not be used
+        # have defaults
+        self.norm_rate_mults = self.config.get('norm_rate_mults',True)
+        self.norm_rate_matrix = self.config.get('norm_rate_matrix',True)
         self.rate_mult_min_val, self.rate_mult_max_val  = self.config.get( 'rate_mult_range', (0.01, 10) )
-        
-        # tested on GTR for proteins; decided that these defaults are best
-        self.rate_mult_activation = self.config.get('rate_mult_activation', 
-                                                    'bound_sigmoid')
-        self.norm_rate_mults = self.config.get('norm_rate_mults', True)
+        self.rate_mult_activation = self.config.get('rate_mult_activation', 'bound_sigmoid')
         
         # validate
         if self.rate_mult_activation not in ['bound_sigmoid', 'softplus']:
@@ -924,6 +922,7 @@ class F81Logprobs(ModuleBase):
                  log_class_probs: jnp.array,
                  t_array: jnp.array,
                  return_cond: bool,
+                 sow_intermediates: bool,
                  *args,
                  **kwargs):
         """
@@ -950,6 +949,7 @@ class F81Logprobs(ModuleBase):
             log-probability of emission at match sites, according to F81
         """
         prob_equl = jnp.exp(logprob_equl) #(C, A)
+        C = prob_equl.shape[0]
         
         
         ### rate multiplier
@@ -996,7 +996,7 @@ class F81Logprobs(ModuleBase):
             
             
         elif self.num_mixtures == 1:
-            rate_multiplier = 1 / ( 1 - jnp.square(prob_equl).sum(axis=(-1)) ) # (1,)
+            rate_multiplier = jnp.ones( (C,) ) #(C,) but C=1
         
         joint_logprob = self._fill_f81(equl = prob_equl, 
                                       rate_multiplier = rate_multiplier, 
@@ -1017,17 +1017,24 @@ class F81Logprobs(ModuleBase):
         C = rate_multiplier.shape[0]
         A = equl.shape[-1]
         
-        oper = -rate_multiplier[None,:]*t_array[:,None] #(T, C)
+        # possibly normalize to one substitution per time t
+        if self.norm_rate_matrix:
+            # \sum_i pi_i chi_{ii} = \sum_i pi_i (1-\pi_i) = 1 - \sum_i pi_i^2
+            norm_factor = 1 / ( 1 - jnp.square(equl).sum(axis=(-1)) ) # (C,)
+        elif not self.norm_rate_matrix:
+            norm_factor = jnp.ones( (C,) ) #(C,)
+        
+        # the exponential operand
+        oper = -( rate_multiplier[None,:] * norm_factor[None,:] * t_array[:,None] ) #(T, C)
         exp_oper = jnp.exp(oper)[...,None] #(T, C, 1)
         equl = equl[None,:] #(1, C, A)
         
-        # all off-diagonal entries 
+        # all off-diagonal entries, i != j
         # pi_j * ( 1 - exp(-rate*t) )
         row = equl * ( 1 - exp_oper ) #(T, C, A)
-        cond_probs_raw = jnp.broadcast_to( row[:, :, None, :], 
-                                            (T, C, A, A) )  # (T, C, A, A)
+        cond_probs_raw = jnp.broadcast_to( row[:, :, None, :], (T, C, A, A) )  # (T, C, A, A)
         
-        # diagonal entries
+        # diagonal entries, i = j
         #   pi_j + (1-pi_j) * exp(-rate*t)
         diags = equl + (1-equl) * exp_oper #(T, C, A)
         diag_indices = jnp.arange(A)  # (A,)
@@ -1086,6 +1093,7 @@ class F81LogprobsFromFile(F81Logprobs):
         ### read config
         self.num_mixtures = self.config['num_mixtures']
         self.norm_rate_mults = self.config.get('norm_rate_mults',True)
+        self.norm_rate_matrix = self.config.get('norm_rate_matrix',True)
         rate_multiplier_file = self.config['filenames'].get('rate_mult', None)
         
         

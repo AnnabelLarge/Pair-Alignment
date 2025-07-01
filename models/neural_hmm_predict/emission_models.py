@@ -352,7 +352,7 @@ class LocalF81(neuralTKFModuleBase):
                                            param_name = 'rate mult.',
                                            sow_intermediates = sow_intermediates) # (B, L_align)
         
-        # return substitution probabilities directly
+        # return equilibrium probabilities directly
         equl = jnp.exp(log_equl) # (B, L_align, A)
         
         # shape of output
