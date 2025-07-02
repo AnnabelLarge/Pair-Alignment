@@ -184,7 +184,6 @@ class FeedforwardPostproc(SelectMask):
             > n=1, if only using ancestor embedding OR descendant embedding
             > n=2, if using both embeddings
         """
-        
         ### select (potentially concat) and mask padding
         # datamat: (B, L, n*H)
         # full_concat_masking_mat: (B, L, n*H)
@@ -194,7 +193,6 @@ class FeedforwardPostproc(SelectMask):
                                                                self.use_desc_emb,
                                                                self.use_prev_align_info)
         del datamat_lst
-        
         
         ### norm -> dense -> activation -> dropout
         for layer_idx, hid_dim in enumerate(self.layer_sizes):
@@ -211,8 +209,7 @@ class FeedforwardPostproc(SelectMask):
             # 2.) norm (plus recording to tensorboard)
             #     shouldn't need masking after this
             concat_masking_mask = full_concat_masking_mat[...,:datamat.shape[-1]]
-            datamat = self.norm_layers[layer_idx](datamat, 
-                                                  mask=concat_masking_mask)
+            datamat = self.norm_layers[layer_idx](datamat)
             datamat = jnp.where(concat_masking_mask,
                                 datamat,
                                 0)
@@ -263,5 +260,5 @@ class FeedforwardPostproc(SelectMask):
                                             label = label, 
                                             which=['scalars'])
                 del label
-        
+            
         return datamat
