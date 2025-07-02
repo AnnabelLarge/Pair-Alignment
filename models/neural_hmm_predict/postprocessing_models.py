@@ -130,17 +130,33 @@ class FeedforwardPostproc(SelectMask):
         self.layer_sizes = self.config['layer_sizes']
         
         # optional
+        normalize_inputs = self.config.get("normalize_inputs", True)
         self.dropout = self.config.get("dropout", 0.0)
         
         
-        ### set up layers
+        ### set up layers of the MLP
         dense_layers = []
         norm_layers = []
-        for layer_idx, hid_dim in enumerate(self.layer_sizes):
+        
+        # first layer
+        if normalize_inputs:
+            norm_layers.append( nn.LayerNorm( reduction_axes= -1, 
+                                              feature_axes=-1,
+                                              name = f'{self.name}/instance norm 0') )
+        elif not normalize_inputs:
+            norm_layers.append( lambda x: x )
+        
+        dense_layers.append( nn.Dense(features = self.layer_sizes[0], 
+                                      use_bias = True, 
+                                      kernel_init = nn.initializers.lecun_normal(),
+                                      name=f'{self.name}/feedforward layer 0') )
+        
+        # subsequent layers
+        for i, hid_dim in enumerate(self.layer_sizes[1:]):
+            layer_idx = i + 1
             norm_layers.append( nn.LayerNorm( reduction_axes= -1, 
                                               feature_axes=-1,
                                               name = f'{self.name}/instance norm {layer_idx}') )
-            
             dense_layers.append( nn.Dense(features = hid_dim, 
                                           use_bias = True, 
                                           kernel_init = nn.initializers.lecun_normal(),
@@ -195,7 +211,7 @@ class FeedforwardPostproc(SelectMask):
         del datamat_lst
         
         ### norm -> dense -> activation -> dropout
-        for layer_idx, hid_dim in enumerate(self.layer_sizes):
+        for layer_idx in range( len(self.layer_sizes) ):
             # 1.) record distribution into block
             if sow_intermediates:
                 label = (f'{self.name}/'+
@@ -262,3 +278,4 @@ class FeedforwardPostproc(SelectMask):
                 del label
             
         return datamat
+
