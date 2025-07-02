@@ -34,9 +34,6 @@ class Placeholder(ModuleBase):
     """
     config: None
     name: str
-    use_anc_emb: None
-    use_desc_emb: None
-    use_prev_align_info: None
     
     @nn.compact
     def __call__(self, 
@@ -65,11 +62,12 @@ class Placeholder(ModuleBase):
 class SelectMask(ModuleBase):
     config: dict
     name: str
-    use_anc_emb: bool=True
-    use_desc_emb: bool=True
-    use_prev_align_info: bool=True
     
-    @nn.compact
+    def setup(self):
+        self.use_anc_emb = self.config['use_anc_emb']
+        self.use_desc_emb = self.config['use_desc_emb']
+        self.use_prev_align_info = self.config['use_prev_align_info']
+    
     def __call__(self,
                  datamat_lst: list,
                  padding_mask: jnp.array,
@@ -112,9 +110,6 @@ class FeedforwardPostproc(SelectMask):
     """
     config: dict
     name: str
-    use_anc_emb: bool=True
-    use_desc_emb: bool=True
-    use_prev_align_info: bool=True
     
     def setup(self):
         """
@@ -129,6 +124,9 @@ class FeedforwardPostproc(SelectMask):
         """
         ### read config
         # required
+        self.use_anc_emb = self.config['use_anc_emb']
+        self.use_desc_emb = self.config['use_desc_emb']
+        self.use_prev_align_info = self.config['use_prev_align_info']
         self.layer_sizes = self.config['layer_sizes']
         
         # optional
@@ -146,7 +144,7 @@ class FeedforwardPostproc(SelectMask):
             dense_layers.append( nn.Dense(features = hid_dim, 
                                           use_bias = True, 
                                           kernel_init = nn.initializers.lecun_normal(),
-                                          name=f'{self.name}/feedforward layer {layer_idx}')(datamat) )
+                                          name=f'{self.name}/feedforward layer {layer_idx}') )
             
         self.dense_layers = dense_layers
         self.norm_layers = norm_layers

@@ -394,9 +394,8 @@ def create_all_tstates(seq_shapes,
     
     ### final prediction network
     # set output shape
-    if pred_config['add_prev_alignment_info']:
-        prev_state_size = (largest_seqs[0], largest_aligns[1], 5)
-        list_of_shapes.append(prev_state_size)
+    prev_state_size = (largest_seqs[0], largest_aligns[1], 5)
+    list_of_shapes.append(prev_state_size)
     
     # init
     out = prediction_head_instance(pred_model_type = pred_model_type,

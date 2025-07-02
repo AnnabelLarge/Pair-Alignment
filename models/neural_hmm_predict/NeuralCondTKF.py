@@ -49,20 +49,32 @@ class NeuralCondTKF(ModuleBase):
     
     def setup(self):
         """
-        Attributes:
-        ------------
-        self.times_from
-        self.subst_model_type
+        Attributes from pred_config:
+        -----------------------------
+        self.times_from : str
+        self.subst_model_type : str
         self.exponential_dist_param : float
+        self.transitions_postproc_config : dict
+        self.emissions_postproc_config : dict
         
-        self.preproc_equl
+        Attributes created after model initialization:
+        -----------------------------------------------
+        self.postproc_equl
         self.equl_module
         
-        self.preproc_subs
+        self.postproc_subs
         self.subs_module
         
-        self.preproc_trans
+        self.postproc_trans
         self.trans_module
+        
+        decide the post-processing architecture to combine 
+        position-specific embeddings with:
+        ---------------------------------------------------
+            - config['emissions_postproc_module']
+              - provide config for this called config['emissions_postproc_config']
+            - config['transitions_postproc_module']
+              - provide config for this called config['transitions_postproc_config']
         
         entries in config['global_or_local']:
         -------------------------------------
@@ -71,16 +83,6 @@ class NeuralCondTKF(ModuleBase):
         (if gtr) exch : str
         tkf_rates : str
         (if tkf92) tkf92_frag_size : str
-        
-        entries in config['use_which_emb']:
-        -----------------------------------------
-        these are tuples of booleans; first is whether or not to use the 
-         ancestor embedding, second refers to descendant embedding, third
-         refers to previous alignment path
-        preproc_equl : (bool, bool, bool)
-        preproc_subs : (bool, bool, bool)
-        preproc_trans : (bool, bool, bool)
-        
         """
         ###################
         ### read config   #
@@ -91,11 +93,14 @@ class NeuralCondTKF(ModuleBase):
         self.indel_model_type = self.config['indel_model_type'].lower()
         times_from = self.config['times_from'].lower()
         global_or_local_dict = self.config['global_or_local']
-        use_which_emb_dict = self.config['use_which_emb']
         
         # optional
+        transitions_postproc_model_type = self.config.get('transitions_postproc_model_type', None)
+        self.transitions_postproc_model_type = transitions_postproc_model_type
+        emissions_postproc_model_type = self.config.get('emissions_postproc_model_type', None)
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1.)
-        preproc_model_type = self.config.get('preproc_model_type', 'selectmask').lower()
+        self.transitions_postproc_config = self.config.get('transitions_postproc_config', dict() )
+        self.emissions_postproc_config = self.config.get('emissions_postproc_config', dict() )
         
         # handle time
         if times_from =='t_per_sample':
@@ -108,26 +113,27 @@ class NeuralCondTKF(ModuleBase):
         ######################################################################
         ### pick architecture for preprocessing features, for local params   #
         ######################################################################
-        preproc_module_registry = {'selectmask': SelectMask,
-                                   'feedforward': FeedforwardPostproc}
-        preproc_module = preproc_module_registry[preproc_model_type]
+        postproc_module_registry = {'selectmask': SelectMask,
+                                    'feedforward': FeedforwardPostproc,
+                                    None: lambda *args, **kwargs: lambda *args, **kwargs: None}
+        
+        transitions_postproc_module = postproc_module_registry[transitions_postproc_model_type]
+        emissions_postproc_module = postproc_module_registry[emissions_postproc_model_type]
         
         
         ###########################################
         ### module for equilibrium distribution   #
         ###########################################
+        # postprocess the concatenated embeddings
+        self.postproc_equl = emissions_postproc_module(config = self.emissions_postproc_config,
+                                           name = f'{self.name}/{emissions_postproc_model_type}_to_equl_module')
+        
+        # get equilibrium distribution
         if global_or_local_dict['equl_dist'].lower() == 'global':
-            self.preproc_equl = lambda *args, **kwargs: None
             self.equl_module = GlobalEqul(config = self.config,
                                           name = f'{self.name}/get_equl')
         
         elif global_or_local_dict['equl_dist'].lower() == 'local':
-            use_anc_emb, use_desc_emb, use_prev_align_info = use_which_emb_dict['preproc_equl']
-            self.preproc_equl = preproc_module(config = self.config,
-                                               use_anc_emb = use_anc_emb,
-                                               use_desc_emb = use_desc_emb,
-                                               use_prev_align_info = use_prev_align_info,
-                                               name = f'{self.name}/{preproc_model_type}_to_equl_module')
             self.equl_module = LocalEqul(config = self.config,
                                           name = f'{self.name}/get_equl')
         
@@ -135,19 +141,16 @@ class NeuralCondTKF(ModuleBase):
         ########################################
         ### module for logprob substitutions   #
         ########################################
+        # postprocess the concatenated embeddings
+        self.postproc_subs =  emissions_postproc_module(config = self.emissions_postproc_config,
+                                            name = f'{self.name}/{emissions_postproc_model_type}_to_subs_module')
+        
         if self.subst_model_type == 'f81':
             if global_or_local_dict['rate_mult'].lower() == 'global':
-                self.preproc_subs = lambda *args, **kwargs: None
                 self.subs_module = GlobalF81(config = self.config,
                                               name = f'{self.name}/get_subs')
             
             elif global_or_local_dict['rate_mult'].lower() == 'local':
-                use_anc_emb, use_desc_emb, use_prev_align_info = use_which_emb_dict['preproc_subs']
-                self.preproc_subs =  preproc_module(config = self.config,
-                                                    use_anc_emb = use_anc_emb,
-                                                    use_desc_emb = use_desc_emb,
-                                                    use_prev_align_info = use_prev_align_info,
-                                                    name = f'{self.name}/{preproc_model_type}_to_subs_module')
                 self.subs_module = LocalF81(config = self.config,
                                             name = f'{self.name}/get_subs')
 
@@ -160,47 +163,37 @@ class NeuralCondTKF(ModuleBase):
             rate_local = global_or_local_dict['rate_mult'].lower() == 'local'
             
             if exch_global and rate_global:
-                self.preproc_subs = lambda *args, **kwargs: None
                 self.subs_module = GTRGlobalExchGlobalRateMult(config = self.config,
                                             name = f'{self.name}/get_subs')
             
-            else:
-                use_anc_emb, use_desc_emb, use_prev_align_info = use_which_emb_dict['preproc_subs']
-                self.preproc_subs = preproc_module(config = self.config,
-                                                   use_anc_emb = use_anc_emb,
-                                                   use_desc_emb = use_desc_emb,
-                                                   use_prev_align_info = use_prev_align_info,
-                                                   name = f'{self.name}/{preproc_model_type}_to_subs_module')
+            elif exch_global and rate_local:
+                self.subs_module = GTRGlobalExchLocalRateMult(config = self.config,
+                                            name = f'{self.name}/get_subs')
             
-                if exch_global and rate_local:
-                    self.subs_module = GTRGlobalExchLocalRateMult(config = self.config,
-                                                name = f'{self.name}/get_subs')
-                
-                elif exch_local and rate_local:
-                    self.subs_module = GTRLocalExchLocalRateMult(config = self.config,
-                                                name = f'{self.name}/get_subs')
-                
-                # weird case that I'm not testing yet
-                elif exch_local and rate_global:
-                    raise NotImplementedError
+            elif exch_local and rate_local:
+                self.subs_module = GTRLocalExchLocalRateMult(config = self.config,
+                                            name = f'{self.name}/get_subs')
+            
+            # weird case that I'm not testing yet
+            elif exch_local and rate_global:
+                raise NotImplementedError
             
             
         ###########################################
         ### module for transition probabilities   #
         ###########################################
+        # postprocess the concatenated embeddings
+        self.postproc_trans =  transitions_postproc_module(config = self.transitions_postproc_config,
+                                             name = f'{self.name}/{transitions_postproc_model_type}_to_trans_module')
+        if self.postproc_trans is None:
+            breakpoint()
+        
         if self.indel_model_type == 'tkf91':
             if global_or_local_dict['tkf_rates'].lower() == 'global':
-                self.preproc_trans = lambda *args, **kwargs: None
                 self.trans_module = GlobalTKF91(config = self.config,
                                             name = f'{self.name}/get_trans')
             
             elif global_or_local_dict['tkf_rates'].lower() == 'local':
-                use_anc_emb, use_desc_emb, use_prev_align_info = use_which_emb_dict['preproc_trans']
-                self.preproc_trans =  preproc_module(config = self.config,
-                                                     use_anc_emb = use_anc_emb,
-                                                     use_desc_emb = use_desc_emb,
-                                                     use_prev_align_info = use_prev_align_info,
-                                                     name = f'{self.name}/{preproc_model_type}_to_trans_module')
                 self.trans_module = LocalTKF91(config = self.config,
                                             name = f'{self.name}/get_trans')
                 
@@ -213,29 +206,20 @@ class NeuralCondTKF(ModuleBase):
             frag_size_local = global_or_local_dict['tkf92_frag_size'].lower() == 'local'
             
             if indel_rates_global and frag_size_global:
-                self.preproc_trans = lambda *args, **kwargs: None
                 self.trans_module = TKF92GlobalRateGlobalFragSize(config = self.config,
                                                         name = f'{self.name}/get_trans')
                 
-            else:
-                use_anc_emb, use_desc_emb, use_prev_align_info = use_which_emb_dict['preproc_trans']
-                self.preproc_trans =  preproc_module(config = self.config,
-                                                     use_anc_emb = use_anc_emb,
-                                                     use_desc_emb = use_desc_emb,
-                                                     use_prev_align_info = use_prev_align_info,
-                                                     name = f'{self.name}/{preproc_model_type}_to_trans_module')
-                
-                if indel_rates_global and frag_size_local:
+            elif indel_rates_global and frag_size_local:
                     self.trans_module = TKF92GlobalRateLocalFragSize(config = self.config,
                                                             name = f'{self.name}/get_trans')
                 
-                elif indel_rates_local and frag_size_local:
-                    self.trans_module = TKF92LocalRateLocalFragSize(config = self.config,
-                                                            name = f'{self.name}/get_trans')
-                
-                # weird case that I'm not testing yet
-                elif indel_rates_local and frag_size_global:
-                    raise NotImplementedError
+            elif indel_rates_local and frag_size_local:
+                self.trans_module = TKF92LocalRateLocalFragSize(config = self.config,
+                                                        name = f'{self.name}/get_trans')
+            
+            # weird case that I'm not testing yet
+            elif indel_rates_local and frag_size_global:
+                raise NotImplementedError
             
     def __call__(self, 
                  datamat_lst: list[jnp.array], 
@@ -248,7 +232,7 @@ class NeuralCondTKF(ModuleBase):
         unlike pairHMM implementation, this ONLY generates scoring matrices
         """
         # equilibrium distribution; used to score emissions from indel sites
-        equl_feats = self.preproc_equl(datamat_lst = datamat_lst,
+        equl_feats = self.postproc_equl(datamat_lst = datamat_lst,
                                        padding_mask = padding_mask,
                                        training = training,
                                        sow_intermediates = sow_intermediates)
@@ -256,7 +240,7 @@ class NeuralCondTKF(ModuleBase):
                                               sow_intermediates = sow_intermediates)
         
         # substitution model; used to score emissions from match sites
-        sub_feats = self.preproc_subs(datamat_lst = datamat_lst,
+        sub_feats = self.postproc_subs(datamat_lst = datamat_lst,
                                       padding_mask = padding_mask,
                                       training = training,
                                       sow_intermediates = sow_intermediates)
@@ -268,7 +252,7 @@ class NeuralCondTKF(ModuleBase):
                                                                 sow_intermediates = sow_intermediates)
         
         # transition model; used to score markovian alignment path
-        trans_feats = self.preproc_trans(datamat_lst = datamat_lst,
+        trans_feats = self.postproc_trans(datamat_lst = datamat_lst,
                                          padding_mask = padding_mask,
                                          training = training,
                                          sow_intermediates = sow_intermediates)
@@ -499,21 +483,21 @@ class NeuralCondTKFLoadAll(NeuralCondTKF):
     
     def setup(self):
         """
-        Attributes:
-        ------------
+        Attributes from pred_config:
+        -----------------------------
         self.times_from
         self.subst_model_type
-        self.norm_loss_by
-        self.norm_loss_by_length
         self.exponential_dist_param
         
-        self.preproc_equl
+        Attributes created after model initialization:
+        -----------------------------------------------
+        self.postproc_equl
         self.equl_module
         
-        self.preproc_subs
+        self.postproc_subs
         self.subs_module
         
-        self.preproc_trans
+        self.postproc_trans
         self.trans_module
         
         entries in config['global_or_local']:
@@ -526,9 +510,9 @@ class NeuralCondTKFLoadAll(NeuralCondTKF):
         
         entries in config['use_which_emb']:
         -----------------------------------------
-        preproc_equl
-        preproc_subs
-        preproc_trans
+        postproc_equl
+        postproc_subs
+        postproc_trans
         
         """
         ###################
@@ -541,7 +525,6 @@ class NeuralCondTKFLoadAll(NeuralCondTKF):
         
         # optional
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
-        preproc_model_type = self.config.get('preproc_model_type', 'selectmask')
         
         # handle time
         if times_from =='t_per_sample':
@@ -554,14 +537,14 @@ class NeuralCondTKFLoadAll(NeuralCondTKF):
         ###########################################
         ### module for equilibrium distribution   #
         ###########################################
-        self.preproc_equl = lambda *args, **kwargs: None
+        self.postproc_equl = lambda *args, **kwargs: None
         self.equl_module = EqulFromFile(config = self.config,
                                         name = f'{self.name}/get_equl')
         
         ########################################
         ### module for logprob substitutions   #
         ########################################
-        self.preproc_subs = lambda *args, **kwargs: None
+        self.postproc_subs = lambda *args, **kwargs: None
         
         if self.subst_model_type == 'f81':
             self.subs_module = F81FromFile(config = self.config,
@@ -574,7 +557,8 @@ class NeuralCondTKFLoadAll(NeuralCondTKF):
         ###########################################
         ### module for transition probabilities   #
         ###########################################
-        self.preproc_trans = lambda *args, **kwargs: None
+        self.postproc_trans = lambda *args, **kwargs: None
+        
         if self.indel_model_type == 'tkf91':
             self.trans_module = GlobalTKF91FromFile(config = self.config,
                                                     name = f'{self.name}/get_trans')

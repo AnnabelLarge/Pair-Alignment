@@ -101,6 +101,12 @@ def logprob_f81(equl,
     """
     this is the CONDITIONAL LOG-PROBABILITY P(desc|anc,t,align=Match)
     
+    this also always normalizes rate matrix to t = one substitution, THEN 
+      multiplies the entire rate matrix by rate multiplier
+    
+    if comparing back to pairHMM implementation, need to make sure 
+      norm_rate_matrix is True and norm_rate_mult is False
+    
     B: batch size
     L_align: length of alignment
     T: number of times in the grid
@@ -345,7 +351,7 @@ def logprob_gtr( exch_upper_triag_values,
                                                  equilibrium_distributions = equilibrium_distributions,
                                                  norm = True) #(B, L_align, A, A) 
     
-    # scale by rate multiplier
+    # scale by rate multiplier AFTER normalization
     rate_mat = rate_multiplier[..., None, None] * normed_rate_mat #(B, L_align, A, A) 
     
     # adjust dims

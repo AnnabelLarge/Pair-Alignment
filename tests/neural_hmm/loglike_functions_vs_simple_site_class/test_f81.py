@@ -25,60 +25,103 @@ class TestF81(unittest.TestCase):
     See if F81 model in neural TKF code matches this reference implementation
     """
     def setUp(self):    
-        self.equl = np.array([0, 0.3, 0.3, 0.4])
         self.t_array = np.array([0.1, 0.2, 0.3])
+        self.B = self.t_array.shape[0]
+        self.A = 4
+        
+        # reference implementation from pairHMM codebase
+        self.ref = F81Logprobs(config={'num_mixtures': 1,
+                                       'norm_rate_matrix': True,
+                                       'norm_rate_mults': False},
+                               name='ref')
+        
+        
+    def test_one_f81_matrix(self):
+        equl = np.array([0, 0.3, 0.3, 0.4])
         
         # reference implementation; return the conditional logprob
-        my_model = F81Logprobs(config={'num_mixtures': 1,
-                                       'norm_rate_mat': True},
-                               name='ref')
-        self.true_f81 = my_model.apply( variables={},
-                                        equl=self.equl[None,...],
-                                        rate_multiplier=jnp.ones((1,)),
-                                        t_array = self.t_array,
-                                        return_cond = True,
-                                        method='_fill_f81' )[:,0,...] #(T, A, A)
-    
-    def test_one_f81_matrix(self):
-        pred_f81 = neural_f81(equl = self.equl[None,None,:],
+        true_f81 = self.ref.apply( variables={},
+                                   equl=equl[None,...],
+                                   rate_multiplier=jnp.ones((1,)),
+                                   t_array = self.t_array,
+                                   return_cond = True,
+                                   method='_fill_f81' )[:,0,...] #(B, A, A)
+        
+        # function in neural TKF codebase
+        pred_f81 = neural_f81(equl = equl[None,None,:],
                               rate_multiplier = np.ones((1,1)),
                               t_array = self.t_array,
-                              unique_time_per_sample = True)[:,0,...] #(T, A, 2)
+                              unique_time_per_sample = True)[:,0,...] #(B, A, 2)
         
-        # compare matches
-        true_f81_diags = jnp.diagonal(self.true_f81, axis1=1, axis2=2)
+        # compare matches i == j
+        true_f81_diags = jnp.diagonal(true_f81, axis1=1, axis2=2)
         npt.assert_allclose(true_f81_diags, pred_f81[...,0], atol=THRESHOLD) 
         
-        # compare mis-matches; do this by indexing individually and avoiding the
-        # diagonals
-        npt.assert_allclose(self.true_f81[:,1,0], pred_f81[...,0,1], atol=THRESHOLD) 
-        npt.assert_allclose(self.true_f81[:,0,1], pred_f81[...,1,1], atol=THRESHOLD) 
-        npt.assert_allclose(self.true_f81[:,1,2], pred_f81[...,2,1], atol=THRESHOLD) 
-        npt.assert_allclose(self.true_f81[:,1,3], pred_f81[...,3,1], atol=THRESHOLD) 
-    
-    def test_multi_f81_matrix(self):
-        B = 3
-        L = 5
-        A = self.equl.shape[-1]
-        equl_exp = jnp.broadcast_to( self.equl[None,None,:], (B, L, A) )
-        pred_f81 = neural_f81(equl = equl_exp,
-                              rate_multiplier = jnp.ones((B,L)),
-                              t_array = self.t_array,
-                              unique_time_per_sample = True) #(T, B, A, 2)
-        
-        for b in range(B):
-            pred_at_b = pred_f81[:,b,...]
-            
-            # compare matches
-            true_f81_diags = jnp.diagonal(self.true_f81, axis1=1, axis2=2)
-            npt.assert_allclose(true_f81_diags, pred_at_b[...,0], atol=THRESHOLD) 
-        
-            # compare mis-matches; do this by indexing individually and avoiding the
-            # diagonals
-            npt.assert_allclose(self.true_f81[:,1,0], pred_at_b[...,0,1], atol=THRESHOLD) 
-            npt.assert_allclose(self.true_f81[:,0,1], pred_at_b[...,1,1], atol=THRESHOLD) 
-            npt.assert_allclose(self.true_f81[:,1,2], pred_at_b[...,2,1], atol=THRESHOLD) 
-            npt.assert_allclose(self.true_f81[:,1,3], pred_at_b[...,3,1], atol=THRESHOLD)
+        # compare mis-matches i!=j
+        for b in range(self.B):
+            for i in range(self.A):
+                for j in range(self.A):
+                    # don't do anything if i == j
+                    if i == j:
+                        continue
 
+                    true_val = true_f81[b, i, j]
+                    pred_val = pred_f81[b, j, 1]
+                    
+                    npt.assert_allclose(true_val, pred_val, atol=THRESHOLD) 
+
+    def test_multi_f81_matrix(self):
+        """
+        unqiue equilibrium distribution for every sample in B, every 
+          alignment column in L
+        """
+        L = 5
+        A = self.A
+        
+        ### generate a unique equilibrium distribution for every B and L
+        local_equl = np.zeros( (self.B, L, A) )
+        true_f81 = np.zeros( (self.B, L, A, A) )
+        
+        # reference implementation
+        for b in range(self.B):
+            for l in range(L):
+                # random equilibrium distribution
+                rngkey = jax.random.key( b*100+l )
+                logits = jax.random.normal( rngkey, (A,) )
+                logits_squared = logits**2
+                probs = logits_squared / logits_squared.sum()
+                local_equl[b, l, :] = probs
+                
+                # true value
+                f81_at_b_l = self.ref.apply( variables={},
+                                             equl=probs[None,...],
+                                             rate_multiplier=jnp.ones((1,)),
+                                             t_array = self.t_array[b][None],
+                                             return_cond = True,
+                                             method='_fill_f81' )[0,0,...] #(A,A)
+                
+                true_f81[b, l, ...] = f81_at_b_l
+        
+        # function in neural TKF codebase
+        pred_f81 = neural_f81(equl = local_equl,
+                              rate_multiplier = np.ones((1,1)),
+                              t_array = self.t_array,
+                              unique_time_per_sample = True) #(B, L, A, 2)
+        
+        # compare
+        for b in range(self.B):
+            for l in range(L):
+                for i in range(self.A):
+                    for j in range(self.A):
+                        true_val = true_f81[b, l, i, j]
+                        
+                        if i == j:
+                            pred_val = pred_f81[b, l, j, 0]
+                        
+                        elif i != j:
+                            pred_val = pred_f81[b, l, j, 1]
+                        
+                        npt.assert_allclose(true_val, pred_val, atol=THRESHOLD) 
+                
 if __name__ == '__main__':
     unittest.main()

@@ -8,7 +8,7 @@ Created on Thu Jun 26 17:17:00 2025
 from cli.test_neural_tkf_model_is_causal import test_neural_tkf_model_is_causal
 import os
 
-mydir = 'marg_over_times'
+mydir = 'original_configs'
 
 for file in os.listdir(mydir):
     if file.startswith('CONFIG') and file.endswith('.json'):
