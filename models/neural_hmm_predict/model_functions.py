@@ -1195,4 +1195,4 @@ def process_datamat_lst(datamat_lst: list,
     #   (B, L_align, 2*H): use_anc_emb & use_anc_emb & ~use_prev_align_info
     #   (B, L_align, 2*H+6): use_anc_emb & use_anc_emb & use_prev_align_info
     datamat = jnp.multiply(datamat, masking_mat)
-    return datamat, masking_mat
+    return datamat

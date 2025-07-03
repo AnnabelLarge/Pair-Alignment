@@ -94,11 +94,11 @@ class SelectMask(ModuleBase):
             
         """
         # select (potentially concat) and mask padding
-        datamat, padding_mask = process_datamat_lst(datamat_lst,
-                                                    padding_mask,
-                                                    self.use_anc_emb,
-                                                    self.use_desc_emb,
-                                                    self.use_prev_align_info)
+        datamat = process_datamat_lst(datamat_lst,
+                                      padding_mask,
+                                      self.use_anc_emb,
+                                      self.use_desc_emb,
+                                      self.use_prev_align_info)
         
         return datamat
         
@@ -130,7 +130,7 @@ class FeedforwardPostproc(SelectMask):
         self.layer_sizes = self.config['layer_sizes']
         
         # optional
-        normalize_inputs = self.config.get("normalize_inputs", True)
+        self.normalize_inputs = self.config.get("normalize_inputs", True)
         self.dropout = self.config.get("dropout", 0.0)
         
         
@@ -139,11 +139,11 @@ class FeedforwardPostproc(SelectMask):
         norm_layers = []
         
         # first layer
-        if normalize_inputs:
+        if self.normalize_inputs:
             norm_layers.append( nn.LayerNorm( reduction_axes= -1, 
                                               feature_axes=-1,
                                               name = f'{self.name}/instance norm 0') )
-        elif not normalize_inputs:
+        elif not self.normalize_inputs:
             norm_layers.append( lambda x: x )
         
         dense_layers.append( nn.Dense(features = self.layer_sizes[0], 
@@ -165,7 +165,7 @@ class FeedforwardPostproc(SelectMask):
         self.dense_layers = dense_layers
         self.norm_layers = norm_layers
         self.act= nn.silu
-        
+    
     
     @nn.compact
     def __call__(self, 
@@ -180,9 +180,10 @@ class FeedforwardPostproc(SelectMask):
         
         Arguments
         ----------
-        datamat_lst : list[ArrayLike, ArrayLike]
-            ancestor embedding, descendant embedding (in that order); each are
-            (B, L_align, H_in)
+        datamat_lst : list[ArrayLike, ArrayLike, ArrayLike]
+            ancestor embedding, descendant embedding, previous alignment state 
+            (in that order); embeddings are (B, L_align, H_in), and previous
+            alignment state is (B, L_align, 5)
         
         padding_mask : ArrayLike, (B, L_align)
             location of padding in alignment
@@ -200,36 +201,106 @@ class FeedforwardPostproc(SelectMask):
             > n=1, if only using ancestor embedding OR descendant embedding
             > n=2, if using both embeddings
         """
-        ### select (potentially concat) and mask padding
-        # datamat: (B, L, n*H)
-        # full_concat_masking_mat: (B, L, n*H)
-        datamat, full_concat_masking_mat = process_datamat_lst(datamat_lst,
-                                                               padding_mask,
-                                                               self.use_anc_emb,
-                                                               self.use_desc_emb,
-                                                               self.use_prev_align_info)
+        # anc_embeddings: (B, L, H)
+        # desc_embeddings: (B, L, H)
+        # prev_align_one_hot_vec: (B, L, 5)
+        anc_embeddings, desc_embeddings, prev_align_one_hot_vec = datamat_lst
         del datamat_lst
         
-        ### norm -> dense -> activation -> dropout
-        for layer_idx in range( len(self.layer_sizes) ):
-            # 1.) record distribution into block
+        
+        ### First block
+        # select (potentially concat) the ancestor and descendant embeddings
+        emb_lst = [anc_embeddings, desc_embeddings]
+        embeddings_datamat = process_datamat_lst(datamat_lst = emb_lst,
+                                                 padding_mask = padding_mask,
+                                                 use_anc_emb = self.use_anc_emb,
+                                                 use_desc_emb = self.use_desc_emb,
+                                                 use_prev_align_info = False) # (B, L, n*H)
+        del emb_lst
+        
+        # 1.1) record distribution into block
+        if sow_intermediates:
+            label = (f'{self.name}/'+
+                     f'final feedforward layer 0/'+
+                     f'embeddings before block')
+            self.sow_histograms_scalars(mat = embeddings_datamat, 
+                                        label = label, 
+                                        which=['scalars'])
+            del label
+            
+        # 1.2) possibly instance norm and mask padding tokens
+        embeddings_datamat = self.norm_layers[0](embeddings_datamat) #(B, L, n*H)
+        
+        if self.normalize_inputs:
+            embeddings_datamat = self._mask_padding_tokens( x=embeddings_datamat,
+                                                            mask=padding_mask ) #(B, L, n*H)
+        
             if sow_intermediates:
                 label = (f'{self.name}/'+
-                         f'final feedforward layer {layer_idx}/'+
-                         f'before block')
-                self.sow_histograms_scalars(mat = datamat, 
+                         f'final feedforward layer 0/'+
+                         f'embeddings after instance normalization')
+                self.sow_histograms_scalars(mat = embeddings_datamat, 
                                             label = label, 
                                             which=['scalars'])
                 del label
-                
-            # 2.) norm (plus recording to tensorboard)
-            #     shouldn't need masking after this
-            concat_masking_mask = full_concat_masking_mat[...,:datamat.shape[-1]]
-            datamat = self.norm_layers[layer_idx](datamat)
-            datamat = jnp.where(concat_masking_mask,
-                                datamat,
-                                0)
-            del concat_masking_mask
+        
+        # 1.3) possibly concatenate normalized sequence embeddings to 
+        #      previous alignment state; this preserves signal from one-hot 
+        #      encoding
+        if self.use_prev_align_info:
+            datamat = jnp.concatenate( [embeddings_datamat, prev_align_one_hot_vec],
+                                       axis = -1 )  #(B, L, n*H + 5)
+        elif not self.use_prev_align_info:
+            datamat = embeddings_datamat #(B, L, n*H)
+        
+        del embeddings_datamat
+        
+        # 1.4) dense layer
+        datamat = self.dense_layers[0](datamat) #(B, L, hid_dim[0] )
+        
+        if sow_intermediates:
+            label = (f'{self.name}/'+
+                     f'final feedforward layer 0/'+
+                     'after dense')
+            self.sow_histograms_scalars(mat = datamat, 
+                                        label = label, 
+                                        which=['scalars'])
+            del label
+        
+        # 1.5) activation
+        datamat = self.act(datamat) #(B, L, hid_dim[0] )
+        
+        if sow_intermediates:
+            label = (f'{self.name}/'+
+                     f'final feedforward layer 0/'+
+                     f'after silu')
+            self.sow_histograms_scalars(mat = datamat, 
+                                        label = label, 
+                                        which=['scalars'])
+            del label
+        
+        # 1.6) dropout
+        datamat = nn.Dropout(rate = self.dropout)(datamat,
+                                            deterministic = not training)  #(B, L, layer_sizes[0] )
+         
+        if sow_intermediates and (self.dropout != 0):
+            label = (f'{self.name}/'+
+                     f'final feedforward layer 0/'+
+                     'after dropout')
+            self.sow_histograms_scalars(mat = datamat, 
+                                        label = label, 
+                                        which=['scalars'])
+            del label
+        
+        
+        ### Subsequent blocks: norm -> dense -> activation -> dropout
+        for i in range( len(self.layer_sizes[1:]) ):
+            layer_idx = i + 1
+             
+            # 1.) norm (plus recording to tensorboard)
+            datamat = self.norm_layers[layer_idx](datamat) #(B, L, layer_sizes[layer_idx-1])
+            datamat = self._mask_padding_tokens( x=datamat,
+                                                 mask=padding_mask ) #(B, L, layer_sizes[layer_idx]-1)
             
             if sow_intermediates:
                 label = (f'{self.name}/'+
@@ -240,8 +311,8 @@ class FeedforwardPostproc(SelectMask):
                                             which=['scalars'])
                 del label
                 
-            # 3.) dense
-            datamat = self.dense_layers[layer_idx](datamat)
+            # 2.) dense
+            datamat = self.dense_layers[layer_idx](datamat) #(B, L, layer_sizes[layer_idx])
             
             if sow_intermediates:
                 label = (f'{self.name}/'+
@@ -252,8 +323,8 @@ class FeedforwardPostproc(SelectMask):
                                             which=['scalars'])
                 del label
             
-            # 4.) activation
-            datamat = self.act(datamat)
+            # 3.) activation
+            datamat = self.act(datamat) #(B, L, layer_sizes[layer_idx])
             
             if sow_intermediates:
                 label = (f'{self.name}/'+
@@ -264,9 +335,9 @@ class FeedforwardPostproc(SelectMask):
                                             which=['scalars'])
                 del label
             
-            # 5.) dropout
+            # 4.) dropout
             datamat = nn.Dropout(rate = self.dropout)(datamat,
-                                                deterministic = not training)
+                                                deterministic = not training) #(B, L, layer_sizes[layer_idx])
             
             if sow_intermediates and (self.dropout != 0):
                 label = (f'{self.name}/'+
@@ -276,6 +347,18 @@ class FeedforwardPostproc(SelectMask):
                                             label = label, 
                                             which=['scalars'])
                 del label
+        
             
-        return datamat
-
+        ### mask out padding tokens one last time
+        datamat = self._mask_padding_tokens( x=datamat,
+                                             mask=padding_mask ) #(B, L, layer_sizes[-1])
+        return datamat  #(B, L, layer_sizes[-1])
+    
+    
+    def _mask_padding_tokens( self,
+                             x: jnp.array, 
+                             mask: jnp.array ):
+        expanded_mask = jnp.broadcast_to( mask[...,None], x.shape ) 
+        return jnp.multiply(expanded_mask, x)
+        
+    
