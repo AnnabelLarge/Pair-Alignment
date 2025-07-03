@@ -301,6 +301,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
         train_cpu_start = process_time()
         
         for batch_idx, batch in enumerate(training_dl):
+            this_batch_size = batch[0].shape[0]
             batch_epoch_idx = epoch_idx * len(training_dl) + batch_idx
 
 #__4___8__12: batch level (three tabs)          
@@ -379,7 +380,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
             
 #__4___8__12: batch level (three tabs)
             ### add to recorded metrics for this epoch
-            weight = args.batch_size / len(training_dset)
+            weight = this_batch_size / len(training_dset)
             ave_epoch_train_loss += train_metrics['batch_loss'] * weight
             ave_epoch_train_perpl += train_metrics['batch_ave_perpl'] * weight
             del weight
@@ -431,6 +432,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
         eval_cpu_start = process_time()
         
         for batch_idx, batch in enumerate(test_dl):
+            this_batch_size = batch[0].shape[0]
             # unpack briefly to get max len and number of samples in the 
             #   batch; place in some bin (this controls how many jit 
             #   compilations you do)
@@ -453,7 +455,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
 #__4___8__12: batch level (three tabs)
             ### add to total loss for this epoch; weight by number of
             ###   samples/valid tokens in this batch
-            weight = args.batch_size / len(test_dset)
+            weight = this_batch_size / len(test_dset)
             ave_epoch_test_loss += eval_metrics['batch_loss'] * weight
             ave_epoch_test_perpl += jnp.mean( eval_metrics['perplexity_perSamp'] ) * weight
             del weight

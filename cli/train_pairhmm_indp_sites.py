@@ -270,6 +270,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
         train_cpu_start = process_time()
         
         for batch_idx, batch in enumerate(training_dl):   
+            this_batch_size = batch[0].shape[0]
             batch_epoch_idx = epoch_idx * len(training_dl) + batch_idx  
             
             rngkey_for_training_batch = jax.random.fold_in(training_rngkey, epoch_idx+batch_idx)
@@ -331,7 +332,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
             
 #__4___8__12: batch level (three tabs)
             ### add to recorded metrics for this epoch
-            weight = args.batch_size / len(training_dset)
+            weight = this_batch_size / len(training_dset)
             ave_epoch_train_loss += train_metrics['batch_loss'] * weight
             ave_epoch_train_perpl += train_metrics['batch_ave_joint_perpl'] * weight
             del weight
@@ -375,6 +376,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
         eval_cpu_start = process_time()
         
         for batch_idx, batch in enumerate(test_dl):
+            this_batch_size = batch[0].shape[0]
             eval_metrics = eval_fn_jitted(batch=batch, 
                                           pairhmm_trainstate=pairhmm_trainstate)
             
@@ -391,7 +393,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
                 
             ### add to total loss for this epoch; weight by number of
             ###   samples/valid tokens in this batch
-            weight = args.batch_size / len(test_dset)
+            weight = this_batch_size / len(test_dset)
             ave_epoch_test_loss += batch_loss * weight
             ave_epoch_test_perpl += jnp.mean( eval_metrics['joint_perplexity_perSamp'] ) * weight
             del weight
