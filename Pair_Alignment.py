@@ -60,7 +60,7 @@ def main():
     # optional: might have pre-processed some dataloaders
     parser.add_argument('-load_dset_pkl',
                         type = str,
-                        default=False,
+                        default=None,
                         help='name of the pre-computed pytorch dataset pickle object')
     
     # only needed when continuing training
@@ -83,7 +83,7 @@ def main():
     # ## UNCOMMENT TO RUN IN SPYDER IDE
     # top_level_args.task = 'train'
     # top_level_args.configs = 'CONFIG_DRY-RUN.json'
-    # top_level_args.load_dset_pkl = False
+    # top_level_args.load_dset_pkl = None
     
     
     ### helper functions 
@@ -127,36 +127,36 @@ def main():
         assert top_level_args.configs.endswith('.json'), "input is one JSON file"
         print(f'TRAINING WITH: {top_level_args.configs}')
         args = read_config_file(top_level_args.configs)
+        pred_model_type = args.pred_model_type
         
         # import correct wrappers, dataloader initializers
-        if args.pred_model_type == 'pairhmm_indp_sites':
+        if pred_model_type == 'pairhmm_indp_sites':
             from cli.train_pairhmm_indp_sites import train_pairhmm_indp_sites as train_fn
             from dloaders.init_counts_dset import init_counts_dset as init_datasets
             from dloaders.CountsDset import jax_collator as collate_fn
             
-        elif args.pred_model_type == 'pairhmm_frag_and_site_classes':
-            from cli.train_pairhmm_frag_and_site_classes import train_pairhmm_frag_and_site_classes as train_fn
+        elif pred_model_type in ['pairhmm_frag_and_site_classes',
+                                      'neural_hmm',
+                                      'feedforward']:
             from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
             from dloaders.FullLenDset import jax_collator as collate_fn
-
-        elif args.pred_model_type == 'neural_hmm':
-            from cli.train_neural_hmm import train_neural_hmm as train_fn
-            from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
-            from dloaders.FullLenDset import jax_collator as collate_fn
-
-        elif args.pred_model_type == 'feedforward':
-            raise NotImplementedError('not ready')
-            from cli.train_feedforward import train_feedforward as train_fn
-            from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
-            from dloaders.FullLenDset import jax_collator as collate_fn
-
+            
+            if pred_model_type == 'pairhmm_frag_and_site_classes':
+                from cli.train_pairhmm_frag_and_site_classes import train_pairhmm_frag_and_site_classes as train_fn
+                
+            elif pred_model_type == 'neural_hmm':
+                from cli.train_neural_hmm import train_neural_hmm as train_fn
+    
+            elif pred_model_type == 'feedforward':
+                raise NotImplementedError('not ready')
+                
         # make dataloder list
-        if not top_level_args.load_dset_pkl:
+        if top_level_args.load_dset_pkl is None:
             dload_dict = init_datasets( args,
                                           'train',
                                           training_argparse = None,
                                           include_dataloader = True)
-        elif top_level_args.load_dset_pkl:
+        else:
             dload_dict = load_dset_pkl(args = args,
                                        file_to_load = top_level_args.load_dset_pkl,
                                        collate_fn = collate_fn)
@@ -166,41 +166,40 @@ def main():
 
 
     elif top_level_args.task == 'batched_train':
-        ### read argparse from first config file
+        # read argparse from first config file
         file_lst = [file for file in os.listdir(top_level_args.configs) if not file.startswith('.')
                     and file.endswith('.json')]
-        assert len(file_lst) > 0, f'{args.configs} is empty!'
+        assert len(file_lst) > 0, f'{top_level_args.configs} is empty!'
         
-        
-        ### get dataloader and functions from first config file
+        # get dataloader and functions from first config file
         first_config_file = file_lst[0]
         print(f'DATALOADER CONSTRUCTED FROM: {top_level_args.configs}/{first_config_file}')
         print(f"WARNING: make sure you want this dataloader for ALL experiments in {top_level_args.configs}!!!")
         print(f"WARNING: make sure you want this dataloader for ALL experiments in {top_level_args.configs}!!!")
         print(f"WARNING: make sure you want this dataloader for ALL experiments in {top_level_args.configs}!!!")
         first_args = read_config_file(f'{top_level_args.configs}/{first_config_file}')
+        pred_model_type = first_args.pred_model_type
         
         # import correct wrappers, dataloader initializers
-        if first_args.pred_model_type == 'pairhmm_indp_sites':
+        if pred_model_type == 'pairhmm_indp_sites':
             from cli.train_pairhmm_indp_sites import train_pairhmm_indp_sites as train_fn
             from dloaders.init_counts_dset import init_counts_dset as init_datasets
             from dloaders.CountsDset import jax_collator as collate_fn
-
-        elif first_args.pred_model_type == 'pairhmm_frag_and_site_classes':
-            from cli.train_pairhmm_frag_and_site_classes import train_pairhmm_frag_and_site_classes as train_fn
+            
+        elif pred_model_type in ['pairhmm_frag_and_site_classes',
+                                      'neural_hmm',
+                                      'feedforward']:
             from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
             from dloaders.FullLenDset import jax_collator as collate_fn
-
-        elif first_args.pred_model_type == 'neural_hmm':
-            from cli.train_neural_hmm import train_neural_hmm as train_fn
-            from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
-            from dloaders.FullLenDset import jax_collator as collate_fn
-
-        elif first_args.pred_model_type == 'feedforward':
-            raise NotImplementedError('not ready')
-            from cli.train_feedforward import train_feedforward as train_fn
-            from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
-            from dloaders.FullLenDset import jax_collator as collate_fn
+            
+            if pred_model_type == 'pairhmm_frag_and_site_classes':
+                from cli.train_pairhmm_frag_and_site_classes import train_pairhmm_frag_and_site_classes as train_fn
+                
+            elif pred_model_type == 'neural_hmm':
+                from cli.train_neural_hmm import train_neural_hmm as train_fn
+    
+            elif pred_model_type == 'feedforward':
+                raise NotImplementedError('not ready')
 
         # load data; due to batched nature, no option to pre-compute (for now? 
         #   if I need it later, make it happen)
@@ -209,7 +208,7 @@ def main():
                                               training_argparse = None,
                                               include_dataloader = True )
             
-        ### with this dload_dict, train using ALL config files
+        # with this dload_dict, train using ALL config files
         for file in file_lst:
             # read argparse
             assert file.endswith('.json'), "input is one JSON file"
@@ -221,14 +220,16 @@ def main():
             
             del this_run_args
     
+    
     elif top_level_args.task == 'continue_train':
         # read argparse
         assert top_level_args.configs.endswith('.json'), "input is one JSON file"
         print(f'CONTINUE TRAINING WITH: {top_level_args.configs}, IN NEW DIR {top_level_args.new_training_wkdir}')
         args_from_training_config = read_config_file(top_level_args.configs)
+        pred_model_type = args_from_training_config.pred_model_type
         
         # import correct wrappers, dataloader initializers
-        if args_from_training_config.pred_model_type == 'pairhmm_indp_sites':
+        if pred_model_type == 'pairhmm_indp_sites':
             from cli.cont_training_pairhmm_indp_sites import cont_training_pairhmm_indp_sites as cont_train_fn
             from dloaders.init_counts_dset import init_counts_dset as init_datasets
             from dloaders.CountsDset import jax_collator as collate_fn
@@ -237,12 +238,12 @@ def main():
             raise NotImplementedError('Cannot continue training yet!')
 
         # make dataloader objects
-        if not top_level_args.load_dset_pkl:
+        if top_level_args.load_dset_pkl is None:
             dload_dict = init_datasets( args_from_training_config,
                                           'train',
                                           training_argparse = None,
                                           include_dataloader = True )
-        elif top_level_args.load_dset_pkl:
+        else:
             dload_dict = load_dset_pkl(args = args_from_training_config,
                                        file_to_load = top_level_args.load_dset_pkl,
                                        collate_fn = collate_fn)
@@ -260,13 +261,12 @@ def main():
     ### EVAL   ################################################################
     ###########################################################################
     elif top_level_args.task == 'eval':
-        ### read argparse
+        # read argparse
         assert top_level_args.configs.endswith('.json'), "input is one JSON file"
         print(f'EVALUATING WITH: {top_level_args.configs}')
         args = read_config_file(top_level_args.configs)
         
-        
-        ### find and read training argparse
+        # find and read training argparse
         model_ckpts_dir = f'{os.getcwd()}/{args.training_wkdir}/model_ckpts'
         training_argparse_filename = model_ckpts_dir + '/' + 'TRAINING_ARGPARSE.pkl'
         
@@ -275,25 +275,34 @@ def main():
         
         pred_model_type = training_argparse.pred_model_type
         
-        
-        ### import correct wrappers, dataloader initializers
+        # import correct wrappers, dataloader initializers
         if pred_model_type == 'pairhmm_indp_sites':
             from cli.eval_pairhmm_indp_sites import eval_pairhmm_indp_sites as eval_fn
             from dloaders.init_counts_dset import init_counts_dset as init_datasets
             from dloaders.CountsDset import jax_collator as collate_fn
 
-        elif pred_model_type == 'pairhmm_frag_and_site_classes':
-            from cli.eval_pairhmm_frag_and_site_classes import eval_pairhmm_frag_and_site_classes as eval_fn
+        elif pred_model_type in ['pairhmm_frag_and_site_classes',
+                                 'neural_hmm',
+                                 'feedforward']:
             from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
             from dloaders.FullLenDset import jax_collator as collate_fn
 
+            if pred_model_type == 'pairhmm_frag_and_site_classes':
+                from cli.eval_pairhmm_frag_and_site_classes import eval_pairhmm_frag_and_site_classes as eval_fn
+
+            elif pred_model_type == 'neural_hmm':
+                from cli.eval_neural_hmm import eval_neural_hmm as eval_fn
+            
+            elif pred_model_type == 'feedforward':
+                raise NotImplementedError('not ready')
+
         # load data; saved under trianing_wkdir name
-        if not top_level_args.load_dset_pkl:
+        if top_level_args.load_dset_pkl is None:
             dload_dict = init_datasets( args,
                                         'eval',
                                         training_argparse,
                                         include_dataloader = True )
-        elif top_level_args.load_dset_pkl:
+        else:
             dload_dict = load_dset_pkl(args = args,
                                        file_to_load = top_level_args.load_dset_pkl,
                                        collate_fn = collate_fn)
@@ -305,13 +314,12 @@ def main():
     
     
     elif top_level_args.task == 'batched_eval':
-        ### read argparse from first config file
+        # read argparse from first config file
         file_lst = [file for file in os.listdir(top_level_args.configs) if not file.startswith('.')
                     and file.endswith('.json')]
         assert len(file_lst) > 0, f'{top_level_args.configs} is empty!'
         
-        
-        ### get dataloader and functions from first config file
+        # get dataloader and functions from first config file
         first_config_file = file_lst[0]
         print(f'DATALOADER CONSTRUCTED FROM: {top_level_args.configs}/{first_config_file}')
         print(f"WARNING: make sure you want this dataloader for ALL experiments in {top_level_args.configs}!!!")
@@ -336,11 +344,21 @@ def main():
             from dloaders.init_counts_dset import init_counts_dset as init_datasets
             from dloaders.CountsDset import jax_collator as collate_fn
 
-        elif pred_model_type == 'pairhmm_frag_and_site_classes':
-            from cli.eval_pairhmm_frag_and_site_classes import eval_pairhmm_frag_and_site_classes as eval_fn
+        elif pred_model_type in ['pairhmm_frag_and_site_classes',
+                                 'neural_hmm',
+                                 'feedforward']:
             from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
             from dloaders.FullLenDset import jax_collator as collate_fn
 
+            if pred_model_type == 'pairhmm_frag_and_site_classes':
+                from cli.eval_pairhmm_frag_and_site_classes import eval_pairhmm_frag_and_site_classes as eval_fn
+
+            elif pred_model_type == 'neural_hmm':
+                from cli.eval_neural_hmm import eval_neural_hmm as eval_fn
+            
+            elif pred_model_type == 'feedforward':
+                raise NotImplementedError('not ready')
+            
         # load data
         dload_dict_for_all = init_datasets( first_args, 
                                              'eval',
@@ -349,8 +367,7 @@ def main():
         
         del first_training_argparse, first_args
         
-        
-        ### with this dload_dict, train using ALL config files
+        # with this dload_dict, train using ALL config files
         for file in file_lst:
             # read argparse
             assert file.endswith('.json'), "input is one JSON file"
@@ -373,47 +390,47 @@ def main():
             del this_run_args, training_argparse
     
     
-    ###########################################################################
-    ### EVAL: label class posterior marginals for markovian class sites   #####
-    ###########################################################################
-    elif top_level_args.task == 'label_class_post':
-        raise NotImplementedError('not ready yet')
-        ### read argparse
-        assert top_level_args.configs.endswith('.json'), "input is one JSON file"
-        print(f'EVALUATING WITH: {top_level_args.configs}')
-        args = read_config_file(top_level_args.configs)
+    # ###########################################################################
+    # ### EVAL: label class posterior marginals for markovian class sites   #####
+    # ###########################################################################
+    # elif top_level_args.task == 'label_class_post':
+    #     raise NotImplementedError('not ready yet')
+    #     ### read argparse
+    #     assert top_level_args.configs.endswith('.json'), "input is one JSON file"
+    #     print(f'EVALUATING WITH: {top_level_args.configs}')
+    #     args = read_config_file(top_level_args.configs)
         
         
-        ### find and read training argparse
-        model_ckpts_dir = f'{os.getcwd()}/{args.training_wkdir}/model_ckpts'
-        training_argparse_filename = model_ckpts_dir + '/' + 'TRAINING_ARGPARSE.pkl'
+    #     ### find and read training argparse
+    #     model_ckpts_dir = f'{os.getcwd()}/{args.training_wkdir}/model_ckpts'
+    #     training_argparse_filename = model_ckpts_dir + '/' + 'TRAINING_ARGPARSE.pkl'
         
-        with open(training_argparse_filename,'rb') as g:
-            training_argparse = pickle.load(g)
+    #     with open(training_argparse_filename,'rb') as g:
+    #         training_argparse = pickle.load(g)
         
-        pred_model_type = training_argparse.pred_model_type
+    #     pred_model_type = training_argparse.pred_model_type
         
         
-        ### import correct wrappers, dataloader initializers
-        from cli.class_posteriors_pairhmm_frag_and_site_classes import class_posteriors_pairhmm_frag_and_site_classes as labeling_fn
-        from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
-        from dloaders.FullLenDset import jax_collator as collate_fn
+    #     ### import correct wrappers, dataloader initializers
+    #     from cli.class_posteriors_pairhmm_frag_and_site_classes import class_posteriors_pairhmm_frag_and_site_classes as labeling_fn
+    #     from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
+    #     from dloaders.FullLenDset import jax_collator as collate_fn
 
-        # load data (saved under training_wkdir name)
-        if not top_level_args.load_dset_pkl:
-            dload_dict = init_datasets( args,
-                                          'eval',
-                                          training_argparse,
-                                          include_dataloader = True )
-        elif top_level_args.load_dset_pkl:
-            dload_dict = load_dset_pkl(args = args,
-                                       file_to_load = top_level_args.load_dset_pkl,
-                                       collate_fn = collate_fn)
+    #     # load data (saved under training_wkdir name)
+    #     if top_level_args.load_dset_pkl is None:
+    #         dload_dict = init_datasets( args,
+    #                                       'eval',
+    #                                       training_argparse,
+    #                                       include_dataloader = True )
+    #     else:
+    #         dload_dict = load_dset_pkl(args = args,
+    #                                    file_to_load = top_level_args.load_dset_pkl,
+    #                                    collate_fn = collate_fn)
         
-        # evaluate
-        labeling_fn( args, 
-                     dload_dict, 
-                     training_argparse )
+    #     # evaluate
+    #     labeling_fn( args, 
+    #                  dload_dict, 
+    #                  training_argparse )
     
     
     ###########################################################################

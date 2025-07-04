@@ -33,7 +33,6 @@ from torch.utils.data import DataLoader
 
 # custom function/classes imports
 from train_eval_fns.build_optimizer import build_optimizer
-from utils.write_config import write_config
 from utils.edit_argparse import (enforce_valid_defaults,
                                  fill_with_default_values,
                                  share_top_level_args)
@@ -51,14 +50,6 @@ from train_eval_fns.neural_tkf_train_eval import ( train_one_batch,
                                                    eval_one_batch )
 from train_eval_fns.full_length_final_eval_wrapper import final_eval_wrapper
 
-
-def _save_to_pickle(out_file, obj):
-    with open(out_file, 'wb') as g:
-        pickle.dump(obj, g)
-
-def _save_trainstate(out_file, tstate_obj):
-    model_state_dict = flax.serialization.to_state_dict(tstate_obj)
-    _save_to_pickle(out_file, model_state_dict)
 
 
 def train_neural_hmm(args, dataloader_dict: dict):
@@ -711,21 +702,16 @@ def train_neural_hmm(args, dataloader_dict: dict):
     ###########################################
     ### update the logfile with final losses  #
     ###########################################
-    to_write = {'RUN': args.training_wkdir,
-                
-                f'train_ave_loss': train_summary_stats['final_ave_loss'],
-                f'train_ave_loss_seqlen_normed': train_summary_stats['final_ave_loss_seqlen_normed'],
-                f'train_perplexity': train_summary_stats['final_perplexity'],
-                f'train_ece': train_summary_stats['final_ece'] ,
-                
-                f'test_ave_loss': test_summary_stats['final_ave_loss'],
-                f'test_ave_loss_seqlen_normed': test_summary_stats['final_ave_loss_seqlen_normed'],
-                f'test_perplexity': test_summary_stats['final_perplexity'],
-                f'test_ece': test_summary_stats['final_ece']
-                }
+    to_write_prefix = {'RUN': args.training_wkdir}
+    to_write_train = {**to_write_prefix, **train_summary_stats}
+    to_write_test = {**to_write_prefix, **test_summary_stats}
     
-    with open(f'{args.logfile_dir}/AVE-LOSSES.tsv','w') as g:
-        for k, v in to_write.items():
+    with open(f'{args.logfile_dir}/TRAIN-AVE-LOSSES.tsv','w') as g:
+        for k, v in to_write_train.items():
+            g.write(f'{k}\t{v}\n')
+    
+    with open(f'{args.logfile_dir}/TEST-AVE-LOSSES.tsv','w') as g:
+        for k, v in to_write_test.items():
             g.write(f'{k}\t{v}\n')
         
     post_training_real_end = wall_clock_time()

@@ -55,7 +55,7 @@ def final_eval_wrapper(dataloader,
     ### GO THROUGH DATALOADER   #
     #############################    
     ### final metrics to keep track of
-    final_ave_loss = 0
+    sum_cond_logprobs = 0
     final_ave_loss_seqlen_normed = 0
     final_acc = 0
     final_perplexity = 0
@@ -131,9 +131,9 @@ def final_eval_wrapper(dataloader,
         
         # record mean values to buckets
         wf = ( num_samples_in_batch / len(dataset) )
-        final_ave_loss += final_loglikes['logP'].mean() * wf
+        sum_cond_logprobs += final_loglikes['logP'].sum()
         final_ave_loss_seqlen_normed += final_loglikes['logP/normlength'].mean() * wf
-        final_perplexity  += final_loglikes['perplexity'].mean() * wf
+        final_perplexity += final_loglikes['perplexity'].mean() * wf
 
         # model may or may not record accuracy as well    
         acc_perSamp = eval_metrics.get('acc_perSamp', None)
@@ -235,14 +235,16 @@ def final_eval_wrapper(dataloader,
     ### POST EVAL LOOP   #
     ######################
     # extract whole-dataset performance
+    final_ave_loss = sum_cond_logprobs / len(dataset)
     final_ece = jnp.exp( final_ave_loss_seqlen_normed )
-    summary_stats = {'final_ave_loss':final_ave_loss, 
-                     'final_ave_loss_seqlen_normed':final_ave_loss_seqlen_normed,
-                     'final_perplexity':final_perplexity,
-                     'final_ece':final_ece}
+    summary_stats = {'sum_cond_logprobs': sum_cond_logprobs,
+                     'cond_ave_loss': final_ave_loss, 
+                     'cond_ave_loss_seqlen_normed':final_ave_loss_seqlen_normed,
+                     'cond_perplexity':final_perplexity,
+                     'cond_ece':final_ece}
     
     if have_acc_metrics:
-        summary_stats['final_acc'] = final_acc
+        summary_stats['cond_acc'] = final_acc
     
         # write whole-dataset confusion matrix, separately
         out_file = f'{out_arrs_dir}/{outfile_prefix}_CONFUSION-MAT.npz'

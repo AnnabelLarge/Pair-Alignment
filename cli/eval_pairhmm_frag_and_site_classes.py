@@ -38,8 +38,8 @@ from utils.edit_argparse import (enforce_valid_defaults,
 
 
 def eval_pairhmm_frag_and_site_classes( args, 
-                                  dataloader_dict: dict,
-                                  training_argparse ):
+                                        dataloader_dict: dict,
+                                        training_argparse ):
     ###########################################################################
     ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES   #########################
     ###########################################################################
@@ -91,7 +91,7 @@ def eval_pairhmm_frag_and_site_classes( args,
     
     
     ###########################################################################
-    ### 1: INITIALIZE MODEL PARTS, OPTIMIZER  #################################
+    ### 2: INITIALIZE MODEL PARTS, OPTIMIZER  #################################
     ###########################################################################
     print('MODEL INIT')
     with open(args.logfile_name,'a') as g:
@@ -191,7 +191,7 @@ def eval_pairhmm_frag_and_site_classes( args,
     
     
     ###########################################################################
-    ### 2: EVAL   #############################################################
+    ### 3: EVAL   #############################################################
     ###########################################################################
     print(f'BEGIN EVAL')
     # write to logfile
