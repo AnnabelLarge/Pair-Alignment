@@ -61,9 +61,9 @@ def eval_neural_hmm( args,
     prev_model_ckpts_dir = f'{os.getcwd()}/{args.training_wkdir}/model_ckpts'
     pairhmm_savemodel_filename = prev_model_ckpts_dir + '/'+ f'FINAL_PRED_BEST.pkl'
     
-    fill_with_default_values(training_wkdir)
-    enforce_valid_defaults(training_wkdir)
-    share_top_level_args(training_wkdir)
+    fill_with_default_values(training_argparse)
+    enforce_valid_defaults(training_argparse)
+    share_top_level_args(training_argparse)
     
     
     ###########################################################################
@@ -101,9 +101,9 @@ def eval_neural_hmm( args,
         
         
     ### provide filenames of saved model parameters
-    encoder_save_model_filename = training_argparse.model_ckpts_dir + '/'+ f'ANC_ENC.pkl'
-    decoder_save_model_filename = training_argparse.model_ckpts_dir + '/'+ f'DESC_DEC.pkl'
-    finalpred_save_model_filename = training_argparse.model_ckpts_dir + '/'+ f'FINAL_PRED.pkl'
+    encoder_save_model_filename = f'ANC_ENC.pkl'
+    decoder_save_model_filename = f'DESC_DEC.pkl'
+    finalpred_save_model_filename = f'FINAL_PRED.pkl'
     all_save_model_filenames = [encoder_save_model_filename, 
                                 decoder_save_model_filename,
                                 finalpred_save_model_filename]
@@ -177,17 +177,18 @@ def eval_neural_hmm( args,
     del out
     
     # load parameters
+    saved_at = f'{args.training_wkdir}/model_ckpts'
     best_trainstates = []
     for i in range(3):
         param_fname = all_save_model_filenames[i]
         blank_tstate = blank_trainstates[i]
-        with open(f'{training_argparse.model_ckpts_dir}/{param_fname}', 'rb') as f:
+        with open(f'{saved_at}/{param_fname}', 'rb') as f:
             state_dict = pickle.load(f)
         ts = flax.serialization.from_state_dict( blank_tstate, state_dict )
         best_trainstates.append(ts)
         del param_fname, blank_tstate, f, state_dict, ts
     
-    del i, blank_trainstates
+    del i, blank_trainstates, saved_at
     
     
     ### jit-compilations
@@ -195,13 +196,13 @@ def eval_neural_hmm( args,
     #   combination)
     parted_determine_alignlen_bin = partial(determine_alignlen_bin,  
                                             chunk_length = args.chunk_length,
-                                            seq_padding_idx = args.seq_padding_idx)
+                                            seq_padding_idx = training_argparse.seq_padding_idx)
     jitted_determine_alignlen_bin = jax.jit(parted_determine_alignlen_bin)
     del parted_determine_alignlen_bin
     
     parted_determine_seqlen_bin = partial(determine_seqlen_bin,
                                           chunk_length = args.chunk_length, 
-                                          seq_padding_idx = args.seq_padding_idx)
+                                          seq_padding_idx = training_argparse.seq_padding_idx)
     jitted_determine_seqlen_bin = jax.jit(parted_determine_seqlen_bin)
     del parted_determine_seqlen_bin
     
@@ -219,7 +220,7 @@ def eval_neural_hmm( args,
     extra_args_for_eval = dict()
     
     # if this is a transformer model, will have extra arguments for eval funciton
-    if (args.anc_model_type == 'Transformer' or args.desc_model_type == 'Transformer'):
+    if (training_argparse.anc_model_type == 'Transformer' or training_argparse.desc_model_type == 'Transformer'):
         extra_args_for_eval['output_attn_weights'] = False
     
     parted_eval_fn = partial( eval_one_batch,
@@ -229,7 +230,7 @@ def eval_neural_hmm( args,
                               concat_fn = concat_fn,
                               norm_loss_by_for_reporting = args.norm_loss_by,                  
                               extra_args_for_eval = extra_args_for_eval )
-    del no_returns, extra_args_for_eval
+    del extra_args_for_eval
     
     # jit compile this eval function
     eval_fn_jitted = jax.jit( parted_eval_fn, 
@@ -253,10 +254,10 @@ def eval_neural_hmm( args,
                                              jitted_determine_seqlen_bin = jitted_determine_seqlen_bin,
                                              jitted_determine_alignlen_bin = jitted_determine_alignlen_bin,
                                              eval_fn_jitted = eval_fn_jitted,
-                                             out_alph_size = args.full_alphabet_size, 
+                                             out_alph_size = training_argparse.full_alphabet_size, 
                                              save_arrs = args.save_scoremats,
                                              save_per_sample_losses = args.save_per_sample_losses,
-                                             interms_for_tboard = args.interms_for_tboard, 
+                                             interms_for_tboard = no_returns, 
                                              logfile_dir = args.logfile_dir,
                                              out_arrs_dir = args.out_arrs_dir,
                                              outfile_prefix = f'dset',

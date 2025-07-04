@@ -629,6 +629,12 @@ def train_neural_hmm(args, dataloader_dict: dict):
     del epoch_idx
     
     
+    ### save the argparse object by itself
+    args.epoch_idx = best_epoch
+    with open(f'{args.model_ckpts_dir}/TRAINING_ARGPARSE.pkl', 'wb') as g:
+        pickle.dump(args, g)
+    
+    
     ### jit compile new eval function
     # if this is a transformer model, will have extra arguments for eval funciton
     extra_args_for_eval = dict()

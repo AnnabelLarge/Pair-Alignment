@@ -46,44 +46,44 @@ def main():
                    'validate_neuraltkf_config',
                    'batched_validate_neuraltkf_config']
     
-    parser.add_argument('-task',
-                        type=str,
-                        required=True,
-                        choices = valid_tasks,
-                        help=f'What do you want to do? Pick from: {valid_tasks}')
+    # parser.add_argument('-task',
+    #                     type=str,
+    #                     required=True,
+    #                     choices = valid_tasks,
+    #                     help=f'What do you want to do? Pick from: {valid_tasks}')
     
-    parser.add_argument('-configs',
-                        type = str,
-                        required=True,
-                        help='Load configs from file or folder of files, in json format.')
+    # parser.add_argument('-configs',
+    #                     type = str,
+    #                     required=True,
+    #                     help='Load configs from file or folder of files, in json format.')
     
-    # optional: might have pre-processed some dataloaders
-    parser.add_argument('-load_dset_pkl',
-                        type = str,
-                        default=None,
-                        help='name of the pre-computed pytorch dataset pickle object')
+    # # optional: might have pre-processed some dataloaders
+    # parser.add_argument('-load_dset_pkl',
+    #                     type = str,
+    #                     default=None,
+    #                     help='name of the pre-computed pytorch dataset pickle object')
     
-    # only needed when continuing training
-    parser.add_argument('-new_training_wkdir',
-                        type = str,
-                        help='FOR CONTINUE_TRAIN OPTION; Name for a new training working dir')
+    # # only needed when continuing training
+    # parser.add_argument('-new_training_wkdir',
+    #                     type = str,
+    #                     help='FOR CONTINUE_TRAIN OPTION; Name for a new training working dir')
     
-    parser.add_argument('-prev_model_ckpts_dir',
-                        type = str,
-                        help='FOR CONTINUE_TRAIN OPTION; Path to previous trainstate, argparse object')
+    # parser.add_argument('-prev_model_ckpts_dir',
+    #                     type = str,
+    #                     help='FOR CONTINUE_TRAIN OPTION; Path to previous trainstate, argparse object')
     
-    parser.add_argument('-tstate_to_load',
-                        type = str,
-                        help='FOR CONTINUE_TRAIN OPTION; The name of the tstate object to load')
+    # parser.add_argument('-tstate_to_load',
+    #                     type = str,
+    #                     help='FOR CONTINUE_TRAIN OPTION; The name of the tstate object to load')
     
     # parse the arguments
     top_level_args = parser.parse_args()
     
     
-    # ## UNCOMMENT TO RUN IN SPYDER IDE
-    # top_level_args.task = 'train'
-    # top_level_args.configs = 'CONFIG_DRY-RUN.json'
-    # top_level_args.load_dset_pkl = None
+    ## UNCOMMENT TO RUN IN SPYDER IDE
+    top_level_args.task = 'eval'
+    top_level_args.configs = 'EVAL-CONFIG.json'
+    top_level_args.load_dset_pkl = None
     
     
     ### helper functions 
@@ -97,7 +97,7 @@ def main():
         return args
     
     # load a pre-computed dataset; make a pytorch dataloader
-    def load_dset_pkl(file_to_load, 
+    def load_dset_pkl_fn(file_to_load, 
                       args,
                       collate_fn):
         with open(file_to_load,'rb') as f:
@@ -157,7 +157,7 @@ def main():
                                           training_argparse = None,
                                           include_dataloader = True)
         else:
-            dload_dict = load_dset_pkl(args = args,
+            dload_dict = load_dset_pkl_fn(args = args,
                                        file_to_load = top_level_args.load_dset_pkl,
                                        collate_fn = collate_fn)
             
@@ -244,7 +244,7 @@ def main():
                                           training_argparse = None,
                                           include_dataloader = True )
         else:
-            dload_dict = load_dset_pkl(args = args_from_training_config,
+            dload_dict = load_dset_pkl_fn(args = args_from_training_config,
                                        file_to_load = top_level_args.load_dset_pkl,
                                        collate_fn = collate_fn)
             
@@ -303,7 +303,7 @@ def main():
                                         training_argparse,
                                         include_dataloader = True )
         else:
-            dload_dict = load_dset_pkl(args = args,
+            dload_dict = load_dset_pkl_fn(args = args,
                                        file_to_load = top_level_args.load_dset_pkl,
                                        collate_fn = collate_fn)
             
@@ -423,7 +423,7 @@ def main():
     #                                       training_argparse,
     #                                       include_dataloader = True )
     #     else:
-    #         dload_dict = load_dset_pkl(args = args,
+    #         dload_dict = load_dset_pkl_fn(args = args,
     #                                    file_to_load = top_level_args.load_dset_pkl,
     #                                    collate_fn = collate_fn)
         

@@ -1,0 +1,16 @@
+{
+    "eval_wkdir": "EVAL_t-per-samp_neuralTKF92_trial1-1_seed1101",
+    "training_wkdir": "RESULTS_t-per-samp_neuralTKF92_trial1-1_seed1101",
+    "rng_seednum": 0,
+    "data_dir": "example_data",
+    "test_dset_splits": [
+        "sevenSamp"
+    ],
+    "toss_alignments_longer_than": null,
+    "batch_size": 7,
+    "chunk_length": 512,
+    "norm_loss_by": "desc_len",
+    "use_scan_fns": false,
+    "save_scoremats": false,
+    "save_per_sample_losses": false
+}
