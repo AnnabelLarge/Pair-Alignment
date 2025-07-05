@@ -42,7 +42,18 @@ def load_dset_pkl_fn(file_to_load,
     return dset_dict
         
 
-def main(args, load_dset_pkl=None):
+def main(args):
+    load_dset_pkl = args.load_dset_pkl
+    assert args.configs.endswith('.json'), "input is one JSON file"
+    print(f'CONVERTING: {args.configs}')
+    
+    with open(args.configs, 'r') as f:
+        contents = json.load(f)
+    t_args = argparse.Namespace()
+    t_args.__dict__.update(contents)
+    args = parser.parse_args(namespace=t_args)
+    del t_args, contents, f
+    
     pred_model_type = args.pred_model_type
     
     # import correct wrappers, dataloader initializers
@@ -96,15 +107,5 @@ if __name__ == '__main__':
                         help='name of the pre-computed pytorch dataset pickle object')
     
     args = parser.parse_args()
-    assert args.configs.endswith('.json'), "input is one JSON file"
-    print(f'CONVERTING: {args.configs}')
     
-    with open(args.configs, 'r') as f:
-        contents = json.load(f)
-    t_args = argparse.Namespace()
-    t_args.__dict__.update(contents)
-    args = parser.parse_args(namespace=t_args)
-    del t_args, contents, f
-        
-    main(args, args.load_dset_pkl)
-    
+    main(args)

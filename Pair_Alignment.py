@@ -175,8 +175,6 @@ def main():
         first_config_file = file_lst[0]
         print(f'DATALOADER CONSTRUCTED FROM: {top_level_args.configs}/{first_config_file}')
         print(f"WARNING: make sure you want this dataloader for ALL experiments in {top_level_args.configs}!!!")
-        print(f"WARNING: make sure you want this dataloader for ALL experiments in {top_level_args.configs}!!!")
-        print(f"WARNING: make sure you want this dataloader for ALL experiments in {top_level_args.configs}!!!")
         first_args = read_config_file(f'{top_level_args.configs}/{first_config_file}')
         pred_model_type = first_args.pred_model_type
         
@@ -201,12 +199,16 @@ def main():
             elif pred_model_type == 'feedforward':
                 raise NotImplementedError('not ready')
 
-        # load data; due to batched nature, no option to pre-compute (for now? 
-        #   if I need it later, make it happen)
-        dload_dict_for_all = init_datasets( first_args,
-                                              'train',
-                                              training_argparse = None,
-                                              include_dataloader = True )
+        # load data
+        if top_level_args.load_dset_pkl is None:
+            dload_dict = init_datasets( first_args,
+                                          'train',
+                                          training_argparse = None,
+                                          include_dataloader = True)
+        else:
+            dload_dict = load_dset_pkl_fn(args = first_args,
+                                       file_to_load = top_level_args.load_dset_pkl,
+                                       collate_fn = collate_fn)
             
         # with this dload_dict, train using ALL config files
         for file in file_lst:
@@ -323,8 +325,6 @@ def main():
         first_config_file = file_lst[0]
         print(f'DATALOADER CONSTRUCTED FROM: {top_level_args.configs}/{first_config_file}')
         print(f"WARNING: make sure you want this dataloader for ALL experiments in {top_level_args.configs}!!!")
-        print(f"WARNING: make sure you want this dataloader for ALL experiments in {top_level_args.configs}!!!")
-        print(f"WARNING: make sure you want this dataloader for ALL experiments in {top_level_args.configs}!!!")
         first_args = read_config_file(f'{top_level_args.configs}/{first_config_file}')
         
         # find and read training argparse
@@ -360,11 +360,16 @@ def main():
                 raise NotImplementedError('not ready')
             
         # load data
-        dload_dict_for_all = init_datasets( first_args, 
-                                             'eval',
-                                             first_training_argparse,
-                                             include_dataloader = True )
-        
+        if top_level_args.load_dset_pkl is None:
+            dload_dict = init_datasets( first_args,
+                                          'eval',
+                                          first_training_argparse,
+                                          include_dataloader = True)
+        else:
+            dload_dict = load_dset_pkl_fn(args = first_args,
+                                       file_to_load = top_level_args.load_dset_pkl,
+                                       collate_fn = collate_fn)
+            
         del first_training_argparse, first_args
         
         # with this dload_dict, train using ALL config files
