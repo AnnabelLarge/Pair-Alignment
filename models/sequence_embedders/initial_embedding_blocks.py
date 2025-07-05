@@ -33,30 +33,29 @@ class PlaceholderEmbedding(nn.Module):
     
     @nn.compact
     def __call__(self, 
-                 datamat: jnp.array, 
+                 datamat: jnp.array,  #(B, L)
                  training: Optional[Any] = None):
         ### unpack
-        hidden_dim = self.config['hidden_dim']
+        hidden_dim = self.config['hidden_dim'] #H
         seq_padding_idx = self.config.get('seq_padding_idx', 0)
         
         ### run
-        padding_mask_template = jnp.where(datamat == seq_padding_idx, 
-                                          False, 
-                                          True)[:,:,None]
-        new_shape = (padding_mask_template.shape[0],
-                     padding_mask_template.shape[1],
-                     hidden_dim)
-        padding_mask = jnp.broadcast_to(padding_mask_template, new_shape)
-        del new_shape
+        B = datamat.shape[0]
+        L = datamat.shape[1]
+        final_shape = (B, L, hidden_dim)
         
-        datamat = datamat[:,:,None]
-        new_shape = (datamat.shape[0],
-                     datamat.shape[1],
-                     hidden_dim)
-        datamat = jnp.broadcast_to(datamat, new_shape)
-        del new_shape
+        # padding mask
+        padding_mask = (datamat != seq_padding_idx) #(B, L)
+        padding_mask_expanded = jnp.broadcast_to(padding_mask[..., None], final_shape) # (B, L, H)
         
-        return (datamat, padding_mask)
+        # expand the data matrix and mask
+        datamat = jnp.broadcast_to(datamat[...,None], final_shape)  #(B, L, H)
+        datamat = jnp.multiply(datamat, padding_mask_expanded)  #(B, L, H)
+        del padding_mask_expanded
+        
+        # datamat is (B, L, H)
+        # padding_mask is (B, L)
+        return (datamat, padding_mask)  
         
 
 class EmbeddingWithPadding(ModuleBase):
@@ -69,7 +68,7 @@ class EmbeddingWithPadding(ModuleBase):
     --------------------------
     hidden_dim (int): length of the embedded vector
     padding_idx (int = 0): padding token
-    base_alphabet_size (int = 23): <pad>, <bos>, <eos>, then all alphabet 
+    args.base_alphabet_size (int): <pad>, <bos>, <eos>, then all alphabet 
                                   (20 for amino acids, 4 for DNA)
                               
     """
@@ -79,38 +78,33 @@ class EmbeddingWithPadding(ModuleBase):
     causal: Optional[Any] = None
     
     def setup(self):
-        ### unpack config
-        self.features = self.config['hidden_dim']
+        # unpack config
+        self.features = self.config['hidden_dim'] #H
+        self.vocab_size = self.config['base_alphabet_size']
+        self.seq_padding_idx = self.config.get('seq_padding_idx', 0)
         
-        # these have default values
-        self.vocab_size = self.config.get('base_alphabet_size', 23)
-        self.padding_idx = self.config.get('seq_padding_idx', 0)
-        
-        
-        ### layers to use
+        # layers to use
         self.initial_embedding = nn.Embed(num_embeddings = self.vocab_size, 
                                           features = self.features)
         
         
     def __call__(self, 
-                 datamat: jnp.array, 
+                 datamat: jnp.array,  #(B, L)
                  training: Optional[Any] = None):
-        padding_mask_template = (datamat != self.padding_idx)[...,None] #(B, L, 1)
+        B = datamat.shape[0]
+        L = datamat.shape[1]
+        final_shape = (B, L, self.features)
         
-        # (B,L) -> (B, L, H)
-        datamat = self.initial_embedding(datamat)
+        # padding mask
+        padding_mask = (datamat != self.seq_padding_idx) #(B, L)
+        padding_mask_expanded = jnp.broadcast_to(padding_mask[..., None], final_shape) # (B, L, H)
         
-        # mask positions with padding tokens
-        # mask is also (B, L, H)
-        new_shape = (padding_mask_template.shape[0],
-                     padding_mask_template.shape[1],
-                     self.features)
-        padding_mask = jnp.broadcast_to(padding_mask_template, new_shape)
-        del new_shape
+        # embed: (B,L) -> (B, L, H)
+        datamat = self.initial_embedding(datamat) # (B, L, H)
+        datamat = jnp.multiply(datamat, padding_mask_expanded) # (B, L, H)
         
-        datamat = jnp.multiply(datamat, padding_mask)
-        
-        # return masked matrix, and the masking used
+        # datamat is (B, L, H)
+        # padding_mask is (B, L)
         return (datamat, padding_mask)
 
 
@@ -129,7 +123,7 @@ class TAPEEmbedding(ModuleBase):
     padding_idx (int = 0): padding token
     dropout (float = 0.0): dropout rate
     max_len (int = 3000): maximum protein length
-    base_alphabet_size (int = 23): <pad>, <bos>, <eos>, then all alphabet 
+    args.base_alphabet_size (int): <pad>, <bos>, <eos>, then all alphabet 
                                   (20 for amino acids, 4 for DNA)
                               
     """
@@ -139,78 +133,60 @@ class TAPEEmbedding(ModuleBase):
     causal: Optional[Any] = None
     
     def setup(self):
-        ### unpack config
+        # unpack config
         self.features = self.config['hidden_dim']
-        
-        # these have default values
-        self.vocab_size = self.config.get('base_alphabet_size', 23)
+        self.vocab_size = self.config['base_alphabet_size']
         self.padding_idx = self.config.get('seq_padding_idx', 0)
         self.max_len = self.config.get('max_len', 3000)
         self.dropout = self.config.get('dropout', 0.0)
         
-        
-        ### layers to use
+        # layers to use
         self.seq_initial_embedding = nn.Embed(num_embeddings = self.vocab_size, 
                                               features = self.features)
         self.pos_initial_embedding = nn.Embed(num_embeddings = self.max_len, 
                                               features = self.features)
-        self.final_layernorm =  nn.LayerNorm(reduction_axes=-1, 
-                                             feature_axes=-1)
+        self.final_instancenorm =  nn.LayerNorm(reduction_axes=-1, 
+                                                feature_axes=-1)
         self.final_dropout = nn.Dropout(rate = self.dropout)
         
         
     def __call__(self, 
-                 datamat: jnp.array, 
+                 datamat: jnp.array,  #(B, L)
                  training: bool):
-        padding_mask_template = (datamat != self.padding_idx)[...,None]
-    
-        ### create a position matrix
-        datamat_batch_size, datamat_max_len = datamat.shape
+        B = datamat.shape[0]
+        L = datamat.shape[1]
+        final_shape = (B, L, self.features)
         
-        datamat_max_len = datamat.shape[1]
-        posmat = jnp.arange(0, datamat_max_len)[None, :]
-        
-        new_shape = (datamat_batch_size,
-                     posmat.shape[1])
-        posmat = jnp.broadcast_to(posmat, new_shape)
-        del new_shape
+        # padding mask
+        padding_mask = (datamat != self.seq_padding_idx) #(B, L)
+        padding_mask_expanded = jnp.broadcast_to(padding_mask[..., None], final_shape) # (B, L, H)
         
         
-        ### first, embed the input data itself
-        # (B,L) -> (B, L, H)
-        datamat = self.seq_initial_embedding(datamat)
-        
-        # mask positions with padding tokens
-        # mask is also (B, L, H)
-        new_shape = (padding_mask_template.shape[0],
-                     padding_mask_template.shape[1],
-                     self.features)
-        padding_mask = jnp.broadcast_to(padding_mask_template, new_shape)
-        del new_shape
-        
-        datamat = jnp.multiply(datamat, padding_mask)
+        # create a position matrix
+        posmat = jnp.arange(0, L) #(L,)
+        posmat = jnp.broadcast_to(posmat[None, :], (B, L) ) #(B, L)
         
         
-        ### second, embed the position matrix (and mask)
-        # (B,L) -> (B, L, H)
-        posmat = self.pos_initial_embedding(posmat)
-        posmat = jnp.multiply(posmat, padding_mask)
+        ### 1.) embed the input data itself: (B,L) -> (B, L, H)
+        datamat = self.seq_initial_embedding(datamat) #(B, L, H)
+        datamat = jnp.multiply(datamat, padding_mask_expanded) #(B, L, H)
         
         
-        ### add, layernorm, and dropout
-        # padding positions should already be zeros
-        out = datamat + posmat
-        out = self.final_layernorm(out)
+        ### 2.) embed the position matrix: (B,L) -> (B, L, H)
+        posmat = self.pos_initial_embedding(posmat) #(B, L, H)
+        posmat = jnp.multiply(posmat, padding_mask_expanded) #(B, L, H)
         
-        # manually mask again, because layernorm leaves NaNs
-        out = jnp.where( padding_mask,
-                         out,
-                         0 )
         
-        out = self.final_dropout(out, 
-                                 deterministic = not training)
+        ### 3.) add, layernorm, and dropout
+        out = datamat + posmat #(B, L, H)
         
-        # return masked matrix, and the masking used
+        out = self.final_instancenorm(out) #(B, L, H)
+        out = jnp.multiply(out, padding_mask_expanded) #(B, L, H)
+        
+        out = self.final_dropout(out, deterministic = not training) #(B, L, H)
+        
+        # datamat is (B, L, H)
+        # padding_mask is (B, L)
         return (out, padding_mask)
 
 
@@ -228,7 +204,7 @@ class ConvEmbedding(ModuleBase):
     hidden_dim (int): length of the embedded vector
     conv_emb_kernel_width (int): width of convolution
     padding_idx (int = 0): padding token
-    base_alphabet_size (int = 23): <pad>, <bos>, <eos>, then all alphabet 
+    args.base_alphabet_size (int): <pad>, <bos>, <eos>, then all alphabet 
                                   (20 for amino acids, 4 for DNA)
        
     """
@@ -238,16 +214,14 @@ class ConvEmbedding(ModuleBase):
     name: str
     
     def setup(self):
-        ### unpack config
-        self.vocab_size = self.config['base_alphabet_size']
-        self.features = self.config['hidden_dim']
+        # unpack config
+        self.vocab_size = self.config['base_alphabet_size'] #A
+        self.features = self.config['hidden_dim'] #H
         self.conv_emb_kernel_size = self.config['conv_emb_kernel_size']
+        self.seq_padding_idx = self.config.get('seq_padding_idx', 0)
+        assert self.seq_padding_idx == 0
         
-        # these have default values
-        self.padding_idx = self.config.get('seq_padding_idx', 0)
-        
-        
-        ### layers to use
+        # layers to use
         self.conv = nn.Conv(features = self.features,
                             kernel_size = self.conv_emb_kernel_size,
                             strides = 1,
@@ -255,42 +229,35 @@ class ConvEmbedding(ModuleBase):
         
         
     def __call__(self, 
-                 datamat: jnp.array, 
+                 datamat: jnp.array, #(B, L) 
                  training: bool):
-        ### use this for building padding masks
-        padding_mask_template = (datamat != self.padding_idx)[:,:,None]
+        B = datamat.shape[0]
+        L = datamat.shape[1]
+        final_shape = (B, L, self.features)
+        
+        # padding mask
+        padding_mask = (datamat != self.seq_padding_idx) #(B, L)
         
         
-        ### one-hot encode
-        # (B,L) -> (B, L, base_alphabet_size)
-        datamat = nn.one_hot(datamat, self.vocab_size)
+        ### one-hot encode first
+        # (B,L) -> (B, L, A)
+        datamat = nn.one_hot(datamat, self.vocab_size) #(B, L, A)
+        padding_mask_expanded = jnp.broadcast_to(padding_mask[...,None], 
+                                                 (B, L, self.vocab_size) ) # (B, L, A)
+        datamat = jnp.multiply(datamat, padding_mask_expanded) #(B, L, A)
+        del padding_mask_expanded
         
-        # mask positions with padding tokens
-        # mask is also (B, L, base_alphabet_size)
-        new_shape = (padding_mask_template.shape[0],
-                     padding_mask_template.shape[1],
-                     self.vocab_size)
-        padding_mask_for_OH = jnp.broadcast_to(padding_mask_template, new_shape)
-        del new_shape
-        
-        datamat = jnp.multiply(datamat, padding_mask_for_OH) #(B, L, base_alphabet_size)
-        datamat = datamat[..., 1:] #(B, L, base_alphabet_size - 1)
+        # remove embeddings associated with padding token (should be 0)
+        datamat = datamat[..., 1:] #(B, L, A - 1)
         
         
         ### conv to full hidden dimension
-        # (B, L, base_alphabet_size - 1) -> (B, L, H)
-        datamat = self.conv(datamat)
+        # (B, L, A - 1) -> (B, L, H)
+        datamat = self.conv(datamat) # (B, L, H)
+        padding_mask_expanded = jnp.broadcast_to(padding_mask[...,None], final_shape ) # (B, L, H)
+        datamat = jnp.multiply(datamat, padding_mask_expanded) #(B, L, H)
         
-        # mask positions with padding tokens
-        # mask is also (B, L, H)
-        new_shape = (padding_mask_template.shape[0],
-                     padding_mask_template.shape[1],
-                     self.features)
-        final_padding_mask = jnp.broadcast_to(padding_mask_template, new_shape)
-        del new_shape
-        
-        datamat = jnp.multiply(datamat, final_padding_mask)
-        
-        # return masked matrix, and the masking used (the one that projected to H, not the first one)
-        return (datamat, final_padding_mask)
+        # datamat is (B, L, H)
+        # padding_mask is (B, L)
+        return (datamat, padding_mask)
     

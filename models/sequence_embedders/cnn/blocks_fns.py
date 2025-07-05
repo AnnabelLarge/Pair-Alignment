@@ -23,15 +23,12 @@ configs will have:
 
 
 """
-# general python
 from typing import Callable
 
-# flaxy and jaxy
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
 
-# custom
 from models.BaseClasses import ModuleBase
 
 
@@ -50,7 +47,7 @@ class ConvnetBlock(ModuleBase):
       conv       |
        |         |
        v         |
-      relu       |
+      silu       |
        |         | 
        v         |
     dropout      |
@@ -72,86 +69,95 @@ class ConvnetBlock(ModuleBase):
     name: str
     
     def setup(self):
-        # !!!  hard set
-        # activations
-        self.act_type = 'silu'
-        self.act = nn.silu
-        
-        # normalization
-        self.norm_type = 'layer'
-        if self.causal:
-            self.norm = nn.LayerNorm(reduction_axes=-1, feature_axes=-1)
-        elif not self.causal:
-            self.norm = nn.LayerNorm(reduction_axes= (-2,-1), 
-                                     feature_axes=-1)
-            
-            
         ### unpack from config
+        # ignore config['kern_size_lst'] here
         self.hidden_dim = self.config['hidden_dim']
         self.dropout = self.config.get('dropout', 0.0)
         
         
-        ### other layers
+        ### set up layers of the CNN block
+        # normalization
+        if self.causal:
+            self.norm = nn.LayerNorm(reduction_axes=-1, feature_axes=-1)
+            self.norm_type = 'InstanceNorm'
+        elif not self.causal:
+            self.norm = nn.LayerNorm(reduction_axes= (-2,-1), feature_axes=-1)
+            self.norm_type = 'LayerNorm'
+        
+        # convolution
         self.conv = nn.Conv(features = self.hidden_dim,
                            kernel_size = self.kern_size,
                            strides = 1,
                            padding =  'CAUSAL' if self.causal else 'SAME')
+        
+        # activation
+        self.act_type = 'silu'
+        self.act = nn.silu
+        
+        # dropout
         self.dropout_layer = nn.Dropout(rate=self.dropout)
         
         
-    def __call__(self, datamat, padding_mask, sow_intermediates:bool, training:bool):
-        skip = datamat
+    def __call__(self, 
+                 datamat: jnp.array, #(B, L, H_in)
+                 padding_mask: jnp.array, #(B, L) 
+                 sow_intermediates:bool, 
+                 training:bool):
+        # mask for padding tokens; broadcast to the datamat input (which will
+        # not change in shape through this whole operation)
+        mask = jnp.broadcast_to( padding_mask[...,None], datamat.shape ) #(B, L, H_in)
+        datamat = jnp.multiply(datamat, mask) #(B, L, H_in)
+        
+        # skip connection
+        skip = datamat #(B, L, H_in)
 
-        # record
         if sow_intermediates:
             self.sow_histograms_scalars(mat = datamat, 
                                         label = f'{self.name}/before conv block', 
                                         which=['scalars'])
         
-        ### norm
-        datamat = self.norm(datamat, 
-                            mask = padding_mask)
+        ### 1.) norm, mask padding tokens
+        datamat = self.norm(datamat)  #(B, L, H_in)
+        datamat = jnp.multiply(datamat, mask) #(B, L, H_in)
         
-        # manually mask again, because layernorm leaves NaNs
-        datamat = jnp.where( padding_mask,
-                            datamat,
-                            0)
-        
-        # record
         if sow_intermediates:
             self.sow_histograms_scalars(mat = datamat, 
                                         label = f'{self.name}/after {self.norm_type}Norm', 
                                         which=['scalars'])
         
         
-        ### convolution + relu
-        datamat = self.conv(datamat)
-        datamat = self.act(datamat)
+        ### 2.) convolution, mask padding tokens
+        datamat = self.conv(datamat) #(B, L, H_in)
+        datamat = jnp.multiply(datamat, mask) #(B, L, H_in)
         
-        # record
+        if sow_intermediates:
+            self.sow_histograms_scalars(mat = datamat, 
+                                        label = f'{self.name}/after conv', 
+                                        which=['scalars'])
+        
+        
+        ### 3.) activation (silu)
+        datamat = self.act(datamat) #(B, L, H_in)
+        
         if sow_intermediates:
             self.sow_histograms_scalars(mat = datamat, 
                                         label = f'{self.name}/after {self.act_type}', 
                                         which=['scalars'])
         
         
-        ### dropout
+        ### 4.) dropout
         datamat = self.dropout_layer(datamat, 
-                                     deterministic = not training)
+                                     deterministic = not training) #(B, L, H_in)
         
-        
-        ### residual add to before step 1 (the raw block input)
-        datamat = datamat + skip
-
-        # record
-        if sow_intermediates:
+        if sow_intermediates and (self.dropout > 0):
             self.sow_histograms_scalars(mat = datamat, 
-                                        label = f'{self.name}/after conv block', 
+                                        label = f'{self.name}/after dropout', 
                                         which=['scalars'])
         
-        ### zero out positions corresponding to padding tokens
-        # mask is (B, L, H)
-        datamat = jnp.multiply(datamat, padding_mask)
         
+        ### 5.) residual add to the block input; again, mask padding tokens
+        datamat = datamat + skip
+        datamat = jnp.multiply(datamat, mask) #(B, L, H_in)
+
         return datamat
 

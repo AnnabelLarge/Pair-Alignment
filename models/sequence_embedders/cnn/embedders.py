@@ -22,7 +22,7 @@ from models.BaseClasses import SeqEmbBase
 
 class CNNSeqEmb(SeqEmbBase):
     """
-    Residual CNN that does: norm -> conv -> act -> dropout
+    Residual CNN that does: (1) -> norm -> conv -> act -> dropout -> += (1)
     
     
     init with:
@@ -45,9 +45,9 @@ class CNNSeqEmb(SeqEmbBase):
     
     automatically added:
     --------------------
+    base_alphabet_size (int): <pad>, <bos>, <eos>, then all alphabet 
+                              (20 for amino acids, 4 for DNA)
     seq_padding_idx (int = 0): padding token
-    base_alphabet_size (int = 23): <pad>, <bos>, <eos>, then all alphabet 
-                                  (20 for amino acids, 4 for DNA)
     
     
     
@@ -67,15 +67,17 @@ class CNNSeqEmb(SeqEmbBase):
     initial_embed_module: callable
     first_block_module: callable
     subsequent_block_module: callable
+    embedding_which: str
     causal: bool
     config: dict
     name: str
     
     def setup(self):
         # first module projects (B,L) -> (B,L,H)
-        self.initial_embed = self.initial_embed_module(config = self.config,
-                                                  causal = self.causal,
-                                                  name = f'{self.name} 0/initial embed')
+        self.initial_embed = self.initial_embed_module(embedding_which = self.embedding_which,
+                                                       config = self.config,
+                                                       causal = self.causal,
+                                                       name = f'{self.name} 0/initial embed')
         
         # second module does the first sequence embedding: (B,L,H) -> (B,L,H)
         self.first_block = self.first_block_module(config = self.config,
@@ -96,22 +98,21 @@ class CNNSeqEmb(SeqEmbBase):
         self.subsequent_blocks = subsequent_blocks
     
     
-    def __call__(self, datamat, sow_intermediates: bool, training: bool):
+    def __call__(self, 
+                 datamat: jnp.array, 
+                 sow_intermediates: bool, 
+                 training: bool):
         ### initial embedding: (B,L) -> (B,L,H)
+        # datamat is (B, L, H)
+        # padding_mask is (B, L)
         datamat, padding_mask = self.initial_embed(datamat)
+        
         
         ### first convolution: (B, L, H) -> (B, L, H)
         datamat = self.first_block(datamat = datamat,
                                    padding_mask = padding_mask,
                                    sow_intermediates = sow_intermediates, 
-                                   training = training)
-        
-        # optionally, sow the intermediate values (as long as this isn't
-        # the last block)
-        if sow_intermediates and len(self.subsequent_blocks) > 0:
-            self.sow_histograms_scalars(mat = datamat, 
-                                        label = f'{self.name} 1/CNN Block 0/after block', 
-                                        which=['scalars'])
+                                   training = training) # (B, L, H)
         
         
         ### apply successive blocks; these start at layernum=2, CNN Block 1
@@ -122,16 +123,15 @@ class CNNSeqEmb(SeqEmbBase):
             datamat = block(datamat = datamat,
                             padding_mask = padding_mask,
                             sow_intermediates = sow_intermediates, 
-                            training = training)
+                            training = training) # (B, L, H)
             
-            # optionally, sow the intermediate values (as long as this isn't
-            # the last block)
-            if sow_intermediates and (block_idx != len(self.subsequent_blocks)):
-                self.sow_histograms_scalars(mat = datamat, 
-                                            label = f'{self.name} {layer_idx}/CNN Block {block_idx}/after block', 
-                                            which=['scalars'])
+            
+        ### record final result to tensorboard
+        if sow_intermediates:
+            self.sow_histograms_scalars(mat = datamat, 
+                                        label = f'{self.name} {layer_idx}/CNN Block {block_idx}/after block', 
+                                        which=['scalars'])
         
-        # output is (B, L, H)
-        return datamat
+        return datamat # (B, L, H)
     
     
