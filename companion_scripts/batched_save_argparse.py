@@ -71,13 +71,6 @@ def main(args):
         this_run_args = read_config_file(f'{args.configs}/{file}')
         print(f'CONVERTING: {args.configs}/{file}')
     
-        with open(file, 'r') as f:
-            contents = json.load(f)
-        t_args = argparse.Namespace()
-        t_args.__dict__.update(contents)
-        this_run_args = parser.parse_args(namespace=t_args)
-        del t_args, contents, f
-            
         this_run_args.pred_config['training_dset_emit_counts'] = dload_dict_for_all['training_dset'].emit_counts
         fill_with_default_values(this_run_args)
         enforce_valid_defaults(this_run_args)
@@ -86,7 +79,7 @@ def main(args):
         # missing best epoch, but oh well
         model_ckpts_dir = f'{os.getcwd()}/{this_run_args.training_wkdir}/model_ckpts'
         with open(f'{model_ckpts_dir}/TRAINING_ARGPARSE.pkl', 'wb') as g:
-            pickle.dump(args, g)
+            pickle.dump(this_run_args, g)
         
 
 if __name__ == '__main__':

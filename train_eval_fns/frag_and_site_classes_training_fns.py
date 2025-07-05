@@ -195,18 +195,22 @@ def final_eval_wrapper(dataloader,
         - return_all_loglike = True
     """
     
-    summary_stats = {'joint_ave_loss': 0,
+    summary_stats = {'sum_joint_loglikes': 0,
+                   'joint_ave_loss': 0,
                    'joint_ave_loss_seqlen_normed': 0,
                    'joint_perplexity': 0,
                    
+                   'sum_cond_joint_loglikes': 0,
                    'cond_ave_loss': 0,
                    'cond_ave_loss_seqlen_normed': 0,
                    'cond_perplexity': 0,
                    
+                   'sum_anc_joint_loglikes': 0,
                    'anc_ave_loss': 0,
                    'anc_ave_loss_seqlen_normed': 0,
                    'anc_perplexity': 0,
                    
+                   'sum_desc_joint_loglikes': 0,
                    'desc_ave_loss': 0,
                    'desc_ave_loss_seqlen_normed': 0,
                    'desc_perplexity': 0,
@@ -254,14 +258,22 @@ def final_eval_wrapper(dataloader,
         wf = ( num_samples_in_batch / len(dataset) )
         
         for prefix in ['joint','cond','anc','desc']:
+            # loglikelihood of interest; don't weight this one!
+            to_add = final_loglikes[f'{prefix}_logP'].sum()
+            summary_stats[f'sum_{prefix}_loglikes'] += to_add
+            del to_add
+
+            # loglikelihood, averaged over samples
             to_add = final_loglikes[f'{prefix}_logP'].mean() * wf
             summary_stats[f'{prefix}_ave_loss'] += to_add
             del to_add
             
+            # loglikelihood normalized by some sequence length, then averaged over samples
             to_add = final_loglikes[f'{prefix}_logP/normlength'].mean() * wf
             summary_stats[f'{prefix}_ave_loss_seqlen_normed'] += to_add
             del to_add
             
+            # perplexity
             to_add = final_loglikes[f'{prefix}_perplexity'].mean() * wf
             summary_stats[f'{prefix}_perplexity'] += to_add
             del to_add
