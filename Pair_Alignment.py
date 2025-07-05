@@ -361,12 +361,12 @@ def main():
             
         # load data
         if top_level_args.load_dset_pkl is None:
-            dload_dict = init_datasets( first_args,
+            dload_dict_for_all = init_datasets( first_args,
                                           'eval',
                                           first_training_argparse,
                                           include_dataloader = True)
         else:
-            dload_dict = load_dset_pkl_fn(args = first_args,
+            dload_dict_for_all = load_dset_pkl_fn(args = first_args,
                                        file_to_load = top_level_args.load_dset_pkl,
                                        collate_fn = collate_fn)
             

@@ -10,6 +10,7 @@
     "batch_size": 7,
     "chunk_length": 512,
     "norm_loss_by": "desc_len",
+    
     "use_scan_fns": false,
     "save_scoremats": false,
     "save_per_sample_losses": false
