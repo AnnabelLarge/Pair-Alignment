@@ -429,7 +429,6 @@ def score_f81_substitutions_marg_over_times(true_alignment_without_start: jnp.ar
     padding_mask = ~( (desc_toks == padding_idx) | 
                       (anc_toks == gap_idx) |
                       (desc_toks == gap_idx) |
-                      (desc_toks == start_idx) |
                       (desc_toks == end_idx) )  #(B, L-align-1)
     
     # remap
@@ -536,7 +535,6 @@ def score_f81_substitutions_t_per_samp(true_alignment_without_start: jnp.array,
     padding_mask = ~( (desc_toks == padding_idx) | 
                       (anc_toks == gap_idx) |
                       (desc_toks == gap_idx) |
-                      (desc_toks == start_idx) |
                       (desc_toks == end_idx) )  #(B, L-align-1)
     
     # remap
@@ -637,7 +635,6 @@ def score_gtr_substitutions(true_alignment_without_start: jnp.array,
     padding_mask = ~( (true_alignment_without_start[...,0] == padding_idx) | 
                       (true_alignment_without_start[...,0] == gap_idx) |
                       (true_alignment_without_start[...,1] == gap_idx) |
-                      (true_alignment_without_start[...,0] == start_idx) |
                       (true_alignment_without_start[...,0] == end_idx) )  #(B, L-align-1)
     
     

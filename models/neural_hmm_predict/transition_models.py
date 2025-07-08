@@ -452,6 +452,8 @@ class TKF92GlobalRateLocalFragSize(GlobalTKF91):
         
         """
         super().setup()
+        self.use_bias = self.config.get('use_bias', True)
+        
         
         ### extra stuff for TKF92: R extension probability 
         # overwrite cond_logprob_fn
@@ -464,7 +466,7 @@ class TKF92GlobalRateLocalFragSize(GlobalTKF91):
         # linear projection to R
         name = f'{self.name}/Project to R extension prob'
         self.final_project_to_r = nn.Dense(features = 1,
-                                           use_bias = True,
+                                           use_bias = self.use_bias,
                                            name = name)
     
     def __call__(self,
@@ -828,8 +830,10 @@ class LocalTKF91(transitionModuleBase):
             bias: [fill in later]
         """
         name = f'{self.name}/Project to mu, offset'
+        self.use_bias = self.config.get('use_bias', True)
+        
         self.mu_offset_final_project = nn.Dense(features = 2,
-                                                use_bias = True,
+                                                use_bias = self.use_bias,
                                                 name = name)
         self.mu_min_val, self.mu_max_val = self.config.get( 'mu_range', 
                                                             [1e-4, 2] )
@@ -1027,7 +1031,7 @@ class TKF92LocalRateLocalFragSize(LocalTKF91):
         # linear projection to R
         name = f'{self.name}/Project to R extension prob'
         self.final_project_to_r = nn.Dense(features = 1,
-                                           use_bias = True,
+                                           use_bias = self.use_bias,
                                            name = name)
         
     def get_r_ext_prob(self,

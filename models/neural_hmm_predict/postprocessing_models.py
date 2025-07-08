@@ -37,11 +37,10 @@ class Placeholder(ModuleBase):
     
     @nn.compact
     def __call__(self, 
-                 padding_mask,
                  *args,
                  **kwargs):
         """
-        placeholder method; just returns the padding mask
+        placeholder method; returns None
         
         
         B: batch size
@@ -71,6 +70,7 @@ class SelectMask(ModuleBase):
     def __call__(self,
                  datamat_lst: list,
                  padding_mask: jnp.array,
+                 *args,
                  **kwargs):
         """
         B: batch size
@@ -82,9 +82,6 @@ class SelectMask(ModuleBase):
             ancestor embedding, descendant embedding (in that order); each are
             (B, L_align, H_in)
         
-        padding_mask : ArrayLike, (B, L_align)
-            location of padding in alignment
-        
         Returns
         --------
         datamat : ArrayLike, (B, L_align, n*H)
@@ -93,7 +90,7 @@ class SelectMask(ModuleBase):
             > n=2, if using both embeddings
             
         """
-        # select (potentially concat) and mask padding
+        # select (potentially concat) inputs
         datamat = process_datamat_lst(datamat_lst,
                                       padding_mask,
                                       self.use_anc_emb,
@@ -134,38 +131,39 @@ class FeedforwardPostproc(SelectMask):
         self.dropout = self.config.get("dropout", 0.0)
         
         
-        ### set up layers of the MLP
+        ### set up parameterized layers of the MLP
         dense_layers = []
         norm_layers = []
         
-        # first layer
+        # first layer: instance norm
         if self.normalize_inputs:
             norm_layers.append( nn.LayerNorm( reduction_axes= -1, 
                                               feature_axes=-1,
                                               name = f'{self.name}/instance norm 0') )
+        
+        # first layer: identity function (if not normalizing inputs)
         elif not self.normalize_inputs:
             norm_layers.append( lambda x: x )
         
         dense_layers.append( nn.Dense(features = self.layer_sizes[0], 
-                                      use_bias = True, 
+                                      use_bias = use_bias, 
                                       kernel_init = nn.initializers.lecun_normal(),
                                       name=f'{self.name}/feedforward layer 0') )
         
-        # subsequent layers
+        # subsequent normalization and dense layers
         for i, hid_dim in enumerate(self.layer_sizes[1:]):
             layer_idx = i + 1
             norm_layers.append( nn.LayerNorm( reduction_axes= -1, 
                                               feature_axes=-1,
                                               name = f'{self.name}/instance norm {layer_idx}') )
             dense_layers.append( nn.Dense(features = hid_dim, 
-                                          use_bias = True, 
+                                          use_bias = use_bias, 
                                           kernel_init = nn.initializers.lecun_normal(),
                                           name=f'{self.name}/feedforward layer {layer_idx}') )
             
         self.dense_layers = dense_layers
         self.norm_layers = norm_layers
-        self.act= nn.silu
-    
+        self.act= nn.silu 
     
     @nn.compact
     def __call__(self, 

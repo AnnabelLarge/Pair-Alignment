@@ -122,14 +122,15 @@ class LocalEqul(GlobalEqul):
           > bias : ArrayLike, (A)  
         """
         emission_alphabet_size = self.config['emission_alphabet_size']
+        self.use_bias = self.config.get('use_bias', True)
         
         name = f'{self.name}/Project to equilibriums'
         self.final_project = nn.Dense(features = emission_alphabet_size,
-                                      use_bias = True,
+                                      use_bias = self.use_bias,
                                       name = name)
     
     def __call__(self,
-                datamat,
+                datamat: jnp.array,
                 sow_intermediates: bool):
         """
         apply final linear projection and log_softmax to get final 
@@ -293,19 +294,20 @@ class LocalF81(neuralTKFModuleBase):
           > kernel : ArrayLike, (H, 1)
           > bias : ArrayLike, (1)  
         """
+        self.use_bias = self.config.get('use_bias', True)
         self.rate_mult_min_val, self.rate_mult_max_val  = self.config.get( 'rate_mult_range', 
                                                                            (0.01, 10) )
         
         name = f'{self.name}/Project to rate multipliers'
         self.final_project = nn.Dense(features = 1,
-                                      use_bias = True,
+                                      use_bias = self.use_bias,
                                       name = name)
     
     def __call__(self,
-                 datamat,
-                 log_equl,
-                 t_array,
-                 unique_time_per_sample,
+                 datamat: jnp.array,
+                 log_equl: jnp.array,
+                 t_array: jnp.array,
+                 unique_time_per_sample: bool,
                  sow_intermediates: bool):
         """
         apply final linear projection and bound_sigmoid activation to get final 
@@ -320,6 +322,8 @@ class LocalF81(neuralTKFModuleBase):
         Arguments
         ----------
         datamat : ArrayLike, (B, L_align, H)
+        
+        align_pading_mask : ArrayLike, (B, L_align)
         
         log_equl : ArrayLike
             > if global: (1, 1, A)
@@ -344,6 +348,7 @@ class LocalF81(neuralTKFModuleBase):
           > if not unique time per sample: (T, B, L_align, A, 2)
             log-probability matrix for emissions from match sites
         """
+        ### rate multiplier
         # (B, L_align, H) -> (B, L_align, 1) -> (B, L_align)
         rate_mult_logits = self.final_project(datamat)[...,0] # (B, L_align)
         rate_multiplier = self.apply_bound_sigmoid_activation(logits = rate_mult_logits,
@@ -352,10 +357,13 @@ class LocalF81(neuralTKFModuleBase):
                                            param_name = 'rate mult.',
                                            sow_intermediates = sow_intermediates) # (B, L_align)
         
+        
+        ### equilibrium distribution
         # return equilibrium probabilities directly
         equl = jnp.exp(log_equl) # (B, L_align, A)
         
-        # shape of output
+        
+        ### output
         #   if unique time per sample: (B, L_align, A, 2)
         #   if not unique time per sample: (T, B, L_align, A, 2)
         cond_logprobs = logprob_f81(equl = equl,
@@ -440,6 +448,7 @@ class GTRGlobalExchLocalRateMult(neuralTKFModuleBase):
     
     def setup(self):
         emission_alphabet_size = self.config['emission_alphabet_size']
+        self.use_bias = self.config.get('use_bias', True)
         self.exchange_min_val, self.exchange_max_val  = self.config.get( 'exchange_range', (1e-4, 12) )
         self.rate_mult_min_val, self.rate_mult_max_val  = self.config.get( 'rate_mult_range', 
                                                                            (0.01, 10) )
@@ -459,7 +468,7 @@ class GTRGlobalExchLocalRateMult(neuralTKFModuleBase):
         # final projection for rate multipliers
         name = f'{self.name}/Project to rate multipliers'
         self.rate_mult_final_project = nn.Dense(features = 1,
-                                                use_bias = True,
+                                                use_bias = self.use_bias,
                                                 name = name)
         
     def __call__(self, 
@@ -507,6 +516,7 @@ class GTRLocalExchLocalRateMult(neuralTKFModuleBase):
     
     def setup(self):
         emission_alphabet_size = self.config['emission_alphabet_size']
+        self.use_bias = self.config.get('use_bias', True)
         self.exchange_min_val, self.exchange_max_val  = self.config.get( 'exchange_range', (1e-4, 12) )
         self.rate_mult_min_val, self.rate_mult_max_val  = self.config.get( 'rate_mult_range', 
                                                                            (0.01, 10) )
@@ -520,14 +530,14 @@ class GTRLocalExchLocalRateMult(neuralTKFModuleBase):
         
         name = f'{self.name}/Project to exchangeabilties'
         self.exch_final_project = nn.Dense(features = num_exchange,
-                                           use_bias = True,
+                                           use_bias = self.use_bias,
                                            name = name)
         del name
         
         # final projection for rate multipliers
         name = f'{self.name}/Project to rate multipliers'
         self.rate_mult_final_project = nn.Dense(features = 1,
-                                                use_bias = True,
+                                                use_bias = self.use_bias,
                                                 name = name)
         
     def __call__(self, 

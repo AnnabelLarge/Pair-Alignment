@@ -132,6 +132,9 @@ class OneHotEmb(SeqEmbBase):
         
 
 
+###############################################################################
+### for debugging and unit tests only   #######################################
+###############################################################################
 class MaskingEmb(SeqEmbBase):
     """
     Return (B, L, 1) matrix of indicators:
@@ -139,7 +142,7 @@ class MaskingEmb(SeqEmbBase):
         - zeros at padding sites
     (like a sequence mask)
     
-    Use this for desc entropy unit test
+    Use this when running base cases for neural models
     
     
     init with:
@@ -156,8 +159,6 @@ class MaskingEmb(SeqEmbBase):
     call arguments are:
     ===================
     datamat: matrix of sequences (B, L)
-    training: NOT USED
-    sow_intermediates: NOT USED
     
     
     outputs:
@@ -175,11 +176,9 @@ class MaskingEmb(SeqEmbBase):
     
     def __call__(self, 
                  datamat, 
-                 sow_intermediates: bool=False, 
-                 training: bool=False):
+                 *args,
+                 **kwargs):
         
-        out_mat = (datamat != self.seq_padding_idx)
-        out_mat = out_mat[..., None]
-        return out_mat
-    
+        out_mat = (datamat != self.seq_padding_idx).astype(float) #(B, L)
+        return out_mat[...,None] #(B, L, 1)
     

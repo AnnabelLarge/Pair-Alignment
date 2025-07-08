@@ -185,8 +185,6 @@ class NeuralCondTKF(ModuleBase):
         # postprocess the concatenated embeddings
         self.postproc_trans =  transitions_postproc_module(config = self.transitions_postproc_config,
                                              name = f'{self.name}/{transitions_postproc_model_type}_to_trans_module')
-        if self.postproc_trans is None:
-            breakpoint()
         
         if self.indel_model_type == 'tkf91':
             if global_or_local_dict['tkf_rates'].lower() == 'global':
