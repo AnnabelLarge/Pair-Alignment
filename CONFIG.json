@@ -1,0 +1,80 @@
+{
+    "training_wkdir": "RESULTS",
+    "rng_seednum": 2011,
+
+    "data_dir": "example_data",
+    "train_dset_splits": ["twoSamp"],
+    "test_dset_splits": ["twoSamp"],
+    "toss_alignments_longer_than": null,
+    "batch_size": 2,
+    "chunk_length": 512,
+    "emission_alphabet_size": 20,
+    "norm_loss_by": "desc_len",
+    "gap_idx": 43,
+
+    "num_epochs": 100,
+    "optimizer_config": {
+        "init_value": 0.005,
+        "peak_value": 0.005,
+        "end_value": 0.005,
+        "warmup_steps": 0,
+        "weight_decay": 0,
+        "every_k_schedule": 1
+    },
+    "early_stop_cond1_atol": 1e-3,
+    "early_stop_cond2_gap": 3,
+    "patience": 10,
+    "update_grads": true,
+    "use_scan_fns": false,
+
+    "interms_for_tboard": {
+        "encoder_sow_outputs": true,
+        "ancestor_embeddings": true,
+        "decoder_sow_outputs": true,
+        "descendant_embeddings": true,
+        "finalpred_sow_outputs": true,
+        "forward_pass_outputs": true,
+        "gradients": true,
+        "optimizer": true
+    },
+    "save_arrs": false,
+    "save_per_sample_losses": false,
+    "histogram_output_freq": 500,
+
+    "anc_model_type": "cnn",
+    "anc_enc_config": {"initial_embed_module": "EmbeddingWithPadding",
+                       "hidden_dim": 1028,
+                       "kern_size_lst": [16, 8],
+                       "dropout": 0.0},
+
+    "desc_model_type": "cnn",
+    "desc_dec_config": {"initial_embed_module": "EmbeddingWithPadding",
+                       "hidden_dim": 1028,
+                       "kern_size_lst": [8, 4],
+                       "dropout": 0.0},
+    "pred_model_type": "neural_hmm",
+    "pred_config": {
+        "load_all": false,
+        "subst_model_type": "f81",
+        "indel_model_type": "tkf92",
+
+        "global_or_local": {"equl_dist": "local",
+                            "rate_mult": "local",
+                            "tkf_rates": "global",
+                            "tkf92_frag_size": "global"},
+
+        "emissions_postproc_model_type": "selectmask",
+        "emissions_postproc_config": {"use_anc_emb": true,
+                                      "use_desc_emb": false,
+                                      "use_prev_align_info": false},
+
+        "transitions_postproc_model_type": null,
+        "transitions_postproc_config": {},
+
+        "tkf_function": "switch_tkf",
+
+        "times_from": "t_per_sample"
+
+    }
+    
+}
