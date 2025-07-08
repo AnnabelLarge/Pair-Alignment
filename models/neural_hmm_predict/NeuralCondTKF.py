@@ -130,11 +130,11 @@ class NeuralCondTKF(ModuleBase):
         
         # get equilibrium distribution
         if global_or_local_dict['equl_dist'].lower() == 'global':
-            self.equl_module = GlobalEqul(config = self.config,
+            self.equl_module = GlobalEqul(config = self.emissions_postproc_config,
                                           name = f'{self.name}/get_equl')
         
         elif global_or_local_dict['equl_dist'].lower() == 'local':
-            self.equl_module = LocalEqul(config = self.config,
+            self.equl_module = LocalEqul(config = self.emissions_postproc_config,
                                           name = f'{self.name}/get_equl')
         
         
@@ -147,11 +147,11 @@ class NeuralCondTKF(ModuleBase):
         
         if self.subst_model_type == 'f81':
             if global_or_local_dict['rate_mult'].lower() == 'global':
-                self.subs_module = GlobalF81(config = self.config,
+                self.subs_module = GlobalF81(config = self.emissions_postproc_config,
                                               name = f'{self.name}/get_subs')
             
             elif global_or_local_dict['rate_mult'].lower() == 'local':
-                self.subs_module = LocalF81(config = self.config,
+                self.subs_module = LocalF81(config = self.emissions_postproc_config,
                                             name = f'{self.name}/get_subs')
 
                 
@@ -163,15 +163,15 @@ class NeuralCondTKF(ModuleBase):
             rate_local = global_or_local_dict['rate_mult'].lower() == 'local'
             
             if exch_global and rate_global:
-                self.subs_module = GTRGlobalExchGlobalRateMult(config = self.config,
+                self.subs_module = GTRGlobalExchGlobalRateMult(config = self.emissions_postproc_config,
                                             name = f'{self.name}/get_subs')
             
             elif exch_global and rate_local:
-                self.subs_module = GTRGlobalExchLocalRateMult(config = self.config,
+                self.subs_module = GTRGlobalExchLocalRateMult(config = self.emissions_postproc_config,
                                             name = f'{self.name}/get_subs')
             
             elif exch_local and rate_local:
-                self.subs_module = GTRLocalExchLocalRateMult(config = self.config,
+                self.subs_module = GTRLocalExchLocalRateMult(config = self.emissions_postproc_config,
                                             name = f'{self.name}/get_subs')
             
             # weird case that I'm not testing yet
@@ -188,11 +188,11 @@ class NeuralCondTKF(ModuleBase):
         
         if self.indel_model_type == 'tkf91':
             if global_or_local_dict['tkf_rates'].lower() == 'global':
-                self.trans_module = GlobalTKF91(config = self.config,
+                self.trans_module = GlobalTKF91(config = self.transitions_postproc_config,
                                             name = f'{self.name}/get_trans')
             
             elif global_or_local_dict['tkf_rates'].lower() == 'local':
-                self.trans_module = LocalTKF91(config = self.config,
+                self.trans_module = LocalTKF91(config = self.transitions_postproc_config,
                                             name = f'{self.name}/get_trans')
                 
         
@@ -204,15 +204,15 @@ class NeuralCondTKF(ModuleBase):
             frag_size_local = global_or_local_dict['tkf92_frag_size'].lower() == 'local'
             
             if indel_rates_global and frag_size_global:
-                self.trans_module = TKF92GlobalRateGlobalFragSize(config = self.config,
+                self.trans_module = TKF92GlobalRateGlobalFragSize(config = self.transitions_postproc_config,
                                                         name = f'{self.name}/get_trans')
                 
             elif indel_rates_global and frag_size_local:
-                    self.trans_module = TKF92GlobalRateLocalFragSize(config = self.config,
+                    self.trans_module = TKF92GlobalRateLocalFragSize(config = self.transitions_postproc_config,
                                                             name = f'{self.name}/get_trans')
                 
             elif indel_rates_local and frag_size_local:
-                self.trans_module = TKF92LocalRateLocalFragSize(config = self.config,
+                self.trans_module = TKF92LocalRateLocalFragSize(config = self.transitions_postproc_config,
                                                         name = f'{self.name}/get_trans')
             
             # weird case that I'm not testing yet
@@ -523,6 +523,8 @@ class NeuralCondTKFLoadAll(NeuralCondTKF):
         
         # optional
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
+        self.emissions_postproc_config = self.config.get('emissions_postproc_config', dict() )
+        self.transitions_postproc_config = self.config.get('transitions_postproc_config', dict() )
         
         # handle time
         if times_from =='t_per_sample':
@@ -536,7 +538,7 @@ class NeuralCondTKFLoadAll(NeuralCondTKF):
         ### module for equilibrium distribution   #
         ###########################################
         self.postproc_equl = lambda *args, **kwargs: None
-        self.equl_module = EqulFromFile(config = self.config,
+        self.equl_module = EqulFromFile(config = self.emissions_postproc_config,
                                         name = f'{self.name}/get_equl')
         
         ########################################
@@ -545,11 +547,11 @@ class NeuralCondTKFLoadAll(NeuralCondTKF):
         self.postproc_subs = lambda *args, **kwargs: None
         
         if self.subst_model_type == 'f81':
-            self.subs_module = F81FromFile(config = self.config,
+            self.subs_module = F81FromFile(config = self.emissions_postproc_config,
                                            name = f'{self.name}/get_subs')
             
         elif self.subst_model_type == 'gtr':
-            self.subs_module = GTRFromFile(config = self.config,
+            self.subs_module = GTRFromFile(config = self.emissions_postproc_config,
                                            name = f'{self.name}/get_subs')
             
         ###########################################
@@ -558,11 +560,11 @@ class NeuralCondTKFLoadAll(NeuralCondTKF):
         self.postproc_trans = lambda *args, **kwargs: None
         
         if self.indel_model_type == 'tkf91':
-            self.trans_module = GlobalTKF91FromFile(config = self.config,
+            self.trans_module = GlobalTKF91FromFile(config = self.transitions_postproc_config,
                                                     name = f'{self.name}/get_trans')
          
         elif self.indel_model_type == 'tkf92':
-            self.trans_module = GlobalTKF92FromFile(config = self.config,
+            self.trans_module = GlobalTKF92FromFile(config = self.transitions_postproc_config,
                                                     name = f'{self.name}/get_trans')
             
             

@@ -294,14 +294,19 @@ class LocalF81(neuralTKFModuleBase):
           > kernel : ArrayLike, (H, 1)
           > bias : ArrayLike, (1)  
         """
-        self.use_bias = self.config.get('use_bias', True)
         self.rate_mult_min_val, self.rate_mult_max_val  = self.config.get( 'rate_mult_range', 
                                                                            (0.01, 10) )
         
-        name = f'{self.name}/Project to rate multipliers'
-        self.final_project = nn.Dense(features = 1,
-                                      use_bias = self.use_bias,
-                                      name = name)
+        # only change these when debugging
+        self.use_bias = self.config.get('use_bias', True)
+        self.force_unit_rate_multiplier = self.config.get( 'force_unit_rate_multiplier',
+                                                            False )
+        
+        if not self.force_unit_rate_multiplier:
+            name = f'{self.name}/Project to rate multipliers'
+            self.final_project = nn.Dense(features = 1,
+                                          use_bias = self.use_bias,
+                                          name = name)
     
     def __call__(self,
                  datamat: jnp.array,
@@ -349,13 +354,18 @@ class LocalF81(neuralTKFModuleBase):
             log-probability matrix for emissions from match sites
         """
         ### rate multiplier
-        # (B, L_align, H) -> (B, L_align, 1) -> (B, L_align)
-        rate_mult_logits = self.final_project(datamat)[...,0] # (B, L_align)
-        rate_multiplier = self.apply_bound_sigmoid_activation(logits = rate_mult_logits,
-                                           min_val = self.rate_mult_min_val,
-                                           max_val = self.rate_mult_max_val,
-                                           param_name = 'rate mult.',
-                                           sow_intermediates = sow_intermediates) # (B, L_align)
+        if not self.force_unit_rate_multiplier:
+            # (B, L_align, H) -> (B, L_align, 1) -> (B, L_align)
+            rate_mult_logits = self.final_project(datamat)[...,0] # (B, L_align)
+            rate_multiplier = self.apply_bound_sigmoid_activation(logits = rate_mult_logits,
+                                               min_val = self.rate_mult_min_val,
+                                               max_val = self.rate_mult_max_val,
+                                               param_name = 'rate mult.',
+                                               sow_intermediates = sow_intermediates) # (B, L_align)
+        
+        elif self.force_unit_rate_multiplier:
+            final_shape = ( datamat.shape[0], datamat.shape[1] )
+            rate_multiplier = jnp.ones( final_shape ) # (B, L_align)
         
         
         ### equilibrium distribution
@@ -374,6 +384,7 @@ class LocalF81(neuralTKFModuleBase):
         intermed_params_dict = {'rate_multiplier': rate_multiplier}
     
         return cond_logprobs, intermed_params_dict
+
 
 # alias for GlobalF81; never loading local parameters, so whenever this is 
 #   invoked, just use GlobalF81 instead
@@ -399,12 +410,8 @@ class GTRGlobalExchGlobalRateMult(neuralTKFModuleBase):
         self.exchange_min_val, self.exchange_max_val  = self.config.get( 'exchange_range', (1e-4, 12) )
         
         # initialize exchangeabilities
-        if emission_alphabet_size == 20:
-            num_exchange = 190
-        
-        elif emission_alphabet_size == 4:
-            num_exchange = 6
-        
+        A = emission_alphabet_size
+        num_exchange = ( ( A * (A-1) ) / 2 ).astype(int)
         self.exch_logits = self.param("exchangeabilities", 
                                       nn.initializers.normal(),
                                       (1, 1, num_exchange,),
@@ -420,12 +427,21 @@ class GTRGlobalExchGlobalRateMult(neuralTKFModuleBase):
                  sow_intermediates: bool,
                  *args,
                  **kwargs):
+        ### exchangeabilities 
+        # exch_upper_triag_values is: 
+        #   (B, L_align=1, 190) if proteins; n=190
+        #   (B, L_align=1, 6) if dna; n=6
         exch_upper_triag_values = self.apply_bound_sigmoid_activation( logits = self.exch_logits,
                                                    min_val = self.exchange_min_val,
                                                    max_val = self.exchange_max_val,
                                                    param_name = 'exchangeabilities',
-                                                   sow_intermediates = sow_intermediates)
+                                                   sow_intermediates = sow_intermediates) #(B, L_align, n)
 
+
+        ### logP(desc | anc, t)
+        # cond_logprobs is:
+        # (B, L_align=1, A, A) if unique_time_per_sample
+        # (T, B=1, L_align=1, A, A) if not unique_time_per_sample
         cond_logprobs = logprob_gtr( exch_upper_triag_values = exch_upper_triag_values,
                             equilibrium_distributions = jnp.exp(log_equl),
                             rate_multiplier = self.global_rate_multiplier,
@@ -447,29 +463,33 @@ class GTRGlobalExchLocalRateMult(neuralTKFModuleBase):
     name: str
     
     def setup(self):
+        ### read config
         emission_alphabet_size = self.config['emission_alphabet_size']
-        self.use_bias = self.config.get('use_bias', True)
         self.exchange_min_val, self.exchange_max_val  = self.config.get( 'exchange_range', (1e-4, 12) )
         self.rate_mult_min_val, self.rate_mult_max_val  = self.config.get( 'rate_mult_range', 
                                                                            (0.01, 10) )
         
-        # initialize exchangeabilities
-        if emission_alphabet_size == 20:
-            num_exchange = 190
+        # for debugging, tests
+        self.use_bias = self.config.get('use_bias', True)
+        self.force_unit_rate_multiplier = self.config.get( 'force_unit_rate_multiplier',
+                                                            False )
         
-        elif emission_alphabet_size == 4:
-            num_exchange = 6
         
+        ### exchangeabilities
+        A = emission_alphabet_size
+        num_exchange = ( ( A * (A-1) ) / 2 ).astype(int)
         self.exch_logits = self.param("exchangeabilities", 
                                       nn.initializers.normal(),
                                       (1, 1, num_exchange,),
                                       jnp.float32 ) #(1, 1, n)
         
-        # final projection for rate multipliers
-        name = f'{self.name}/Project to rate multipliers'
-        self.rate_mult_final_project = nn.Dense(features = 1,
-                                                use_bias = self.use_bias,
-                                                name = name)
+        
+        ### rate multipliers
+        if not self.force_unit_rate_multiplier:
+            name = f'{self.name}/Project to rate multipliers'
+            self.rate_mult_final_project = nn.Dense(features = 1,
+                                                    use_bias = self.use_bias,
+                                                    name = name)
         
     def __call__(self, 
                  datamat,
@@ -477,23 +497,34 @@ class GTRGlobalExchLocalRateMult(neuralTKFModuleBase):
                  t_array,
                  unique_time_per_sample,
                  sow_intermediates: bool):
-        ### rate multipliers come from input
-        # (B, L_align, H) -> (B, L_align, 1) -> (B, L_align)
-        rate_mult_logits = self.rate_mult_final_project(datamat)[...,0] # (B, L_align)
-        rate_multiplier = self.apply_bound_sigmoid_activation(logits = rate_mult_logits,
-                                           min_val = self.rate_mult_min_val,
-                                           max_val = self.rate_mult_max_val,
-                                           param_name = 'rate mult.',
-                                           sow_intermediates = sow_intermediates) # (B, L_align)
+        ### rate multipliers: (B, L_align, H) -> (B, L_align, 1) -> (B, L_align)
+        if not self.force_unit_rate_multiplier:
+            rate_mult_logits = self.rate_mult_final_project(datamat)[...,0] # (B, L_align)
+            rate_multiplier = self.apply_bound_sigmoid_activation(logits = rate_mult_logits,
+                                               min_val = self.rate_mult_min_val,
+                                               max_val = self.rate_mult_max_val,
+                                               param_name = 'rate mult.',
+                                               sow_intermediates = sow_intermediates) # (B, L_align)
+        
+        elif self.force_unit_rate_multiplier:
+            final_shape = ( datamat.shape[0], datamat.shape[1] )
+            rate_multiplier = jnp.ones( final_shape ) # (B, L_align)
         
         
-        ### exchangeabilities are global
+        ### exchangeabilities 
+        # exch_upper_triag_values is: 
+        #   (B, L_align, 190) if proteins
+        #   (B, L_align, 6) if dna
         exch_upper_triag_values = self.apply_bound_sigmoid_activation( logits = self.exch_logits,
                                                    min_val = self.exchange_min_val,
                                                    max_val = self.exchange_max_val,
                                                    param_name = 'exchangeabilities',
                                                    sow_intermediates = sow_intermediates)
         
+        ### logP(desc | anc, t)
+        # cond_logprobs is:
+        # (B, L_align, A, A) if unique_time_per_sample
+        # (T, B, L_align, A, A) if not unique_time_per_sample
         cond_logprobs = logprob_gtr( exch_upper_triag_values = exch_upper_triag_values,
                             equilibrium_distributions = jnp.exp(log_equl),
                             rate_multiplier = rate_multiplier,
@@ -516,29 +547,32 @@ class GTRLocalExchLocalRateMult(neuralTKFModuleBase):
     
     def setup(self):
         emission_alphabet_size = self.config['emission_alphabet_size']
-        self.use_bias = self.config.get('use_bias', True)
         self.exchange_min_val, self.exchange_max_val  = self.config.get( 'exchange_range', (1e-4, 12) )
         self.rate_mult_min_val, self.rate_mult_max_val  = self.config.get( 'rate_mult_range', 
                                                                            (0.01, 10) )
         
-        # final projection for exchangeabilities
-        if emission_alphabet_size == 20:
-            num_exchange = 190
         
-        elif emission_alphabet_size == 4:
-            num_exchange = 6
+        # for debugging, tests
+        self.use_bias = self.config.get('use_bias', True)
+        self.force_unit_rate_multiplier = self.config.get( 'force_unit_rate_multiplier',
+                                                            False )
+       
         
+        ### exchangeabilities
+        A = emission_alphabet_size
+        num_exchange = ( ( A * (A-1) ) / 2 ).astype(int)
         name = f'{self.name}/Project to exchangeabilties'
         self.exch_final_project = nn.Dense(features = num_exchange,
                                            use_bias = self.use_bias,
                                            name = name)
         del name
         
-        # final projection for rate multipliers
-        name = f'{self.name}/Project to rate multipliers'
-        self.rate_mult_final_project = nn.Dense(features = 1,
-                                                use_bias = self.use_bias,
-                                                name = name)
+        ### rate multipliers
+        if not self.force_unit_rate_multiplier:
+            name = f'{self.name}/Project to rate multipliers'
+            self.rate_mult_final_project = nn.Dense(features = 1,
+                                                    use_bias = self.use_bias,
+                                                    name = name)
         
     def __call__(self, 
                  datamat,
@@ -546,25 +580,36 @@ class GTRLocalExchLocalRateMult(neuralTKFModuleBase):
                  t_array,
                  unique_time_per_sample,
                  sow_intermediates: bool):
-        ### rate multipliers come from input
-        # (B, L_align, H) -> (B, L_align, 1) -> (B, L_align)
-        rate_mult_logits = self.rate_mult_final_project(datamat)[...,0] # (B, L_align)
-        rate_multiplier = self.apply_bound_sigmoid_activation(logits = rate_mult_logits,
-                                           min_val = self.rate_mult_min_val,
-                                           max_val = self.rate_mult_max_val,
-                                           param_name = 'rate mult.',
-                                           sow_intermediates = sow_intermediates) # (B, L_align)
+        ### rate multipliers: (B, L_align, H) -> (B, L_align, 1) -> (B, L_align)
+        if not self.force_unit_rate_multiplier:
+            rate_mult_logits = self.rate_mult_final_project(datamat)[...,0] # (B, L_align)
+            rate_multiplier = self.apply_bound_sigmoid_activation(logits = rate_mult_logits,
+                                               min_val = self.rate_mult_min_val,
+                                               max_val = self.rate_mult_max_val,
+                                               param_name = 'rate mult.',
+                                               sow_intermediates = sow_intermediates) # (B, L_align)
+        
+        elif self.force_unit_rate_multiplier:
+            final_shape = ( datamat.shape[0], datamat.shape[1] )
+            rate_multiplier = jnp.ones( final_shape ) # (B, L_align)
         
         
-        ### exchangeabilities also come from input
-        # (B, L_align, H) -> (B, L_align, n)
-        exch_logits = self.exch_final_project(datamat)
+        ### exchangeabilities: (B, L_align, H) -> (B, L_align, n) 
+        # exch_upper_triag_values is: 
+        #   (B, L_align, 190) if proteins; n=190
+        #   (B, L_align, 6) if dna; n=6
+        exch_logits = self.exch_final_project(datamat) # (B, L_align, n) 
         exch_upper_triag_values = self.apply_bound_sigmoid_activation( logits = exch_logits,
                                                    min_val = self.exchange_min_val,
                                                    max_val = self.exchange_max_val,
                                                    param_name = 'exchangeabilities',
-                                                   sow_intermediates = sow_intermediates)
+                                                   sow_intermediates = sow_intermediates) # (B, L_align, n) 
         
+        
+        ### logP(desc | anc, t)
+        # cond_logprobs is:
+        # (B, L_align, A, A) if unique_time_per_sample
+        # (T, B, L_align, A, A) if not unique_time_per_sample
         cond_logprobs = logprob_gtr( exch_upper_triag_values = exch_upper_triag_values,
                                      equilibrium_distributions = jnp.exp(log_equl),
                                      rate_multiplier = rate_multiplier,

@@ -918,7 +918,11 @@ class IndpSitesLoadAll(IndpSites):
                     np.save(g, mat)
                 
                 mat = np.squeeze(mat)
-                if len(mat.shape) <= 2:
+                if len(mat.shape) == 0:
+                    with open(f'{out_folder}/{prefix}_ASCII_{new_key}.tsv', 'w') as g:
+                        g.write(f'{new_key}: {mat}\n')
+                
+                elif len(mat.shape) <= 2:
                     np.savetxt( f'{out_folder}/{prefix}_ASCII_{new_key}_transit_matrix.tsv', 
                                 np.array(mat), 
                                 fmt = '%.4f',
@@ -947,15 +951,16 @@ class IndpSitesLoadAll(IndpSites):
             # emission from match sites
             # rho * Q
             scaled_rate_mat_per_class = out['rate_mat_times_rho']
-            for c in range(scaled_rate_mat_per_class.shape[0]):
-                mat_to_save = scaled_rate_mat_per_class[c,...]
-                
-                with open(f'{out_folder}/{prefix}_class-{c}_rate_matrix_times_rho.npy', 'wb') as g:
-                    np.save(g, mat_to_save)
-                
-                np.savetxt( f'{out_folder}/{prefix}_ASCII_class-{c}_rate_matrix_times_rho.tsv', 
-                            np.array(mat_to_save), 
-                            fmt = '%.4f',
-                            delimiter= '\t' )
-                
-                del mat_to_save, g
+            if scaled_rate_mat_per_class is not None:
+                for c in range(scaled_rate_mat_per_class.shape[0]):
+                    mat_to_save = scaled_rate_mat_per_class[c,...]
+                    
+                    with open(f'{out_folder}/{prefix}_class-{c}_rate_matrix_times_rho.npy', 'wb') as g:
+                        np.save(g, mat_to_save)
+                    
+                    np.savetxt( f'{out_folder}/{prefix}_ASCII_class-{c}_rate_matrix_times_rho.tsv', 
+                                np.array(mat_to_save), 
+                                fmt = '%.4f',
+                                delimiter= '\t' )
+                    
+                    del mat_to_save, g

@@ -96,6 +96,11 @@ def share_top_level_args(args):
         args.pred_config['emission_alphabet_size'] = args.emission_alphabet_size
         args.pred_config['full_alphabet_size'] = args.full_alphabet_size
 
+        args.pred_config['emissions_postproc_config']['emission_alphabet_size'] = args.emission_alphabet_size
+        args.pred_config['transitions_postproc_config']['emission_alphabet_size'] = args.emission_alphabet_size
+        args.pred_config['emissions_postproc_config']['full_alphabet_size'] = args.full_alphabet_size
+        args.pred_config['transitions_postproc_config']['full_alphabet_size'] = args.full_alphabet_size
+
     elif args.pred_model_type in ['pairhmm_indp_sites',
                                   'pairhmm_frag_and_site_classes']:
         args.pred_config['gap_tok'] = args.gap_tok
