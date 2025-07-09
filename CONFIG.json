@@ -12,11 +12,11 @@
     "norm_loss_by": "desc_len",
     "gap_idx": 43,
 
-    "num_epochs": 10,
+    "num_epochs": 1000,
     "optimizer_config": {
-        "init_value": 0.005,
-        "peak_value": 0.005,
-        "end_value": 0.005,
+        "init_value": 1e-4,
+        "peak_value": 1e-4,
+        "end_value": 1e-4,
         "warmup_steps": 0,
         "weight_decay": 0,
         "every_k_schedule": 1
@@ -43,15 +43,13 @@
 
     "anc_model_type": "cnn",
     "anc_enc_config": {"initial_embed_module": "EmbeddingWithPadding",
-                       "hidden_dim": 32,
-                       "kern_size_lst": [2],
+                       "hidden_dim": 1028,
+                       "kern_size_lst": [16, 8],
                        "dropout": 0.0},
 
-    "desc_model_type": "cnn",
-    "desc_dec_config": {"initial_embed_module": "EmbeddingWithPadding",
-                       "hidden_dim": 32,
-                       "kern_size_lst": [2],
-                       "dropout": 0.0},
+    "desc_model_type": null,
+    "desc_dec_config": {},
+
     "pred_model_type": "neural_hmm",
     "pred_config": {
         "load_all": false,
@@ -66,7 +64,8 @@
         "emissions_postproc_model_type": "selectmask",
         "emissions_postproc_config": {"use_anc_emb": true,
                                       "use_desc_emb": false,
-                                      "use_prev_align_info": false},
+                                      "use_prev_align_info": false,
+                                      "normalize_seq_embeddings_before_block": true},
 
         "transitions_postproc_model_type": null,
         "transitions_postproc_config": {},
