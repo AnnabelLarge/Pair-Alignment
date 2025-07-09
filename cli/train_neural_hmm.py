@@ -334,7 +334,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
                                    calc_sum = False )
             
             # potentially save the trainstates during training
-            if (self.checkpoint_freq_during_training > 0) and (checkpoint_counter % self.checkpoint_freq_during_training == 0):
+            if (args.checkpoint_freq_during_training > 0) and (checkpoint_counter % args.checkpoint_freq_during_training == 0):
                 with open(f'{args.out_arrs_dir}/INPROGRESS_trainstates_info.txt','w') as g:
                     g.write(f'Checkpoint created at: epoch {epoch_idx}, batch {batch_idx}\n')
                     g.write(f'Current loss for the training set batch is: train_metrics["batch_loss"]\n')
