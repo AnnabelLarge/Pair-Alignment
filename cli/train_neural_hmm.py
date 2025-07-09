@@ -291,7 +291,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
         train_real_start = wall_clock_time()
         train_cpu_start = process_time()
         
-        checkpoint_counter = 0
+        checkpoint_counter = -1
         for batch_idx, batch in enumerate(training_dl):
             this_batch_size = batch[0].shape[0]
             batch_epoch_idx = epoch_idx * len(training_dl) + batch_idx
@@ -334,11 +334,12 @@ def train_neural_hmm(args, dataloader_dict: dict):
                                    calc_sum = False )
             
             # potentially save the trainstates during training
+            checkpoint_counter += 1
             if (args.checkpoint_freq_during_training > 0) and (checkpoint_counter % args.checkpoint_freq_during_training == 0):
                 # save some metadata about the trainstate files
                 with open(f'{args.out_arrs_dir}/INPROGRESS_trainstates_info.txt','w') as g:
                     g.write(f'Checkpoint created at: epoch {epoch_idx}, batch {batch_idx}\n')
-                    g.write(f'Current loss for the training set batch is: train_metrics["batch_loss"]\n')
+                    g.write(f'Current loss for the training set batch is: {train_metrics["batch_loss"]}\n')
                 
                 # save the trainstates
                 for i in range(3):
@@ -353,9 +354,6 @@ def train_neural_hmm(args, dataloader_dict: dict):
                 
                 checkpoint_counter = 0
             
-            else:
-                checkpoint_counter += 1
-                
             
 #__4___8__12: batch level (three tabs)
             ################################################################
