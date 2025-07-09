@@ -113,6 +113,7 @@ class CNNSeqEmb(SeqEmbBase):
                                         which=['scalars']) 
         
         # first convolution: (B, L, H) -> (B, L, H)
+        block_idx = 0
         datamat = self.first_block(datamat = datamat,
                                    padding_mask = padding_mask,
                                    sow_intermediates = sow_intermediates, 
@@ -131,7 +132,7 @@ class CNNSeqEmb(SeqEmbBase):
         # record final result to tensorboard
         if sow_intermediates:
             self.sow_histograms_scalars(mat = datamat, 
-                                        label = f'{self.name} {layer_idx}/CNN Block {block_idx}/after block', 
+                                        label = f'{self.name} CNN Block {block_idx}/after block', 
                                         which=['scalars'])
         
         return datamat # (B, L, H)

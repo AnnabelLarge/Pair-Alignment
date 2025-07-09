@@ -18,7 +18,7 @@ from dloaders.init_dataloader import init_dataloader
 
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update("jax_debug_infs", True)
-jax.config.update("jax_enable_x64", True)
+# jax.config.update("jax_enable_x64", True)
 
 
 def main():

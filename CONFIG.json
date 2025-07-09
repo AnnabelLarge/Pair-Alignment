@@ -12,7 +12,7 @@
     "norm_loss_by": "desc_len",
     "gap_idx": 43,
 
-    "num_epochs": 100,
+    "num_epochs": 10,
     "optimizer_config": {
         "init_value": 0.005,
         "peak_value": 0.005,
@@ -43,14 +43,14 @@
 
     "anc_model_type": "cnn",
     "anc_enc_config": {"initial_embed_module": "EmbeddingWithPadding",
-                       "hidden_dim": 1028,
-                       "kern_size_lst": [16, 8],
+                       "hidden_dim": 32,
+                       "kern_size_lst": [2],
                        "dropout": 0.0},
 
     "desc_model_type": "cnn",
     "desc_dec_config": {"initial_embed_module": "EmbeddingWithPadding",
-                       "hidden_dim": 1028,
-                       "kern_size_lst": [8, 4],
+                       "hidden_dim": 32,
+                       "kern_size_lst": [2],
                        "dropout": 0.0},
     "pred_model_type": "neural_hmm",
     "pred_config": {
