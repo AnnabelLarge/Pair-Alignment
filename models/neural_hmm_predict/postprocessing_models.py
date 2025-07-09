@@ -392,11 +392,3 @@ class FeedforwardPostproc(SelectMask):
                                              mask=padding_mask ) #(B, L, layer_sizes[-1])
         return datamat  #(B, L, layer_sizes[-1])
     
-    
-    def _mask_padding_tokens( self,
-                             x: jnp.array, 
-                             mask: jnp.array ):
-        expanded_mask = jnp.broadcast_to( mask[...,None], x.shape ) 
-        return jnp.multiply(expanded_mask, x)
-        
-    

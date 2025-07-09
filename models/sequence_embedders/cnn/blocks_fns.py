@@ -30,7 +30,6 @@ import jax
 import jax.numpy as jnp
 
 from models.BaseClasses import ModuleBase
-from models.neural_utils.custom_normalization_layers import ( LayerNormOverLastTwoDims )
 
 
 class ConvnetBlock(ModuleBase):
@@ -78,14 +77,8 @@ class ConvnetBlock(ModuleBase):
         
         ### set up layers of the CNN block
         # normalization
-        if self.causal:
-            self.norm = nn.LayerNorm(reduction_axes=-1, feature_axes=-1)
-            self.norm_type = 'Instance'
-            
-        elif not self.causal:
-            # self.norm = nn.LayerNorm(reduction_axes= (-2,-1), feature_axes=-1)
-            self.norm = LayerNormOverLastTwoDims()
-            self.norm_type = 'Layer'
+        self.norm = nn.LayerNorm(reduction_axes=-1, feature_axes=-1)
+        self.norm_type = 'Instance'
         
         # convolution
         self.conv = nn.Conv(features = self.hidden_dim,
@@ -120,8 +113,7 @@ class ConvnetBlock(ModuleBase):
                                         which=['scalars'])
         
         ### 1.) norm, mask padding tokens
-        mask_for_norm = padding_mask if not self.causal else None
-        datamat = self.norm(datamat, mask=mask_for_norm)  #(B, L, H_in)
+        datamat = self.norm(datamat)  #(B, L, H_in)
         datamat = jnp.multiply(datamat, mask) #(B, L, H_in)
         
         if sow_intermediates:
