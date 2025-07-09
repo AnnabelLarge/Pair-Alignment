@@ -335,15 +335,21 @@ def train_neural_hmm(args, dataloader_dict: dict):
             
             # potentially save the trainstates during training
             if (args.checkpoint_freq_during_training > 0) and (checkpoint_counter % args.checkpoint_freq_during_training == 0):
+                # save some metadata about the trainstate files
                 with open(f'{args.out_arrs_dir}/INPROGRESS_trainstates_info.txt','w') as g:
                     g.write(f'Checkpoint created at: epoch {epoch_idx}, batch {batch_idx}\n')
                     g.write(f'Current loss for the training set batch is: train_metrics["batch_loss"]\n')
-                    
+                
+                # save the trainstates
                 for i in range(3):
                     new_outfile = all_save_model_filenames[i].replace('.pkl','_INPROGRESS.pkl')
                     with open(new_outfile, 'wb') as g:
                         model_state_dict = flax.serialization.to_state_dict(all_trainstates[i])
                         pickle.dump(model_state_dict, g)
+                
+                # update the general logfile
+                with open(args.logfile_name,'a') as g:
+                    g.write(f'\tTrain loss at epoch {epoch_idx}, batch {batch_idx}: {train_metrics["batch_loss"]}\n')
                 
                 checkpoint_counter = 0
                 
