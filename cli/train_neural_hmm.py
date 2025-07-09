@@ -291,6 +291,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
         train_real_start = wall_clock_time()
         train_cpu_start = process_time()
         
+        checkpoint_counter = 0
         for batch_idx, batch in enumerate(training_dl):
             this_batch_size = batch[0].shape[0]
             batch_epoch_idx = epoch_idx * len(training_dl) + batch_idx
@@ -332,6 +333,20 @@ def train_neural_hmm(args, dataloader_dict: dict):
                                    subline = subline,
                                    calc_sum = False )
             
+            # potentially save the trainstates during training
+            if (self.checkpoint_freq_during_training > 0) and (checkpoint_counter % self.checkpoint_freq_during_training == 0):
+                with open(f'{args.out_arrs_dir}/INPROGRESS_trainstates_info.txt','w') as g:
+                    g.write(f'Checkpoint created at: epoch {epoch_idx}, batch {batch_idx}\n')
+                    g.write(f'Current loss for the training set batch is: train_metrics["batch_loss"]\n')
+                    
+                for i in range(3):
+                    new_outfile = all_save_model_filenames[i].replace('.pkl','_INPROGRESS.pkl')
+                    with open(new_outfile, 'wb') as g:
+                        model_state_dict = flax.serialization.to_state_dict(all_trainstates[i])
+                        pickle.dump(model_state_dict, g)
+                
+                checkpoint_counter = 0
+                
             
 #__4___8__12: batch level (three tabs)
             ################################################################
