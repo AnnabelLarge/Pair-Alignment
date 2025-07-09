@@ -352,6 +352,9 @@ def train_neural_hmm(args, dataloader_dict: dict):
                     g.write(f'\tTrain loss at epoch {epoch_idx}, batch {batch_idx}: {train_metrics["batch_loss"]}\n')
                 
                 checkpoint_counter = 0
+            
+            else:
+                checkpoint_counter += 1
                 
             
 #__4___8__12: batch level (three tabs)
