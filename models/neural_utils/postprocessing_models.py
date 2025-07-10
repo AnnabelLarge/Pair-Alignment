@@ -7,16 +7,15 @@ Created on Mon Jan 27 12:44:26 2025
 
 About:
 =======
-Take concatenated outputs from both sequence embedders and postprocess for 
-downstream blocks that create logits
+Concatenated outputs from both sequence embedders and postprocess for 
+downstream blocks that create logits, features, etc.
 
 
 classes available:
 ==================
-1.) Placeholder (ignore outputs from sequence embedders)
-2.) SelectMask (one-hot encode amino acids from training path)
-3.) FeedforwardPostproc 
-    norm -> dense -> act -> dropout
+1.) Placeholder: (ignore outputs from sequence embedders)
+2.) SelectMask: concatenate outputs from sequence embedders, possibly norm
+3.) FeedforwardPostproc: repeat blocks of norm -> dense -> act -> dropout
 
 """
 from flax import linen as nn
@@ -26,40 +25,9 @@ import jax.numpy as jnp
 from typing import Optional
 
 from models.BaseClasses import ModuleBase
-from models.neural_hmm_predict.model_functions import (process_datamat_lst)
+from models.neural_utils.model_functions import process_datamat_lst
 
 
-class Placeholder(ModuleBase):
-    """
-    to ignore embeddings entirely, use this 
-        (useful when you're reading log-probabilities from files')
-    """
-    config: None
-    name: str
-    
-    @nn.compact
-    def __call__(self, 
-                 *args,
-                 **kwargs):
-        """
-        placeholder method; returns None
-        
-        
-        B: batch size
-        L_align: length of alignment
-        
-        Arguments
-        ----------
-        padding_mask : ArrayLike, (B, L_align)
-        
-        Returns
-        --------
-        None
-        """
-        
-        return None
-    
-    
 class SelectMask(ModuleBase):
     config: dict
     name: str

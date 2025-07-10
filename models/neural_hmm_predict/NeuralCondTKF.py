@@ -35,9 +35,9 @@ from models.neural_hmm_predict.transition_models import (GlobalTKF91,
                                                          TKF92LocalRateLocalFragSize,
                                                          GlobalTKF91FromFile,
                                                          GlobalTKF92FromFile)
-from models.neural_hmm_predict.postprocessing_models import (FeedforwardPostproc,
-                                                             Placeholder,
-                                                             SelectMask)
+
+from models.neural_utils.postprocessing_models import (FeedforwardPostproc,
+                                                       SelectMask)
 
 
 class NeuralCondTKF(ModuleBase):
@@ -221,53 +221,70 @@ class NeuralCondTKF(ModuleBase):
             
     def __call__(self, 
                  datamat_lst: list[jnp.array], 
-                 padding_mask: jnp.array, 
-                 t_array: jnp.array,
+                 padding_mask: jnp.array,  #(B, L)
+                 t_array: jnp.array, #(B,) or (T,)
                  training: bool, 
                  sow_intermediates: bool=False,
+                 *args,
                  **kwargs):
         """
         unlike pairHMM implementation, this ONLY generates scoring matrices
         """
-        # equilibrium distribution; used to score emissions from indel sites
+        # elements of datamat_lst are:
+        # anc_embeddings: (B, L, H)
+        # desc_embeddings: (B, L, H)
+        # prev_align_one_hot_vec: (B, L, 5)
+
+        ### equilibrium distribution; used to score emissions from indel sites
         equl_feats = self.postproc_equl(datamat_lst = datamat_lst,
                                        padding_mask = padding_mask,
                                        training = training,
-                                       sow_intermediates = sow_intermediates)
-        logprob_emit_indel = self.equl_module(datamat = equl_feats,
-                                              sow_intermediates = sow_intermediates)
+                                       sow_intermediates = sow_intermediates)  #(B, L, H_out)
         
-        # substitution model; used to score emissions from match sites
+        logprob_emit_indel = self.equl_module(datamat = equl_feats,
+                                              sow_intermediates = sow_intermediates) #(B, L, A)
+        
+        
+        ### substitution model; used to score emissions from match sites
         sub_feats = self.postproc_subs(datamat_lst = datamat_lst,
                                       padding_mask = padding_mask,
                                       training = training,
-                                      sow_intermediates = sow_intermediates)
+                                      sow_intermediates = sow_intermediates)  #(B, L, H_out)
         
+        # logprob_emit_match is either (T, B, L, A, A) or (B, L, A, A)
+        # subs_model_params is a dictionary of parameters; see module for more details
         logprob_emit_match, subs_model_params = self.subs_module(datamat = sub_feats,
                                                                 log_equl = logprob_emit_indel,
                                                                 t_array = t_array,
                                                                 unique_time_per_sample = self.unique_time_per_sample,
                                                                 sow_intermediates = sow_intermediates)
         
-        # transition model; used to score markovian alignment path
+        
+        ### transition model; used to score markovian alignment path
         trans_feats = self.postproc_trans(datamat_lst = datamat_lst,
                                          padding_mask = padding_mask,
                                          training = training,
-                                         sow_intermediates = sow_intermediates)
+                                         sow_intermediates = sow_intermediates)  #(B, L, H_out)
         
         out = self.trans_module(datamat = trans_feats,
                                 t_array = t_array,
                                 unique_time_per_sample = self.unique_time_per_sample,
                                 sow_intermediates = sow_intermediates) 
+        
+        # logprob_transits is either (T, B, L, S, S) or (B, L, S, S)
+        # approx_flags_dict and indel_model_params are dictionaroes; 
+        # see module for more details
         logprob_transits, approx_flags_dict, indel_model_params = out
         del out
         
-        out_dict = {'logprob_emit_match': logprob_emit_match, 
-                    'logprob_emit_indel': logprob_emit_indel, 
-                    'logprob_transits': logprob_transits,
-                    'approx_flags_dict': approx_flags_dict,
-                    'subs_model_params': subs_model_params,
-                    'indel_model_params': indel_model_params}
+        # out dictionary
+        out_dict = {'logprob_emit_match': logprob_emit_match,  # (T, B, L, A, A) or (B, L, A, A)
+                    'logprob_emit_indel': logprob_emit_indel,  #(B, L, A)
+                    'logprob_transits': logprob_transits, # (T, B, L, S, S) or (B, L, S, S)
+                    'approx_flags_dict': approx_flags_dict, #dict
+                    'subs_model_params': subs_model_params, #dict
+                    'indel_model_params': indel_model_params}  #dict
+        
         
         ### correction to conditional logprob
         # if tkf91, no corrections needed
@@ -279,11 +296,11 @@ class NeuralCondTKF(ModuleBase):
         # if tkf92, include correction factor for starting with s->ins transition, 
         # and ending with ins->e
         elif self.indel_model_type == 'tkf92':
-            lam = indel_model_params['lambda'] #(B, length_for_scan-1) or (1,1)
-            mu = indel_model_params['mu'] #(B, length_for_scan-1) or (1,1)
-            r_extend = indel_model_params['r_extend'] #(B, length_for_scan-1) or (1,1)
+            lam = indel_model_params['lambda'] #(B, L) or (1,1)
+            mu = indel_model_params['mu'] #(B, L) or (1,1)
+            r_extend = indel_model_params['r_extend'] #(B, L) or (1,1)
             
-            out_dict['corr'] = ( jnp.log(mu/lam), #(B, length_for_scan-1) or (1,1)
+            out_dict['corr'] = ( jnp.log(mu/lam), #(B, L) or (1,1)
                                  jnp.log( r_extend + (1-r_extend)*(lam/mu) ) ) #(B, length_for_scan-1) or (1,1)
         
         return out_dict
@@ -299,7 +316,9 @@ class NeuralCondTKF(ModuleBase):
                               padding_idx: int=0,
                               start_idx: int=1,
                               end_idx: int=2,
-                              return_result_before_sum: bool=False):
+                              return_result_before_sum: bool=False,
+                              *args,
+                              **kwargs):
         """
         loss of alignment path, given by alignment_state
         
@@ -371,6 +390,7 @@ class NeuralCondTKF(ModuleBase):
                            )
         # conditional logprob, so don't score "emissions" from ancestor tokens
         
+        
         ### final logprob(sequences)
         # if unique_time_per_sample, logprob_perSamp_perPos_perTime is (B, length_for_scan)
         # elif not unique_time_per_sample, logprob_perSamp_perPos_perTime is (T, B, length_for_scan)
@@ -422,7 +442,9 @@ class NeuralCondTKF(ModuleBase):
                                  logprob_perSamp_perTime,
                                  length_for_normalization_for_reporting,
                                  t_array,
-                                 padding_idx: int = 0):
+                                 padding_idx: int = 0,
+                                 *args,
+                                 **kwargs):
         """
         postprocessing after accumulating logprobs in a scan function
         """
@@ -464,11 +486,6 @@ class NeuralCondTKF(ModuleBase):
         perplexity_perSamp = jnp.exp(neg_logP_length_normed) #(B,)
         return perplexity_perSamp
     
-    def get_ece(self,
-                loss):
-        return jnp.exp(loss)
-
-
 
 class NeuralCondTKFLoadAll(NeuralCondTKF):
     """

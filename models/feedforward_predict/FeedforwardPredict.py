@@ -10,37 +10,38 @@ ABOUT:
 Use these projection layers when generating possible descendant + alignment,
   conditioned on an ancestor sequence
 
-full amino acid alphabet is 44 tokens:
-  - <pad>: 0
-  - <bos>: 1
-  - <eos>: 2
-  - 20 AAs + match: 3-22
-  - 20 AAs + insert: 23 - 42
-  - gap: 43
+(note: REMOVE <bos> token from output alphabet)
 
-
-full DNA alphabet would be 12 tokens:
+full amino acid alphabet is 43 tokens:
   - <pad>: 0
-  - <bos>: 1
-  - <eos>: 2
-  - 4 nucls + match: 3-6
-  - 4 nucls + insert: 7-10
-  - gap: 11
+  - <eos>: 1
+  - 20 AAs + match: 2-21
+  - 20 AAs + insert: 22 - 41
+  - gap: 42
+
+full DNA alphabet would be 11 tokens:
+  - <pad>: 0
+  - <eos>: 1
+  - 4 nucls + match: 2-5
+  - 4 nucls + insert: 6-0
+  - gap: 10 
 
   
 """
-# general python
 import logging
 from typing import Any, Callable, Sequence, Union, Tuple
 from dataclasses import field
+from functools import partial
 
-# jumping jax and leaping flax
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
 import optax
 
-from models.model_utils.BaseClasses import ModuleBase
+from models.BaseClasses import ModuleBase
+from models.neural_utils.postprocessing_models import (FeedforwardPostproc,
+                                                       SelectMask)
+from models.feedforward_predict.model_functions import confusion_matrix
 
 
 class FeedforwardPredict(ModuleBase):
@@ -52,328 +53,132 @@ class FeedforwardPredict(ModuleBase):
       > norm can be None (in which case, no normalization applied)
       > could have no blocks at all
     
-    then, ues final dense layer to project from last block's hidden dimension
+    then, use final dense layer to project from last block's hidden dimension
       to full_alphabet_size
     """
     config: dict
     name: str
     
     def setup(self):
-        ### unpack config
-        self.layer_sizes = self.config['layer_sizes']
-        self.normalize_inputs = self.config["normalize_inputs"]
-        self.dropout = self.config.get("dropout", 0.0)
+        # read config
+        self.postproc_model_type = self.config['postproc_model_type']
+        self.output_size = self.config['full_alphabet_size'] - 1 #remove <bos> from alphabet
+        self.use_bias = self.config.get('use_bias', True)
         
-        #!!! hardcode these options for now; change as desired
-        self.act_type = 'silu'
-        self.act= nn.silu
-        self.kernel_init = nn.initializers.lecun_normal()
-        self.use_bias = True
-
-        # need a different norm for every instance?
-        norm_lst = []
+        # setup up postprocessing layers
+        postproc_module_registry = {'selectmask': SelectMask,
+                                    'feedforward': FeedforwardPostproc,
+                                    None: lambda *args, **kwargs: lambda *args, **kwargs: None}
         
-        if self.normalize_inputs:
-            norm_lst.append( nn.LayerNorm(reduction_axes = -1, 
-                                               feature_axes = -1) )
-        else:
-            norm_lst.append( lambda x: x )
+        postproc_module = postproc_module_registry[transitions_postproc_model_type]
+        self.postproc = postproc_module( config = self.config,
+                                         name = f'{self.name}/{self.postproc_model_type}_postproc' )
         
-        additional_norms = len(self.layer_sizes[1:])
-        for i in range(additional_norms):
-            norm_lst.append( nn.LayerNorm(reduction_axes = -1, 
-                                               feature_axes = -1) )
-        self.norm_lst = norm_lst
-            
-        # DON'T generate <bos>
-        self.output_size = self.config.get("full_alphabet_size", 44) - 1
-            
+        # final projection to alignment-augmented alphabet
+        self.final_proj = nn.Dense(features = self.output_size, 
+                                  use_bias = use_bias, 
+                                  kernel_init = nn.initializers.lecun_normal(),
+                                  name=f'{self.name}/final projection')
+        
+        # cm function
+        self.parted_confusion_matrix = partial( confusion_matrix,
+                                                output_alph_with_pad = self.output_size )
+        
     @nn.compact
     def __call__(self, 
-                 datamat_lst, 
-                 padding_mask, 
+                 datamat_lst: list, 
+                 padding_mask: jnp.array, # (B, L)
                  training: bool, 
                  sow_intermediates: bool=False,
+                 *args,
                  **kwargs):
-        ### concatenate embeddings along last axis; order will be: 
-        ###   (anc_embs, desc_embs, previous alignment state)
-        ###   shape will be: ( B, length_for_scan, 2H (+6, if 
-        ###   providing previous state) )
-        datamat = jnp.concatenate(datamat_lst, axis=-1)
-            
-        ### mask out padding tokens before passing to any blocks
-        new_shape = (padding_mask.shape[0],
-                     padding_mask.shape[1],
-                     datamat.shape[2])
-        masking_mat = jnp.broadcast_to(padding_mask[...,None], new_shape)
-        del new_shape
+        # elements of datamat_lst are:
+        # anc_embeddings: (B, L, H)
+        # desc_embeddings: (B, L, H)
+        # prev_align_one_hot_vec: (B, L, 5)
+        datamat = self.postproc( datamat_lst = datamat_lst,
+                                 padding_mask = padding_mask,
+                                 training = training,
+                                 sow_intermediates = sow_intermediates ) #(B, L, H_out)
         
-        datamat = jnp.multiply(datamat, masking_mat)
-        
-        
-        ### initial norm
-        if self.normalize_inputs:
-            datamat = self.norm_lst[0](datamat,
-                                       mask = masking_mat)
-            datamat = jnp.where(masking_mat,
-                                datamat,
-                                0)
-            del masking_mat
-            
-            if sow_intermediates:
-                label = f'{self.name}/after initial norm'
-                self.sow_histograms_scalars(mat = datamat, 
-                                            label = label, 
-                                            which=['scalars'])
-                del label
-            
-        
-        ### first (dense -> relu -> dropout)
-        if len(self.layer_sizes) > 0:
-            # dense
-            datamat = nn.Dense(features = self.layer_sizes[0], 
-                         use_bias = self.use_bias, 
-                         kernel_init = self.kernel_init,
-                         name=f'{self.name}/feedforward layer 0')(datamat)
-            
-            # activation
-            datamat = self.act(datamat)
-            if sow_intermediates:
-                label = (f'{self.name}/'+
-                         f'feedforward layer 0/'+
-                         f'after {self.act_type}')
-                self.sow_histograms_scalars(mat = datamat, 
-                                            label = label, 
-                                            which=['scalars'])
-                del label
-            
-            # dropout
-            datamat = nn.Dropout(rate = self.dropout)(datamat,
-                                                deterministic = not training)
-            if sow_intermediates:
-                label = f'{self.name}/feedforward layer 0/after block'
-                self.sow_histograms_scalars(mat = datamat, 
-                                            label = label, 
-                                            which=['scalars'])
-                del label
-        
-        
-        ### subsequent layers leading up to final projection 
-        ###   (norm -> dense -> relu -> dropout)
-        for i, hid_dim in enumerate(self.layer_sizes[1:]):
-            layer_idx = i + 1
-            
-            new_shape = (padding_mask.shape[0],
-                         padding_mask.shape[1],
-                         datamat.shape[2])
-            masking_mat = jnp.broadcast_to(padding_mask[...,None], new_shape)
-            del new_shape
-            
-            # norm
-            datamat = self.norm_lst[layer_idx](datamat,
-                                               mask = masking_mat)
-            datamat = jnp.where(masking_mat,
-                                datamat,
-                                0)
-            del masking_mat
-            
-            if sow_intermediates:
-                label = (f'{self.name}/'+
-                         f'feedforward layer {layer_idx}/'+
-                         f'after norm')
-                self.sow_histograms_scalars(mat = datamat, 
-                                            label = label, 
-                                            which=['scalars'])
-                del label
-                
-            # dense
-            name = f'{self.name}/feedforward layer {layer_idx}'
-            datamat = nn.Dense(features = hid_dim, 
-                         use_bias = self.use_bias, 
-                         kernel_init = self.kernel_init,
-                         name=name)(datamat)
-            del name
-            
-            # activation
-            datamat = self.act(datamat)
-            
-            if sow_intermediates:
-                label = (f'{self.name}/'+
-                         f'feedforward layer {layer_idx}/'+
-                         f'after {self.act_type}')
-                self.sow_histograms_scalars(mat = datamat, 
-                                            label = label, 
-                                            which=['scalars'])
-                del label
-                
-            
-            # dropout
-            datamat = nn.Dropout(rate = self.dropout)(datamat,
-                                                deterministic = not training)
-            if sow_intermediates:
-                label = (f'{self.name}/'+
-                         f'feedforward layer {layer_idx}/'+
-                         f'after block')
-                self.sow_histograms_scalars(mat = datamat, 
-                                            label = label, 
-                                            which=['scalars'])
-                del label
-          
-            
-        ### final projection to probabilities
-        ###   ( B, length_for_scan, output_size)
-        final_logits = nn.Dense(features = self.output_size,
-                                use_bias = self.use_bias, 
-                                kernel_init = self.kernel_init,
-                                name='Project to Logits')(datamat)
+        # get final logits, mask, and return: (B, L, H_out) -> (B, L, A_aug - 1)
+        final_logits = self.final_proj(datamat) #(B, L, A_aug - 1)
+        expanded_mask = jnp.broadcast_to( padding_mask[...,None], final_logits.shape ) #(B, L, A_aug - 1)
+        final_logits = jnp.multiply( final_logits, expanded_mask ) #(B, L, A_aug - 1)
         
         return final_logits
     
 
-    def apply_ce_loss( self, 
-                       final_logits, 
-                       true_out,
-                       length_for_normalization,
-                       seq_padding_idx: int = 0 ):
+    def neg_loglike_in_scan_fn( self, 
+                                final_logits: jnp.array, # (B, L, A_aug - 1)
+                                padding_mask: jnp.array, # (B, L)
+                                true_out: jnp.array, # (B, L)
+                                return_result_before_sum: bool = False,
+                                *args,
+                                **kwargs ):
         """
-        Cross-entropy loss per position, using a chunk over alignment length
-        true_out is (B, L): the alignment-augmented descendant
-        
-        return sum(-logP)
+        Cross-entropy loss per position, along with collecting accuracy metrics
         """
-        ### make padding mask
-        output_padding_mask = jnp.where(true_out != seq_padding_idx,
-                                        True,
-                                        False)
+        ### loss
+        # subtract one from true_out (except for padding positions)
+        true_out = jnp.where( padding_mask,
+                              true_out-1,
+                              0 ) #(B, L)
+        
+        # logP(desc, align | anc) comes from -cross_ent()
+        logprob_perSamp_perPos = -optax.softmax_cross_entropy_with_integer_labels(logits = final_logits, 
+                                                                                  labels = true_out) # (B, L)
+        logprob_perSamp_perPos = jnp.multiply( logprob_perSamp_perPos, padding_mask ) #(B, L)
+        logprob_perSamp = logprob_perSamp_perPos.sum(axis=-1) #(B, L)
         
         
-        ### evaluate CrossEnt loss, using the implementation from optax
-        # (B, L, full_alphabet_size-1) -> (B, L)
-        # won't ever predict <bos>, hence minus one
-        CE_loss = optax.softmax_cross_entropy_with_integer_labels(logits = final_logits, 
-                                                                  labels = true_out)
+        ### accuracy
+        # get predicted outputs
+        pred_outputs = jnp.argmax(final_logits, axis=-1) #(B, L)
         
+        # accumulate matches
+        correct_predictions_perSamp = (pred_outputs == true_out) & (padding_mask) #(B, L)
+        correct_predictions_perSamp = correct_predictions_perSamp.sum(axis=-1) #(B)
+        valid_positions_perSamp = padding_mask.sum(axis=-1) #(B)
         
-        ### mask out the positions corresponding to padding characters; they
-        ###  shouldn't contribute to loss calculations
-        #  (B, L)
-        neg_logP_perSamp_perPos = jnp.multiply(CE_loss, output_padding_mask)
+        # accumulate confusion matrices
+        cm_perSamp = confusion_matrix( true_out, pred_outputs, padding_mask ) #(B, A)
         
-        ### get losses
-        # (B,)
-        sum_neg_logP = jnp.sum(neg_logP_perSamp_perPos, axis=1)
+        out_dict = {'logprob_perSamp': logprob_perSamp, #(B)
+                    'correct_predictions_perSamp': correct_predictions_perSamp,  #(B)
+                    'valid_positions_perSamp': valid_positions_perSamp, #(B)
+                    'cm_perSamp': cm_perSamp}  #(B, A_aug-1, A_aug-1)
         
-        # (B,)
-        neg_logP_length_normed = jnp.divide( sum_neg_logP, 
-                                             length_for_normalization )
+        if return_result_before_sum:
+            out_dict['logprob_perSamp_perPos'] = logprob_perSamp_perPos #(B, L)
         
-        # final loss is mean ( (1/L)(-logP) ); one vaue
-        loss = jnp.mean(neg_logP_length_normed)
-        
-        # auxilary dictionary to output
-        loss_intermediates = {'neg_logP_perSamp_perPos':neg_logP_perSamp_perPos,
-                              'sum_neg_logP': sum_neg_logP,
-                              'neg_logP_length_normed': neg_logP_length_normed}
-        
-        return loss, loss_intermediates
-        
-        
-    def compile_metrics(self, 
-                        true_out, 
-                        final_logits,
-                        loss,
-                        neg_logP_length_normed,
-                        seq_padding_idx = 0,
-                        out_alph_size_with_pad = 43):
-        """
-        metrics include:
-            - accuracy + confusion matrix
-            - perplexity
-            - exponentiated cross entropy
-        
-        (though, technically accuracy and confusion matrix don't
-           make a lot of sense for this problem? Ian didn't like it,
-           but keep it anyways)
-        
-        this is now done OUTSIDE jax.value_and_grad call, but is still 
-          jit-compiled
-        """
-        ##################
-        ### adjust sizes #
-        ##################
-        ### pred_outputs will be (B, chunk_len)
-        pred_outputs = jnp.argmax(nn.softmax(final_logits,-1), -1)
-        pred_outputs = loss_fn_dict['pred_outputs']
-        
-        # make this compatible even if you're not scanning
-        if len(pred_outputs.shape) == 3:
-            # need to transpose and reshape to (B, L) (not ideal because big 
-            #   intermediates, but worry about this later)
-            num_scan_iters, batch_size, chunk_len = pred_outputs.shape
-            seq_len = num_scan_iters * chunk_len
-            
-            # (B, num_scan_iters, chunk_len)
-            pred_outputs = jnp.transpose(pred_outputs, (1,0,2))
-            pred_outputs = jnp.reshape(pred_outputs, (batch_size, seq_len))
-        
-        
-        ####################
-        ### accuracy block #
-        ####################
-        # (B,)
-        matches_per_samp = jnp.sum( jnp.where( (pred_outputs == true_out) & 
-                                                (true_out != seq_padding_idx),
-                                              True,
-                                              False
-                                              ),
-                                    axis = 1)
-        
-        # regardless of how you choose to normalize inputs, accuracy needs
-        #   to be divided by alignment length
-        align_lens = jnp.where(true_out != seq_padding_idx,
-                               1,
-                               0).sum(axis=1)
-        
-        acc_perSamp = jnp.divide( matches_per_samp, align_lens ) #(B,)
-        
-        
-        ### confusion matrix
-        def confusion_matrix(true_idx, 
-                             pred_idx):
-            # true at dim0, pred at dim1
-            cm = jnp.zeros( (out_alph_size_with_pad, out_alph_size_with_pad) )
-            indices = (true_idx, pred_idx)
-            cm = cm.at[indices].add(1)
-    
-            # don't return padding row/col
-            return cm[1:, 1:]
-            
-        # vmap this over the batch
-        vmapped_fn = jax.vmap(confusion_matrix,
-                              in_axes = (0, 0))
-        
-        cm_perSamp = vmapped_fn(true_out, 
-                                pred_outputs)
-        
-        
-        ########################
-        ### Perplexity and ECE #
-        ########################
-        # perplexity per sample
-        neg_logP_length_normed = loss_fn_dict['neg_logP_length_normed']
-        perplexity_perSamp = jnp.exp(neg_logP_length_normed) #(B,)
-        
-        # exponentiated cross entropy
-        ece = jnp.exp(loss)
-        
-        
-        ########################
-        ### Return all metrics #
-        ########################
-        out_dict = {'perplexity_perSamp': perplexity_perSamp,
-                    'ece': ece,
-                    'acc_perSamp': acc_perSamp,
-                    'cm_perSamp': cm_perSamp}
         return out_dict
     
+    def evaluate_loss_after_scan(self, 
+                                 scan_dict, # dictionary
+                                 length_for_normalization_for_reporting, #(B, )
+                                 *args,
+                                 **kwargs):
+        # loss
+        logprob_perSamp = scan_dict['logprob_perSamp'] #(B,)
+        loss = -jnp.mean(logprob_perSamp) # one float value
+        
+        # accuracy
+        correct_predictions_perSamp = scan_dict['correct_predictions_perSamp'] #(B,)
+        valid_positions_perSamp = scan_dict['valid_positions_perSamp'] #(B,)
+        acc_perSamp = correct_predictions_perSamp / valid_positions_perSamp #(B,)
+        
+        # outputs
+        # don't keep correct_predictions_perSamp or valid_positions_perSamp
+        intermediate_vals = { 'sum_neg_logP': -logprob_perSamp,
+                              'neg_logP_length_normed': -logprob_perSamp/length_for_normalization_for_reporting,
+                              'acc_perSamp': acc_perSamp,
+                              'cm_perSamp': scan_dict['cm_perSamp'] }
+        
+        return loss, intermediate_vals
     
+    def get_perplexity_per_sample(self,
+                                  loss_fn_dict):
+        neg_logP_length_normed = loss_fn_dict['neg_logP_length_normed']
+        perplexity_perSamp = jnp.exp(neg_logP_length_normed) #(B,)
+        return perplexity_perSamp
