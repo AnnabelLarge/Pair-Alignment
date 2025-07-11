@@ -21,8 +21,13 @@ def fill_with_default_values(args):
     if 'update_grads' not in provided_args:
         args.update_grads = True
     
+    # two possible names for this oops
+    if 'gap_idx' not in provided_args:
+        args.gap_idx = 43
+        
     if 'gap_tok' not in provided_args:
-        args.gap_tok = 43
+        args.gap_tok = args.gap_idx
+        
     
     ### extra defaults
     if args.pred_model_type == 'feedforward':

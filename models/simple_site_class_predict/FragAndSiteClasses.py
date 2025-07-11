@@ -607,7 +607,7 @@ class FragAndSiteClasses(ModuleBase):
         # Probability of each site class; is one, if no site clases
         log_class_probs = self.site_class_probability_module( sow_intermediates = sow_intermediates ) #(C,)
         
-        # generate log prob of site classes
+        # generate log prob of each rate
         
         
         ######################################################
