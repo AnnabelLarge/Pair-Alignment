@@ -533,7 +533,8 @@ def train_neural_hmm(args, dataloader_dict: dict):
             # save models to regular python pickles too (in case training is 
             #   interrupted)
             for i in range(3):
-                with open(f'BEST_{all_save_model_filenames[i]}', 'wb') as g:
+                out_file = all_save_model_filenames[i].replace('.pkl','_BEST.pkl')
+                with open(out_file, 'wb') as g:
                     model_state_dict = flax.serialization.to_state_dict(all_trainstates[i])
                     pickle.dump(model_state_dict, g)
                     
