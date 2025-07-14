@@ -317,14 +317,12 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
             del weight
             
             # record metrics
-            interm_rec = batch_epoch_idx % args.histogram_output_freq == 0
-            final_rec = (batch_idx == len(training_dl)) & (epoch_idx == args.num_epochs)
             write_optional_outputs_during_training_hmms(writer_obj = writer, 
                                                     pairhmm_trainstate = pairhmm_trainstate,
                                                     global_step = batch_epoch_idx, 
                                                     dict_of_values = train_metrics, 
                                                     interms_for_tboard = args.interms_for_tboard, 
-                                                    write_histograms_flag = interm_rec or final_rec)
+                                                    write_histograms_flag = False)
             
         
 #__4___8: epoch level (two tabs)

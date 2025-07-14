@@ -398,16 +398,12 @@ def train_neural_hmm(args, dataloader_dict: dict):
             ave_epoch_train_perpl += train_metrics['batch_ave_perpl'] * weight
             del weight
             
-            # record metrics
-            interm_rec = batch_epoch_idx % args.histogram_output_freq == 0
-            final_rec = (batch_idx == len(training_dl)) & (epoch_idx == args.num_epochs)
-            
             write_optional_outputs_during_training(writer_obj = writer, 
                                                     all_trainstates = all_trainstates,
                                                     global_step = batch_epoch_idx, 
                                                     dict_of_values = train_metrics, 
                                                     interms_for_tboard = args.interms_for_tboard, 
-                                                    write_histograms_flag = interm_rec or final_rec)
+                                                    write_histograms_flag = False)
             
 #__4___8: epoch level (two tabs)
         ### manage timing
@@ -537,7 +533,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
             # save models to regular python pickles too (in case training is 
             #   interrupted)
             for i in range(3):
-                with open(f'{all_save_model_filenames[i]}', 'wb') as g:
+                with open(f'BEST_{all_save_model_filenames[i]}', 'wb') as g:
                     model_state_dict = flax.serialization.to_state_dict(all_trainstates[i])
                     pickle.dump(model_state_dict, g)
                     

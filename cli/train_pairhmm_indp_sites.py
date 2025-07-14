@@ -294,16 +294,13 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
                                    out_file = 'TRAIN_tkf_approx.tsv',
                                    subline = subline )
                         
-            ### record metrics to tensorboard
-            interm_rec = batch_epoch_idx % args.histogram_output_freq == 0
-            final_rec = (batch_idx == len(training_dl)) & (epoch_idx == args.num_epochs)
-            
+            # record metrics to tensorboard
             write_optional_outputs_during_training_hmms( writer_obj = writer, 
                                                     pairhmm_trainstate = pairhmm_trainstate,
                                                     global_step = batch_epoch_idx, 
                                                     dict_of_values = train_metrics, 
                                                     interms_for_tboard = args.interms_for_tboard, 
-                                                    write_histograms_flag = interm_rec or final_rec )
+                                                    write_histograms_flag = False )
             
             
 #__4___8__12: batch level (three tabs)
