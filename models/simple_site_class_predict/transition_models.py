@@ -5,16 +5,21 @@ Created on Sat Oct  5 14:42:28 2024
 
 @author: annabel
 
-modules used for training:
-==========================
-  GeomLenTransitionLogprobs
-  GeomLenTransitionLogprobsFromFile
 
- 'TKF91TransitionLogprobs',
- 'TKF91TransitionLogprobsFromFile',
- 
- 'TKF92TransitionLogprobs',
- 'TKF92TransitionLogprobsFromFile',
+modules:
+=========
+
+originals:
+------------
+'GeomLenTransitionLogprobs',
+'TKF91TransitionLogprobs',
+'TKF92TransitionLogprobs',
+
+loading from files:
+--------------------
+'GeomLenTransitionLogprobsFromFile',
+'TKF91TransitionLogprobsFromFile',
+'TKF92TransitionLogprobsFromFile',
 
 """
 # jumping jax and leaping flax
@@ -33,9 +38,9 @@ from models.simple_site_class_predict.model_functions import (bound_sigmoid,
                                                               switch_tkf,
                                                               regular_tkf,
                                                               approx_tkf,                                                              
-                                                              MargTKF91TransitionLogprobs,
-                                                              MargTKF92TransitionLogprobs,
-                                                              CondTransitionLogprobs)
+                                                              get_tkf91_single_seq_marginal_transition_logprobs,
+                                                              get_tkf92_single_seq_marginal_transition_logprobs,
+                                                              get_cond_transition_logprobs)
 
 ###############################################################################
 ### Geometric sequence length (no indels)   ###################################
@@ -525,10 +530,10 @@ class TKF91TransitionLogprobs(ModuleBase):
         
         """
         # output is: (4, 4)
-        marginal_matrix = MargTKF91TransitionLogprobs(offset=offset)
+        marginal_matrix = get_tkf91_single_seq_marginal_transition_logprobs(offset=offset)
         
         # output is same as joint: (T, 4, 4)
-        cond_matrix = CondTransitionLogprobs(marg_matrix=marginal_matrix, 
+        cond_matrix = get_cond_transition_logprobs(marg_matrix=marginal_matrix, 
                                              joint_matrix=joint_matrix)
         
         return {'joint': joint_matrix,
@@ -1052,12 +1057,12 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         
         """
         # output is: (C, C, 4, 4)
-        marginal_matrix = MargTKF92TransitionLogprobs(offset=offset,
+        marginal_matrix = get_tkf92_single_seq_marginal_transition_logprobs(offset=offset,
                                                       class_probs=class_probs,
                                                       r_ext_prob=r_ext_prob)
         
         # output is: (T, C, C, 4, 4)
-        cond_matrix = CondTransitionLogprobs(marg_matrix=marginal_matrix, 
+        cond_matrix = get_cond_transition_logprobs(marg_matrix=marginal_matrix, 
                                              joint_matrix=joint_matrix)
         
         return {'joint': joint_matrix,

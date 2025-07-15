@@ -21,12 +21,12 @@ from models.BaseClasses import ModuleBase
 from models.simple_site_class_predict.emission_models import (EqulDistLogprobsFromCounts,
                                                               EqulDistLogprobsPerClass,
                                                               EqulDistLogprobsFromFile,
-                                                              GTRRateMat,
-                                                              GTRRateMatFromFile,
+                                                              GTRLogprobs,
+                                                              GTRLogprobsFromFile,
                                                               SiteClassLogprobs,
                                                               SiteClassLogprobsFromFile,
-                                                              HKY85RateMat,
-                                                              HKY85RateMatFromFile,
+                                                              HKY85Logprobs,
+                                                              HKY85LogprobsFromFile,
                                                               F81Logprobs,
                                                               F81LogprobsFromFile)
 from models.simple_site_class_predict.transition_models import (TKF91TransitionLogprobs,
@@ -37,13 +37,10 @@ from models.simple_site_class_predict.transition_models import (TKF91TransitionL
                                                                 GeomLenTransitionLogprobsFromFile)
 from models.simple_site_class_predict.model_functions import (bound_sigmoid,
                                                               safe_log,
-                                                              scale_rate_multipliers,
-                                                              get_cond_logprob_emit_at_match_per_class,
-                                                              get_joint_logprob_emit_at_match_per_class,
-                                                              lse_over_match_logprobs_per_class,
-                                                              lse_over_equl_logprobs_per_class,
+                                                              joint_logprob_emit_at_match_per_mixture,
+                                                              lse_over_match_logprobs_per_mixture,
+                                                              lse_over_equl_logprobs_per_mixture,
                                                               joint_prob_from_counts,
-                                                              # cond_prob_from_counts,
                                                               anc_marginal_probs_from_counts,
                                                               desc_marginal_probs_from_counts)
 
@@ -62,14 +59,19 @@ class IndpSites(ModuleBase):
         config['num_mixtures'] :  int
             number of emission site classes
         
+        config['indp_rate_mults'] :  bool
+            if true, then rate multipliers are independent from latent
+            site classes; P(k|c) = P(k) and \rho_{c,k} = \rho{k}
+        
         config['subst_model_type'] : {gtr, hky85, f81}
             which substitution model
         
         config['indel_model_type'] : {tkf91, tkf92, None}
             which indel model, if any
             
-        config['norm_loss_by'] :  {desc_len, align_len}, optional
-            what length to normalize loglikelihood by
+        config['norm_reported_loss_by'] :  {desc_len, align_len}, optional
+            what length to normalize loglikelihood by, when reporting values
+            this does NOT affect the objective function!!!
             Default is 'desc_len'
         
         config['exponential_dist_param'] : int, optional
@@ -113,53 +115,63 @@ class IndpSites(ModuleBase):
         ### read config   #
         ###################
         # required
+        num_mixtures = self.config['num_mixtures']
+        self.indp_rate_mults = self.config['indp_rate_mults']
         self.subst_model_type = self.config['subst_model_type'].lower()
         indel_model_type = self.config['indel_model_type']
         self.indel_model_type = indel_model_type.lower() if indel_model_type is not None else None
-        
         self.times_from = self.config['times_from'].lower()
-        num_mixtures = self.config['num_mixtures']
         
         # optional
-        self.norm_loss_by = self.config.get('norm_loss_by', 'desc_len') # this is for reporting
-        self.norm_loss_by_length = self.config.get('norm_loss_by_length', False) # this is the objective during training
+        self.norm_reported_loss_by = self.config.get('norm_reported_loss_by', 'desc_len')
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
+        
+        ###############################################################
+        ### modules for probability of being in latent site classes,  #
+        ### probability of having a particular subsitution rate       #
+        ### rate multiplier, and the rate multipliers themselves      #
+        ###############################################################
+        # Latent site class probabilities
+        self.site_class_probability_module = SiteClassLogprobs(config = self.config,
+                                                  name = f'get site class probabilities')
+        
+        # substitution rate multipliers
+        if not self.indp_rate_mults:
+            self.rate_mult_module = RateMultipliersPerClass(config = self.config,
+                                                      name = f'get rate multipliers')
+        
+        elif self.indp_rate_mults:
+            self.rate_mult_module = IndpRateMultipliers(config = self.config,
+                                                      name = f'get rate multipliers')
         
         
         ###########################################
         ### module for equilibrium distribution   #
         ###########################################
         if num_mixtures == 1:
-            self.indel_prob_module = EqulDistLogprobsFromCounts(config = self.config,
+            self.equl_dist_module = EqulDistLogprobsFromCounts(config = self.config,
                                                        name = f'get equilibrium')
         elif num_mixtures > 1:
-            self.indel_prob_module = EqulDistLogprobsPerClass(config = self.config,
+            self.equl_dist_module = EqulDistLogprobsPerClass(config = self.config,
                                                      name = f'get equilibrium')
         
         
-        ######################################################################
-        ### module for substitution rate matrix, or just the logprob subst   #
-        ######################################################################
+        ################################
+        ### module for logprob subst   #
+        ################################
         if self.subst_model_type == 'gtr':
-            self.rate_matrix_module = GTRRateMat( config = self.config,
-                                                  name = f'get rate matrix' )
+            self.logprob_subst_module = GTRLogprobs( config = self.config,
+                                                  name = f'gtr subst. model' )
             
-        elif self.subst_model_type == 'hky85':
-            self.rate_matrix_module = HKY85RateMat( config = self.config,
-                                                    name = f'get rate matrix' )
-        
-        # this is slightly different; it returns the conditional log-probability
-        #   matrix directly
         elif self.subst_model_type == 'f81':
-            self.cond_logprob_match_module = F81Logprobs( config = self.config,
-                                                          name = f'get cond logprob' )
-        
-        
-        ##############################################################
-        ### module for probability of being in latent site classes   #
-        ##############################################################
-        self.site_class_probability_module = SiteClassLogprobs(config = self.config,
-                                                  name = f'get site class probabilities')
+            self.logprob_subst_module = F81Logprobs( config = self.config,
+                                                     name = f'f81 subst. model' )
+
+        elif self.subst_model_type == 'hky85':
+            self.logprob_subst_module = HKY85Logprobs( config = self.config,
+                                                    name = f'hky85 subst. model' )
+            # this only works with DNA
+            assert self.config['emission_alphabet_size'] == 4
         
         
         ###########################################
@@ -192,7 +204,7 @@ class IndpSites(ModuleBase):
             - aux_dict: has the following keys and values
               1.) 'joint_neg_logP': sum down the length
               2.) 'joint_neg_logP_length_normed': sum down the length,  
-                  normalized by desired length (set by self.norm_loss_by)
+                  normalized by desired length (set by self.norm_reported_loss_by)
               3.) whether or not you used approximation formula for TKF indel model
         """
         # which times to use for scoring matrices
@@ -214,20 +226,15 @@ class IndpSites(ModuleBase):
                                            scoring_matrices_dict = scoring_matrices_dict,
                                            t_array = t_array,
                                            exponential_dist_param = self.exponential_dist_param,
-                                           norm_loss_by = self.norm_loss_by )
+                                           norm_reported_loss_by = self.norm_reported_loss_by,
+                                           return_intermeds = False )
         aux_dict['used_approx'] = scoring_matrices_dict['used_approx']
-        
 
         # if doing stochastic gradient descent, take the average over the batch
         # if doing gradient descent with whole dataset, only use the sum
         reduction = jnp.mean if not whole_dset_grad_desc else jnp.sum
-
-        if self.norm_loss_by_length:
-            loss = reduction( aux_dict['joint_neg_logP_length_normed'] )
+        loss = reduction( aux_dict['joint_neg_logP'] )
         
-        elif not self.norm_loss_by_length:
-            loss = reduction( aux_dict['joint_neg_logP'] )
-            
         return loss, aux_dict
     
     
@@ -275,7 +282,7 @@ class IndpSites(ModuleBase):
                                            scoring_matrices_dict = scoring_matrices_dict,
                                            t_array = t_array,
                                            exponential_dist_param = self.exponential_dist_param,
-                                           norm_loss_by = self.norm_loss_by,
+                                           norm_reported_loss_by = self.norm_reported_loss_by,
                                            return_intermeds=return_intermeds )
         aux_dict['used_approx'] = scoring_matrices_dict['used_approx']
         
@@ -322,8 +329,8 @@ class IndpSites(ModuleBase):
         #                                 scoring_matrices_dict = scoring_matrices_dict,
         #                                 t_array = t_array,
         #                                 exponential_dist_param = self.exponential_dist_param,
-        #                                 norm_loss_by = self.norm_loss_by,
-        #                                 return_intermeds=return_intermeds )
+        #                                 norm_reported_loss_by = self.norm_reported_loss_by,
+        #                                 return_intermeds=False )
         # aux_dict = {**aux_dict, **to_add}
         return aux_dict
         
@@ -334,70 +341,50 @@ class IndpSites(ModuleBase):
         # Probability of each site class; is one, if no site clases
         log_class_probs = self.site_class_probability_module(sow_intermediates = sow_intermediates) #(C,)
         
+        # Substitution rate multipliers
+        # both are (C, K)
+        log_rate_mult_probs, rate_multipliers = self.rate_mult_module(sow_intermediates = sow_intermediates,
+                                                                      log_class_probs = log_class_probs) 
+        
         
         ######################################################
         ### build log-transformed equilibrium distribution   #
         ### use this to score emissions from indels sites    #
         ######################################################
-        log_equl_dist_per_class = self.indel_prob_module(sow_intermediates = sow_intermediates) # (C, A)
-        logprob_emit_at_indel = lse_over_equl_logprobs_per_class( log_class_probs = log_class_probs,
-                                                                  log_equl_dist_per_class = log_equl_dist_per_class) #(A,)
+        log_equl_dist_per_mixture = self.equl_dist_module(sow_intermediates = sow_intermediates) # (C, A)
+        
+        # P(x) = \sum_c P(c) * P(x|c)
+        logprob_emit_at_indel = lse_over_equl_logprobs_per_mixture( log_class_probs = log_class_probs,
+                                                                    log_equl_dist_per_mixture = log_equl_dist_per_mixture) #(A,)
         
         
         ####################################################
         ### build substitution log-probability matrix      #
         ### use this to score emissions from match sites   #
         ####################################################
-        # to get joint logprob:
-        # 1.) generate (C, K) different rate multipliers
-        # 2.) using all these rate multipliers, get (C, K, A, A) different 
-        #     rate matrices
-        # 3.) multiply be time, matrix exponential, then multiply by P(anc) 
-        #     to get P(x,y|c,k,t), a (T, C, K, A, A) matrix of substitution 
-        #     probabilities at every time, site class, and rate class
-        # 4.) generate P(k|c) matrix (C, K)
-        # 5.) multiply by raw P(x,y|c,k,t) rate matrices (T, )
-        # 6.) sum_k P(k|c) P(x,y|c,k,t) = P(x,y|c,t); this is now ready to be
-        #     multiplied by sites class P(c); continue with marginalizing over
-        #     site classes as usual
+        # cond_logprobs_per_mixture is (T, C, K, A, A) or (B, C, K, A, A)
+        # subst_module_intermeds is a dictionary of intermediates
+        out = self.logprob_subst_module( logprob_equl = log_equl_dist_per_mixture,
+                                         rate_multipliers = rate_multipliers,
+                                         t_array = t_array,
+                                         sow_intermediates = sow_intermediates,
+                                         return_cond = True,
+                                         return_intermeds = True )        
+        cond_subst_logprobs_per_mixture, subst_module_intermeds = out
+        del out
         
-        if self.subst_model_type in ['gtr', 'hky85']:
-            # rho * Q
-            # change rate_matrix_module class
-            scaled_rate_mat_per_class = self.rate_matrix_module(logprob_equl = log_equl_dist_per_class,
-                                                                log_class_probs = log_class_probs,
-                                                                sow_intermediates = sow_intermediates) #(C, A, A)
-            
-            # conditional probability
-            # cond_logprob_emit_at_match_per_class is (T, C, A, A)
-            # to_expm is (T, C, A, A)
-            out = get_cond_logprob_emit_at_match_per_class(t_array = t_array,
-                                                            scaled_rate_mat_per_class = scaled_rate_mat_per_class)
-            cond_logprob_emit_at_match_per_class, to_expm = out 
-            del out
+        # get the joint probability
+        joint_subst_logprobs_per_mixture = joint_logprob_emit_at_match_per_mixture( cond_logprob_emit_at_match_per_mixture = cond_logprobs_per_mixture,
+                                                                              log_equl_dist_per_mixture = log_equl_dist_per_mixture ) # (T, C, K, A, A) or (B, C, K, A, A)
         
-        elif self.subst_model_type == 'f81':
-            # cond_logprob_emit_at_match_per_class is (T, C, A, A)
-            # to_exp is None
-            # scaled_rate_mat_per_class is None
-            cond_logprob_emit_at_match_per_class = self.cond_logprob_match_module( logprob_equl = log_equl_dist_per_class,
-                                                                                   log_class_probs = log_class_probs,
-                                                                                   t_array = t_array,
-                                                                                   return_cond = True,
-                                                                                   sow_intermediates = sow_intermediates
-                                                                                   )
-            to_expm = None
-            scaled_rate_mat_per_class = None
-              
-        # joint probability
-        joint_logprob_emit_at_match_per_class = get_joint_logprob_emit_at_match_per_class( cond_logprob_emit_at_match_per_class = cond_logprob_emit_at_match_per_class,
-                                                                        log_equl_dist_per_class = log_equl_dist_per_class) #(T, C, A, A)
         
-        # add extra step to marginalize over k classes, where appropriate
-        joint_logprob_emit_at_match = lse_over_match_logprobs_per_class(log_class_probs = log_class_probs,
-                                               joint_logprob_emit_at_match_per_class = joint_logprob_emit_at_match_per_class) #(T, A, A)
-        cond_logprob_emit_at_match = lse_over_match_logprobs_per_class(log_class_probs = log_class_probs,
-                                               joint_logprob_emit_at_match_per_class = cond_logprob_emit_at_match_per_class) #(T, A, A)
+        # marginalize over c classes and k possible rate multipliers
+        joint_logprob_emit_at_match = lse_over_match_logprobs_per_mixture(log_class_probs = log_class_probs,
+                                                                          log_rate_mult_probs = log_rate_mult_probs,
+                                                                          logprob_emit_at_match_per_mixture = joint_subst_logprobs_per_mixture) #(T, A, A) or (B, A, A)
+        cond_logprob_emit_at_match = lse_over_match_logprobs_per_mixture(log_class_probs = log_class_probs,
+                                                                         log_rate_mult_probs = log_rate_mult_probs,
+                                                                         logprob_emit_at_match_per_mixture = cond_subst_logprobs_per_mixture) #(T, A, A) or (B, A, A)
         
         
         ####################################################
@@ -435,8 +422,8 @@ class IndpSites(ModuleBase):
         out_dict = {'logprob_emit_at_indel': logprob_emit_at_indel, #(A,)
                     'joint_logprob_emit_at_match': joint_logprob_emit_at_match, #(T,A,A)
                     'all_transit_matrices': all_transit_matrices, #dict
-                    'rate_mat_times_rho': scaled_rate_mat_per_class, #(C,A,A) or None
-                    'to_expm': to_expm, #(T,C,A,A) or None
+                    'rate_matrix': subst_module_intermeds.get('rate_matrix',None), #(C,A,A) or None
+                    'exchangeabilities': subst_module_intermeds.get('exchangeabilities',None), #(A,A) or None
                     'cond_logprob_emit_at_match': cond_logprob_emit_at_match, #(T,A,A)
                     'used_approx': used_approx} #dict
         
@@ -448,18 +435,13 @@ class IndpSites(ModuleBase):
                      out_folder: str,
                      prefix: str,
                      write_time_static_objs: bool):
-        ### declare which module you used for substitution model 
-        if self.subst_model_type in ['gtr', 'hky85']:
-            module_name = self.rate_matrix_module
-        
-        elif self.subst_model_type == 'f81':
-            module_name = self.cond_logprob_match_module
-        
-        
+        #########################################################
+        ### only write once: activations_times_used text file   #
+        #########################################################
         if write_time_static_objs:
-            with open(f'{out_folder}/activations_and_times_used.tsv','w') as g:
+            with open(f'{out_folder}/activations_times_used.tsv','w') as g:
                 act = module_name.rate_mult_activation
-                g.write(f'activation for rate multipliers: {act}\n')
+                g.write(f'activation for rate multipliers: bound_sigmoid\n')
                 g.write(f'activation for exchangeabiliites: bound_sigmoid\n')
                 
                 if self.times_from in ['geometric','t_array_from_file']:
@@ -472,139 +454,160 @@ class IndpSites(ModuleBase):
                     g.write(f'{t_array}')
                     g.write('\n')
         
-        #####################
-        ### Full matrices   #
-        #####################
-        out = self._get_scoring_matrices(t_array=t_array,
-                                        sow_intermediates=False)
         
-        # final conditional and joint prob of match (after LSE over classes)
+        ###################################
+        ### always write: Full matrices   #
+        ###################################
+        out = self._get_scoring_matrices(t_array=t_array,
+                                         sow_intermediates=False)
+        
         for loss_type in ['joint', 'cond']:
-            mat = np.exp(out[f'{loss_type}_logprob_emit_at_match'])
+            # final conditional and joint prob of match (after LSE over classes)
+            mat = np.exp (out[f'{loss_type}_logprob_emit_at_match'] ) #(T, A, A)
             new_key = f'{loss_type}_logprob_emit_at_match'.replace('logprob','prob')
             
-            with open(f'{out_folder}/{prefix}_{new_key}.npy', 'wb') as g:
-                np.save(g, mat)
+            with open(f'{out_folder}/PARAMS-MAT_{prefix}_{new_key}.npy', 'wb') as g:
+                np.save( g, mat )
             
-            mat = np.squeeze(mat)
+            # if only one timepoint, then also write to flat text file
+            mat = jnp.squeeze(mat)
             if len(mat.shape) <= 2:
-                np.savetxt( f'{out_folder}/{prefix}_ASCII_{new_key}.tsv', 
+                np.savetxt( f'{out_folder}/ASCII_{prefix}_{new_key}.tsv', 
                             np.array(mat), 
-                            fmt = '%.4f',
+                            fmt = '%.8f',
                             delimiter= '\t' )
             
             del new_key, mat, g
     
-        # joint transition matrix
-        if self.indel_model_type is not None:
-            mat = np.exp(out['all_transit_matrices']['joint'])
-            
-            with open(f'{out_folder}/{prefix}_joint_prob_transit_matrix.npy', 'wb') as g:
-                np.save(g, mat)
-            
-            mat = np.squeeze(mat)
-            if len(mat.shape) <= 2:
-                np.savetxt( f'{out_folder}/{prefix}_ASCII_joint_prob_transit_matrix.tsv', 
-                            np.array(mat), 
-                            fmt = '%.4f',
-                            delimiter= '\t' )
-            
-            del mat, g
+            # transition matrix
+            if self.indel_model_type is not None:
+                mat = np.exp(out['all_transit_matrices'][loss_type]) #(T, A, A)
+                
+                with open(f'{out_folder}/PARAMS-MAT_{prefix}_{loss_type}_prob_transit_matrix.npy', 'wb') as g:
+                    np.save(g, mat)
+                
+                # if only one timepoint, then also write to flat text file
+                mat = jnp.squeeze(mat)
+                if len(mat.shape) <= 2:
+                    np.savetxt( f'{out_folder}/ASCII_{prefix}_{loss_type}_prob_transit_matrix.tsv', 
+                                np.array(mat), 
+                                fmt = '%.8f',
+                                delimiter= '\t' )
+                
+                del mat, g
         
         
-        ### these do not; only write once 
+        #####################################################################
+        ### only write once: parameters, things that don't depend on time   #
+        #####################################################################
         if write_time_static_objs:
-            # equilibrium distribution 
-            mat = np.exp(out['logprob_emit_at_indel'])
+            ### logprob_emit_at_indel (AFTER marginalizing over classes)
+            mat = np.exp( out['logprob_emit_at_indel'] ) #(A,)
             new_key = 'logprob_emit_at_indel'.replace('logprob','prob')
             
-            with open(f'{out_folder}/{prefix}_{new_key}.npy', 'wb') as g:
+            with open(f'{out_folder}/PARAMS-MAT_{prefix}_{new_key}.npy', 'wb') as g:
                 np.save(g, mat)
             
-            mat = np.squeeze(mat)
-            np.savetxt( f'{out_folder}/{prefix}_ASCII_{new_key}.tsv', 
-                        mat, 
-                        fmt = '%.4f',
+            np.savetxt( f'{out_folder}/ASCII_{prefix}_{new_key}.tsv', 
+                        np.squeeze(mat), 
+                        fmt = '%.8f',
                         delimiter= '\t' )
                 
             del new_key, mat, g
         
-            # emission from match sites
-            # rho * Q
-            scaled_rate_mat_per_class = out['rate_mat_times_rho']
-            if scaled_rate_mat_per_class is not None:
-                for c in range(scaled_rate_mat_per_class.shape[0]):
-                    mat_to_save = scaled_rate_mat_per_class[c,...]
+        
+            ### substitution rate matrix
+            rate_matrix = out['rate_matrix'] #(C, A, A) or None
+            if rate_matrix is not None:
+                for c in range(rate_matrix.shape[0]):
+                    mat_to_save = rate_matrix[c,...]
                     
-                    with open(f'{out_folder}/{prefix}_class-{c}_rate_matrix_times_rho.npy', 'wb') as g:
+                    with open(f'{out_folder}/PARAMS-MAT_{prefix}_class-{c}_rate_matrix.npy', 'wb') as g:
                         np.save(g, mat_to_save)
                     
-                    np.savetxt( f'{out_folder}/{prefix}_ASCII_class-{c}_rate_matrix_times_rho.tsv', 
+                    np.savetxt( f'{out_folder}/ASCII_{prefix}_class-{c}_rate_matrix.tsv', 
                                 np.array(mat_to_save), 
-                                fmt = '%.4f',
+                                fmt = '%.8f',
                                 delimiter= '\t' )
                     
                     del mat_to_save, g
         
         
-            ###################################################
-            ### extract emissions paramaters, intermediates   # 
-            ### needed for final scoring matrices             #
-            ###################################################
-            ### site class probs
-            if 'class_logits' in dir(self.site_class_probability_module):
-                class_probs = nn.softmax(self.site_class_probability_module.class_logits)
-                with open(f'{out_folder}/PARAMS_class_probs.txt','w') as g:
+            ### site class probs (if num_mixtures > 1)
+            if self.config['num_mixtures'] > 1:
+                class_probs = nn.softmax(self.site_class_probability_module.class_logits) #(C,)
+                
+                with open(f'{out_folder}/PARAMS-MAT_class_probs.npy', 'wb') as g:
+                    np.save(g, class_probs)
+                
+                with open(f'{out_folder}/ASCII_class_probs.txt','w') as g:
                     [g.write(f'{elem.item()}\n') for elem in class_probs]
             
             
-            ### exchangeabilities, if gtr or hky85
-            if self.subst_model_type in ['gtr', 'hky85']:
-                if 'exchangeabilities_logits_vec' in dir(module_name):
-                    exch_logits = module_name.exchangeabilities_logits_vec
-                    exchangeabilities = module_name.exchange_activation( exch_logits )
-                    
-                    if self.subst_model_type == 'gtr':
-                        np.savetxt( f'{out_folder}/PARAMS_exchangeabilities.tsv', 
-                                    np.array(exchangeabilities), 
-                                    fmt = '%.4f',
-                                    delimiter= '\t' )
-                        
-                        with open(f'{out_folder}/PARAMS_exchangeabilities.npy','wb') as g:
-                            jnp.save(g, exchangeabilities)
-                    
-                    elif self.subst_model_type == 'hky85':
-                        with open(f'{out_folder}/PARAMS_HKY85RateMat_model.txt','w') as g:
-                            g.write(f'transition rate, ti: {exchangeabilities[1]}\n')
-                            g.write(f'transition rate, tv: {exchangeabilities[0]}')
-                    
-            ### rate multipliers
-            if 'rate_mult_logits' in dir(module_name):
-                norm_rate_mults = module_name.norm_rate_mults
-                rate_mult_logits = module_name.rate_mult_logits
-                rate_mult = module_name.rate_multiplier_activation( rate_mult_logits )
+            ### rate multipliers 
+            # P(K|C) or P(K), if not 1
+            if not self.rate_mult_module.prob_rate_mult_is_one:
+                rate_mult_probs = nn.softmax(self.rate_mult_module.rate_mult_prob_logits, axis=-1) #(C,K) or (K,)
                 
-                if norm_rate_mults:
-                    rate_mult = scale_rate_multipliers( unnormed_rate_multipliers = rate_mult,
-                                            log_class_probs = jnp.log(class_probs) )
-    
-                with open(f'{out_folder}/PARAMS_rate_multipliers.txt','w') as g:
-                    [g.write(f'{elem.item()}\n') for elem in rate_mult]
-            
-            
-            ### equilibrium distribution
-            if 'logits' in dir(self.indel_prob_module):
-                equl_logits = self.indel_prob_module.logits
-                equl_dist = nn.softmax( equl_logits, axis=1 )
+                with open(f'{out_folder}/PARAMS-MAT_rate_mult_probs.npy', 'wb') as g:
+                    np.save(g, rate_mult_probs)
                 
-                np.savetxt( f'{out_folder}/PARAMS_equilibriums.tsv', 
-                            np.array(equl_dist), 
-                            fmt = '%.4f',
+                np.savetxt( f'{out_folder}/ASCII_rate_mult_probs.txt', 
+                            np.array( jnp.squeeze(rate_mult_probs) ), 
+                            fmt = '%.8f',
+                            delimiter= '\t' )
+            
+            # \rho_{c,k} or \rho_k
+            if not self.rate_mult_module.use_unit_rate_mult:
+                rate_multipliers = self.rate_mult_module.rate_multiplier_activation( self.rate_mult_module.rate_mult_logits ) #(C,K) or (K,)
+                
+                with open(f'{out_folder}/PARAMS-MAT_rate_multipliers.npy', 'wb') as g:
+                    np.save(g, rate_multipliers)
+                
+                np.savetxt( f'{out_folder}/ASCII_rate_multipliers.txt', 
+                            np.array( jnp.squeeze(rate_multipliers) ), 
+                            fmt = '%.8f',
                             delimiter= '\t' )
                 
-                with open(f'{out_folder}/PARAMS-ARR_equilibriums.npy','wb') as g:
-                    jnp.save(g, equl_dist)
+                
+            ### exchangeabilities, if gtr or hky85
+            exchangeabilities = out['exchangeabilities'] #(A, A) or None
+            
+            if exchangeabilities is not None:
+                if self.subst_model_type == 'gtr':
+                    with open(f'{out_folder}/PARAMS-MAT_exchangeabilities.npy','wb') as g:
+                        jnp.save(g, exchangeabilities)
+                        
+                    np.savetxt( f'{out_folder}/ASCII_exchangeabilities.tsv', 
+                                np.array(exchangeabilities), 
+                                fmt = '%.8f',
+                                delimiter= '\t' )
+                
+                elif self.subst_model_type == 'hky85':
+                    ti = exchangeabilities[0, 2]
+                    tv = exchangeabilities[0, 1]
                     
+                    arr = np.array( [ti, tv] )
+                    with open(f'{out_folder}/PARAMS-MAT_HKY85_ti_tv.npy','wb') as g:
+                        np.save(g, arr)
+                    
+                    with open(f'{out_folder}/ASCII_HKY85_ti_tv.txt','w') as g:
+                        g.write(f'transition rate, ti: {ti}\n')
+                        g.write(f'transition rate, tv: {tv}')
+                    
+                    
+            ### equilibrium distribution (BEFORE marginalizing over site clases)
+            if 'logits' in dir(self.equl_dist_module):
+                equl_dist = nn.softmax( self.equl_dist_module.logits, axis=1 ) #(C, A)
+                
+                with open(f'{out_folder}/PARAMS-MAT_equilibriums.npy','wb') as g:
+                    jnp.save(g, equl_dist)
+
+                np.savetxt( f'{out_folder}/ASCII_equilibriums.tsv', 
+                            np.array( jnp.sqeeze(equl_dist) ), 
+                            fmt = '%.8f',
+                            delimiter= '\t' )
+                
                     
             ####################################################
             ### extract transition paramaters, intermediates   # 
@@ -613,53 +616,59 @@ class IndpSites(ModuleBase):
             ####################################################
             ### under geometric length (only scoring subs)
             if self.indel_model_type is None:
-                geom_p_emit = nn.sigmoid(self.transitions_module.p_emit_logit) #(1,)
-                with open(f'{out_folder}/PARAMS_geom_seq_len.txt','w') as g:
+                geom_p_emit = nn.sigmoid(self.transitions_module.p_emit_logit).item() #(1,)
+                
+                arr = np.array( [geom_p_emit, 1 - geom_p_emit] )
+                with open(f'{out_folder}/PARAMS-MAT_geom_seq_len.npy','wb') as g:
+                    np.save(g, arr)
+                
+                with open(f'{out_folder}/ASCII_geom_seq_len.txt','w') as g:
                     g.write(f'P(emit): {geom_p_emit}\n')
                     g.write(f'1-P(emit): {1 - geom_p_emit}\n')
+                    
                     
             ### for TKF models
             elif self.indel_model_type in ['tkf91', 'tkf92']:
                 # always write lambda and mu
                 # also record if you used any tkf approximations
                 if 'tkf_mu_offset_logits' in dir(self.transitions_module):
-                    mu_min_val = self.transitions_module.mu_min_val
-                    mu_max_val = self.transitions_module.mu_max_val
-                    offs_min_val = self.transitions_module.offs_min_val
-                    offs_max_val = self.transitions_module.offs_max_val
-                    mu_offset_logits = self.transitions_module.tkf_mu_offset_logits
+                    mu_min_val = self.transitions_module.mu_min_val #float
+                    mu_max_val = self.transitions_module.mu_max_val #float
+                    offs_min_val = self.transitions_module.offs_min_val #float
+                    offs_max_val = self.transitions_module.offs_max_val #float
+                    mu_offset_logits = self.transitions_module.tkf_mu_offset_logits #(2,)
                 
                     mu = bound_sigmoid(x = mu_offset_logits[0],
                                        min_val = mu_min_val,
-                                       max_val = mu_max_val)
+                                       max_val = mu_max_val).item() #float
                     
                     offset = bound_sigmoid(x = mu_offset_logits[1],
                                              min_val = offs_min_val,
-                                             max_val = offs_max_val)
-                    lam = mu * (1 - offset) 
+                                             max_val = offs_max_val).item() #float
+                    lam = mu * (1 - offset)  #float
                     
-                    with open(f'{out_folder}/PARAMS_{self.indel_model_type}_indel_params.txt','w') as g:
+                    with open(f'{out_folder}/ASCII_{self.indel_model_type}_indel_params.txt','w') as g:
                         g.write(f'insert rate, lambda: {lam}\n')
                         g.write(f'deletion rate, mu: {mu}\n')
                         g.write(f'offset: {offset}\n\n')
                     
-                    out_dict = {'lambda': lam,
-                                'mu': mu,
-                                'offset': offset}
+                    out_dict = {'lambda': np.array(lam), # shape=()
+                                'mu': np.array(mu), # shape=()
+                                'offset': np.array(offset)} # shape=()
                                 
                 # if tkf92, have extra r_ext param
                 if self.indel_model_type == 'tkf92':
                     r_extend_min_val = self.transitions_module.r_extend_min_val
                     r_extend_max_val = self.transitions_module.r_extend_max_val
-                    r_extend_logits = self.transitions_module.r_extend_logits
+                    r_extend_logits = self.transitions_module.r_extend_logits #(C)
                     
                     r_extend = bound_sigmoid(x = r_extend_logits,
-                                               min_val = r_extend_min_val,
-                                               max_val = r_extend_max_val)
+                                             min_val = r_extend_min_val,
+                                             max_val = r_extend_max_val) #(C)
                     
-                    mean_indel_lengths = 1 / (1 - r_extend)
+                    mean_indel_lengths = 1 / (1 - r_extend) #(C)
                     
-                    with open(f'{out_folder}/PARAMS_{self.indel_model_type}_indel_params.txt','a') as g:
+                    with open(f'{out_folder}/ASCII_{self.indel_model_type}_indel_params.txt','a') as g:
                         g.write(f'extension prob, r: ')
                         [g.write(f'{elem}\t') for elem in r_extend]
                         g.write('\n')
@@ -667,64 +676,64 @@ class IndpSites(ModuleBase):
                         [g.write(f'{elem}\t') for elem in mean_indel_lengths]
                         g.write('\n')
                     
-                    out_dict['r_extend'] = r_extend
+                    out_dict['r_extend'] = r_extend #(C,)
                 
-                with open(f'{out_folder}/{self.indel_model_type}_indel_params.pkl','wb') as g:
+                with open(f'{out_folder}/PARAMS-DICT_{self.indel_model_type}_indel_params.pkl','wb') as g:
                     pickle.dump(out_dict, g)
                 del out_dict
 
+    # don't think I need this anymre
+    # def return_bound_sigmoid_limits(self):
+    #     params_range = {}
         
-    def return_bound_sigmoid_limits(self):
-        params_range = {}
-        
-        ### declare substitution model module, also optionally get exch
-        if self.subst_model_type in ['gtr', 'hky85']:
-            module_name = self.rate_matrix_module
+    #     ### declare substitution model module, also optionally get exch
+    #     if self.subst_model_type in ['gtr', 'hky85']:
+    #         module_name = self.rate_matrix_module
             
-            # exchangeabilities
-            exchange_min_val = module_name.exchange_min_val
-            exchange_max_val = module_name.exchange_max_val
-            params_range["exchange_min_val"] = exchange_min_val
-            params_range["exchange_max_val"] = exchange_max_val
+    #         # exchangeabilities
+    #         exchange_min_val = module_name.exchange_min_val
+    #         exchange_max_val = module_name.exchange_max_val
+    #         params_range["exchange_min_val"] = exchange_min_val
+    #         params_range["exchange_max_val"] = exchange_max_val
         
-        elif self.subst_model_type == 'f81':
-            module_name = self.cond_logprob_match_module
+    #     elif self.subst_model_type == 'f81':
+    #         module_name = self.cond_logprob_match_module
         
         
-        ### rate multiplier
-        if self.config['rate_mult_activation'] == 'bound_sigmoid':
-            rate_mult_min_val = module_name.rate_mult_min_val
-            rate_mult_max_val = module_name.rate_mult_max_val
-            params_range["rate_mult_min_val"] = rate_mult_min_val
-            params_range["rate_mult_max_val"] = rate_mult_max_val
+    #     ### rate multiplier
+    #     if self.config['rate_mult_activation'] == 'bound_sigmoid':
+    #         rate_mult_min_val = module_name.rate_mult_min_val
+    #         rate_mult_max_val = module_name.rate_mult_max_val
+    #         params_range["rate_mult_min_val"] = rate_mult_min_val
+    #         params_range["rate_mult_max_val"] = rate_mult_max_val
     
         
-        ### transitions_module
-        if self.indel_model_type is not None:
-            # delete rate mu
-            mu_min_val = self.transitions_module.mu_min_val
-            mu_max_val = self.transitions_module.mu_max_val
+    #     ### transitions_module
+    #     if self.indel_model_type is not None:
+    #         # delete rate mu
+    #         mu_min_val = self.transitions_module.mu_min_val
+    #         mu_max_val = self.transitions_module.mu_max_val
             
-            # offset (for deletion rate mu)
-            offs_min_val = self.transitions_module.offs_min_val
-            offs_max_val = self.transitions_module.offs_max_val
+    #         # offset (for deletion rate mu)
+    #         offs_min_val = self.transitions_module.offs_min_val
+    #         offs_max_val = self.transitions_module.offs_max_val
             
-            to_add = {"mu_min_val": mu_min_val,
-                      "mu_max_val": mu_max_val,
-                      "offs_min_val": offs_min_val,
-                      "offs_max_val": offs_max_val}
+    #         to_add = {"mu_min_val": mu_min_val,
+    #                   "mu_max_val": mu_max_val,
+    #                   "offs_min_val": offs_min_val,
+    #                   "offs_max_val": offs_max_val}
             
-            if self.indel_model_type == 'tkf92':
-                # r extension probability
-                r_extend_min_val = self.transitions_module.r_extend_min_val
-                r_extend_max_val = self.transitions_module.r_extend_max_val
+    #         if self.indel_model_type == 'tkf92':
+    #             # r extension probability
+    #             r_extend_min_val = self.transitions_module.r_extend_min_val
+    #             r_extend_max_val = self.transitions_module.r_extend_max_val
         
-                to_add['r_extend_min_val'] = r_extend_min_val
-                to_add['r_extend_max_val'] = r_extend_max_val
+    #             to_add['r_extend_min_val'] = r_extend_min_val
+    #             to_add['r_extend_max_val'] = r_extend_max_val
             
-            params_range = {**params_range, **to_add} 
+    #         params_range = {**params_range, **to_add} 
         
-        return params_range
+    #     return params_range
 
 
 class IndpSitesLoadAll(IndpSites):
@@ -745,7 +754,7 @@ class IndpSitesLoadAll(IndpSites):
         config['indel_model_type'] : {tkf91, tkf92, None}
             which indel model, if any
             
-        config['norm_loss_by'] :  {desc_len, align_len}, optional
+        config['norm_reported_loss_by'] :  {desc_len, align_len}, optional
             what length to normalize loglikelihood by
             Default is 'desc_len'
         
@@ -795,47 +804,57 @@ class IndpSitesLoadAll(IndpSites):
         ### read config   #
         ###################
         # required
-        self.subst_model_type = self.config['subst_model_type'].lower()
-        self.indel_model_type = self.config['indel_model_type'].lower()
-        self.times_from = self.config['times_from'].lower()
         num_mixtures = self.config['num_mixtures']
+        self.indp_rate_mults = self.config['indp_rate_mults']
+        self.subst_model_type = self.config['subst_model_type'].lower()
+        indel_model_type = self.config['indel_model_type']
+        self.indel_model_type = indel_model_type.lower() if indel_model_type is not None else None
+        self.times_from = self.config['times_from'].lower()
         
         # optional
-        self.norm_loss_by = self.config.get('norm_loss_by', 'desc_len')
-        self.norm_loss_by_length = self.config.get('norm_loss_by_length', False)
+        self.norm_reported_loss_by = self.config.get('norm_reported_loss_by', 'desc_len')
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
         
+        
+        ###############################################################
+        ### modules for probability of being in latent site classes,  #
+        ### probability of having a particular subsitution rate       #
+        ### rate multiplier, and the rate multipliers themselves      #
+        ###############################################################
+        # Latent site class probabilities
+        self.site_class_probability_module = SiteClassLogprobsFromFile(config = self.config,
+                                                  name = f'get site class probabilities')
+        
+        # substitution rate multipliers
+        if not self.indp_rate_mults:
+            self.rate_mult_module = RateMultipliersPerClassFromFile(config = self.config,
+                                                      name = f'get rate multipliers')
+        
+        elif self.indp_rate_mults:
+            self.rate_mult_module = IndpRateMultipliersFromFile(config = self.config,
+                                                      name = f'get rate multipliers')
         
         ###########################################
         ### module for equilibrium distribution   #
         ###########################################
-        self.indel_prob_module = EqulDistLogprobsFromFile(config = self.config,
+        self.equl_dist_module = EqulDistLogprobsFromFile(config = self.config,
                                                           name = f'get equilibrium')
         
         ###########################################
         ### module for substitution rate matrix   #
         ###########################################
         if self.subst_model_type == 'gtr':
-            self.rate_matrix_module = GTRRateMatFromFile( config = self.config,
-                                                  name = f'get rate matrix' )
+            self.logprob_subst_module = GTRLogprobsFromFile( config = self.config,
+                                                  name = f'gtr subst. model' )
             
-        elif self.subst_model_type == 'hky85':
-            self.rate_matrix_module = HKY85RateMatFromFile( config = self.config,
-                                                    name = f'get rate matrix' )
-        
-        # this is slightly different; it returns the conditional log-probability
-        #   matrix directly
         elif self.subst_model_type == 'f81':
-            self.cond_logprob_match_module = F81LogprobsFromFile( config = self.config,
-                                                                  name = f'get cond logprob' )
-        
-        
-        ##############################################################
-        ### module for probability of being in latent site classes   #
-        ##############################################################
-        self.site_class_probability_module = SiteClassLogprobsFromFile(config = self.config,
-                                                  name = f'get site class probabilities')
-        
+            self.logprob_subst_module = F81LogprobsFromFile( config = self.config,
+                                                     name = f'f81 subst. model' )
+
+        elif self.subst_model_type == 'hky85':
+            self.logprob_subst_module = HKY85LogprobsFromFile( config = self.config,
+                                                    name = f'hky85 subst. model' )
+            
         
         ###########################################
         ### module for transition probabilities   #
@@ -857,24 +876,11 @@ class IndpSitesLoadAll(IndpSites):
                      out_folder: str,
                      prefix: str,
                      write_time_static_objs: bool):
-        ### declare which module you used for substitution model 
-        if self.subst_model_type in ['gtr', 'hky85']:
-            module_name = self.rate_matrix_module
-        
-        elif self.subst_model_type == 'f81':
-            module_name = self.cond_logprob_match_module
-        
-        
+        #########################################################
+        ### only write once: activations_times_used text file   #
+        #########################################################
         if write_time_static_objs:
-            with open(f'{out_folder}/activations_and_times_used.tsv','w') as g:
-                if 'rate_mult_activation' in dir(module_name):
-                    act = module_name.rate_mult_activation
-                else:
-                    act = 'N/A'
-                
-                g.write(f'activation for rate multipliers: {act}\n')
-                g.write(f'activation for exchangeabiliites: bound_sigmoid\n')
-                
+            with open(f'{out_folder}/times_used.tsv','w') as g:
                 if self.times_from in ['geometric','t_array_from_file']:
                     g.write(f't_array for all samples; possible marginalized over them\n')
                     g.write(f'{t_array}')
@@ -885,82 +891,80 @@ class IndpSitesLoadAll(IndpSites):
                     g.write(f'{t_array}')
                     g.write('\n')
         
-        #####################
-        ### Full matrices   #
-        #####################
+        
+        ###################################
+        ### always write: Full matrices   #
+        ###################################
         out = self._get_scoring_matrices(t_array=t_array,
-                                        sow_intermediates=False)
+                                         sow_intermediates=False)
         
-        ### these depend on time`
-        # final joint prob of match (after LSE over classes)
-        mat = np.exp(out['joint_logprob_emit_at_match'])
-        new_key = 'joint_logprob_emit_at_match'.replace('logprob','prob')
-        
-        with open(f'{out_folder}/{prefix}_{new_key}.npy', 'wb') as g:
-            np.save(g, mat)
-        
-        mat = np.squeeze(mat)
-        if len(mat.shape) <= 2:
-            np.savetxt( f'{out_folder}/{prefix}_ASCII_{new_key}.tsv', 
-                        np.array(mat), 
-                        fmt = '%.4f',
-                        delimiter= '\t' )
-        
-        del new_key, mat, g
+        for loss_type in ['joint', 'cond']:
+            # final conditional and joint prob of match (after LSE over classes)
+            mat = np.exp (out[f'{loss_type}_logprob_emit_at_match'] ) #(T, A, A)
+            new_key = f'{loss_type}_logprob_emit_at_match'.replace('logprob','prob')
+            
+            with open(f'{out_folder}/PARAMS-MAT_{prefix}_{new_key}.npy', 'wb') as g:
+                np.save( g, mat )
+            
+            # if only one timepoint, then also write to flat text file
+            mat = jnp.squeeze(mat)
+            if len(mat.shape) <= 2:
+                np.savetxt( f'{out_folder}/ASCII_{prefix}_{new_key}.tsv', 
+                            np.array(mat), 
+                            fmt = '%.8f',
+                            delimiter= '\t' )
+            
+            del new_key, mat, g
     
-        # transition matrices, or P(emit) for geometrically distributed model
-        if self.indel_model_type is not None:
-            for key, mat in out['all_transit_matrices'].items():
-                mat = np.exp(mat)
-                new_key = key.replace('logprob','prob')
+            # transition matrices
+            if self.indel_model_type is not None:
+                mat = np.exp(out['all_transit_matrices'][loss_type]) #(T, A, A)
                 
-                with open(f'{out_folder}/{prefix}_{new_key}_transit_matrix.npy', 'wb') as g:
+                with open(f'{out_folder}/PARAMS-MAT_{prefix}_{loss_type}_prob_transit_matrix.npy', 'wb') as g:
                     np.save(g, mat)
                 
-                mat = np.squeeze(mat)
-                if len(mat.shape) == 0:
-                    with open(f'{out_folder}/{prefix}_ASCII_{new_key}.tsv', 'w') as g:
-                        g.write(f'{new_key}: {mat}\n')
-                
-                elif len(mat.shape) <= 2:
-                    np.savetxt( f'{out_folder}/{prefix}_ASCII_{new_key}_transit_matrix.tsv', 
+                # if only one timepoint, then also write to flat text file
+                mat = jnp.squeeze(mat)
+                if len(mat.shape) <= 2:
+                    np.savetxt( f'{out_folder}/ASCII_{prefix}_{loss_type}_prob_transit_matrix.tsv', 
                                 np.array(mat), 
-                                fmt = '%.4f',
+                                fmt = '%.8f',
                                 delimiter= '\t' )
                 
-                del key, mat, g
+                del mat, g
         
         
-        ### these do not; only write once 
+        #####################################################################
+        ### only write once: parameters, things that don't depend on time   #
+        #####################################################################
         if write_time_static_objs:
-            # equilibrium distribution 
-            mat = np.exp(out['logprob_emit_at_indel'])
+            ### logprob_emit_at_indel (AFTER marginalizing over classes)
+            mat = np.exp( out['logprob_emit_at_indel'] ) #(A,)
             new_key = 'logprob_emit_at_indel'.replace('logprob','prob')
             
-            with open(f'{out_folder}/{prefix}_{new_key}.npy', 'wb') as g:
+            with open(f'{out_folder}/PARAMS-MAT_{prefix}_{new_key}.npy', 'wb') as g:
                 np.save(g, mat)
             
-            mat = np.squeeze(mat)
-            np.savetxt( f'{out_folder}/{prefix}_ASCII_{new_key}.tsv', 
-                        mat, 
-                        fmt = '%.4f',
+            np.savetxt( f'{out_folder}/ASCII_{prefix}_{new_key}.tsv', 
+                        np.squeeze(mat), 
+                        fmt = '%.8f',
                         delimiter= '\t' )
                 
             del new_key, mat, g
         
-            # emission from match sites
-            # rho * Q
-            scaled_rate_mat_per_class = out['rate_mat_times_rho']
-            if scaled_rate_mat_per_class is not None:
-                for c in range(scaled_rate_mat_per_class.shape[0]):
-                    mat_to_save = scaled_rate_mat_per_class[c,...]
+        
+            ### substitution rate matrix
+            rate_matrix = out['rate_matrix'] #(C, A, A) or None
+            if rate_matrix is not None:
+                for c in range(rate_matrix.shape[0]):
+                    mat_to_save = rate_matrix[c,...]
                     
-                    with open(f'{out_folder}/{prefix}_class-{c}_rate_matrix_times_rho.npy', 'wb') as g:
+                    with open(f'{out_folder}/PARAMS-MAT_{prefix}_class-{c}_rate_matrix.npy', 'wb') as g:
                         np.save(g, mat_to_save)
                     
-                    np.savetxt( f'{out_folder}/{prefix}_ASCII_class-{c}_rate_matrix_times_rho.tsv', 
+                    np.savetxt( f'{out_folder}/ASCII_{prefix}_class-{c}_rate_matrix.tsv', 
                                 np.array(mat_to_save), 
-                                fmt = '%.4f',
+                                fmt = '%.8f',
                                 delimiter= '\t' )
                     
                     del mat_to_save, g
