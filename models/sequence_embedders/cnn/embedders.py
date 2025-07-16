@@ -102,24 +102,27 @@ class CNNSeqEmb(SeqEmbBase):
                  datamat: jnp.array, 
                  sow_intermediates: bool, 
                  training: bool):
-        # initial embedding: (B,L) -> (B,L,H)
+        ### initial embedding: (B,L) -> (B,L,H)
         # datamat is (B, L, H)
         # padding_mask is (B, L)
-        datamat, padding_mask = self.initial_embed(datamat)
+        datamat, padding_mask = self.initial_embed(datamat, 
+                                                   training)
         
         if sow_intermediates:
             self.sow_histograms_scalars(mat = datamat,  
                                         label = f'{self.name} 0/after initial embed', 
                                         which=['scalars']) 
         
-        # first convolution: (B, L, H) -> (B, L, H)
+        
+        ### first convolution: (B, L, H) -> (B, L, H)
         block_idx = 0
         datamat = self.first_block(datamat = datamat,
                                    padding_mask = padding_mask,
                                    sow_intermediates = sow_intermediates, 
                                    training = training) # (B, L, H)
         
-        # apply successive blocks; these start at layernum=2, CNN Block 1
+        
+        ### apply successive blocks; these start at layernum=2, CNN Block 1
         # (B, L, H) -> (B, L, H)
         for i,block in enumerate(self.subsequent_blocks):
             layer_idx = i+2

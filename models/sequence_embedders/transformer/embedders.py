@@ -11,17 +11,14 @@ The embedding trunk for both ancestor and descendant sequence, using:
     Transformer-based architecture
 
 """
-# general python
 import logging
 from typing import Any, Callable, Sequence, Union, Tuple
 from dataclasses import field
 
-# jax, flax (and wax, oh my!)
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
 
-# custom imports
 from models.BaseClasses import SeqEmbBase
 
 
@@ -70,6 +67,7 @@ class TransfSeqEmb(SeqEmbBase):
     initial_embed_module: callable
     first_block_module: callable
     subsequent_block_module: callable
+    embedding_which: str
     causal: bool
     config: dict
     name: str
@@ -78,18 +76,15 @@ class TransfSeqEmb(SeqEmbBase):
         num_blocks = self.config['num_blocks']
         
         # first module projects (B,L) -> (B,L,H)
-        name = f'{self.name} 0/initial embed'
-        self.initial_embed = self.initial_embed_module(config = self.config,
+        self.initial_embed = self.initial_embed_module(embedding_which = self.embedding_which,
+                                                       config = self.config,
                                                        causal = self.causal,
-                                                       name = name)
-        del name
+                                                       name = f'{self.name} 0/initial embed')
         
         # second module does the first sequence embedding: (B,L,H) -> (B,L,H)
-        name = f'{self.name} 1/Transf Block 0'
         self.first_block = self.first_block_module(config = self.config,
                                                    causal = self.causal,
-                                                   name = name)
-        del name
+                                                   name = f'{self.name} 1/Transf Block 0')
         
         # may have additional blocks: (B,L,H) -> (B,L,H)
         subsequent_blocks = []
@@ -110,13 +105,23 @@ class TransfSeqEmb(SeqEmbBase):
                  sow_intermediates: bool, 
                  training: bool):
         ### initial embedding: (B,L) -> (B,L,H)
-        datamat, padding_mask = self.initial_embed(datamat, training)
+        # datamat is (B, L, H)
+        # padding_mask is (B, L)
+        datamat, padding_mask = self.initial_embed(datamat, 
+                                                   training)
         
+        if sow_intermediates:
+            self.sow_histograms_scalars(mat = datamat,  
+                                        label = f'{self.name} 0/after initial embed', 
+                                        which=['scalars']) 
+            
+            
         ### first transformer block: (B, L, H) -> (B, L, H)
+        block_idx = 0
         datamat = self.first_block(datamat = datamat,
                                    padding_mask = padding_mask,
                                    sow_intermediates = sow_intermediates,
-                                   training = training)
+                                   training = training) # (B, L, H)
         
         if sow_intermediates:
             label = f'{self.name} 1/Transf Block 0/after block'
@@ -133,16 +138,13 @@ class TransfSeqEmb(SeqEmbBase):
             datamat = block(datamat = datamat,
                             padding_mask = padding_mask,
                             sow_intermediates = sow_intermediates,
-                            training = training)
-            
-            if sow_intermediates:
-                label = (f'{self.name} {layer_idx}/'+
-                         f'Transf Block {block_idx}/'+
-                         f'after block')
-                self.sow_histograms_scalars(mat = datamat, 
-                                            label = label, 
-                                            which=['scalars'])
-                del label
+                            training = training) # (B, L, H)
+          
+        # record final result to tensorboard 
+        if sow_intermediates:
+            self.sow_histograms_scalars(mat = datamat, 
+                                        label = f'{self.name} Transf Block {block_idx}/after block', 
+                                        which=['scalars'])
         
         # output is (B, L, H)
         return datamat

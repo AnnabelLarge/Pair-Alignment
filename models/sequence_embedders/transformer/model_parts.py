@@ -30,21 +30,16 @@ def expand_padding_mask(padding_mask):
     """
     repeat padding mask to make compatible with attention heads
     
-    (B,L,H) -> (B,L,1) -> (B,L,L) -> (B,1,L,L)
+    padding_mask is (B, L)
+
+    shape expansion is: (B,L,1) -> (B,L,L) -> (B,1,L,L)
+    
     """
-    # make boolean mask to cover padding tokens
-    # 
-    padding_mask = padding_mask[:,:,0] #(B, L)
-    padding_mask = padding_mask[:,:,None] #(B, L, 1)
-    
-    new_shape = (padding_mask.shape[0],
-                 padding_mask.shape[1],
-                 padding_mask.shape[2])
-    
-    padding_mask = jnp.broadcast_to(padding_mask, new_shape) #(B, L, L)
-    padding_mask = padding_mask.transpose(0,2,1)[:,None,:,:] #(B, 1, L, L)
-    
-    return padding_mask
+    q_mask = padding_mask[:, :, None]  # (B, L, 1)
+    k_mask = padding_mask[:, None, :]  # (B, 1, L)
+    combined_mask = jnp.logical_and(q_mask, k_mask)  # (B, L, L)
+    out = combined_mask[:,None,...] #(B, 1, L, L)
+    return out
 
 
 ### helpers for attention with rotary positional embedding

@@ -202,15 +202,15 @@ def weight_summary_stats(all_trainstates,
         param_dict = flatten_convert( tstate.params.get('params', dict()) )
         
         for layer_name, param_mat in param_dict.items():
-            
-            ## for some reason, the first two labels keep getting duplicated; 
-            ## just manually remove these
-            #layer_name = '/'.join( layer_name.split('/')[2:] )
-            
+            # usual stats
             layer_for_tag = f'{tag_prefix}/WEIGHTS/'+layer_name
             to_add = calc_stats(mat = param_mat, 
                                 name = layer_for_tag)
             out_dict = {**out_dict, **to_add}
+            
+            # add l2 norm
+            l2_norm = np.linalg.norm(param_mat.reshape(-1), ord=2)
+            out_dict['L2_norm'] = l2_norm
     
     return out_dict
             
@@ -434,15 +434,15 @@ def write_optional_outputs_during_training(writer_obj,
                                 global_step=global_step)
         del flat_dict
         
-        # also possibly output histogram
-        if write_histograms_flag:
-            for tstate in all_trainstates:
-                param_dict = flatten_convert( tstate.params.get('params', dict()) )
-                write_histograms_from_dict(flat_dict=param_dict, 
-                                            top_layer_name='IN TRAIN LOOP/WEIGHTS/',
-                                            writer_obj=writer_obj, 
-                                            global_step=global_step)
-            del param_dict
+        # # also possibly output histogram
+        # if write_histograms_flag:
+        #     for tstate in all_trainstates:
+        #         param_dict = flatten_convert( tstate.params.get('params', dict()) )
+        #         write_histograms_from_dict(flat_dict=param_dict, 
+        #                                     top_layer_name='IN TRAIN LOOP/WEIGHTS/',
+        #                                     writer_obj=writer_obj, 
+        #                                     global_step=global_step)
+        #     del param_dict
         
             
     
@@ -459,15 +459,15 @@ def write_optional_outputs_during_training(writer_obj,
                                 global_step=global_step)
         del flat_dict
         
-        # also possibly output histogram
-        if write_histograms_flag:
-            for key, grad_dict in gradient_dictionaries.items():
-                grad_dict = flatten_convert( grad_dict.get('params',dict()) )
-                write_histograms_from_dict(flat_dict=grad_dict, 
-                                            top_layer_name='IN TRAIN LOOP/GRADIENTS/',
-                                            writer_obj=writer_obj, 
-                                            global_step=global_step)
-            del grad_dict
+        # # also possibly output histogram
+        # if write_histograms_flag:
+        #     for key, grad_dict in gradient_dictionaries.items():
+        #         grad_dict = flatten_convert( grad_dict.get('params',dict()) )
+        #         write_histograms_from_dict(flat_dict=grad_dict, 
+        #                                     top_layer_name='IN TRAIN LOOP/GRADIENTS/',
+        #                                     writer_obj=writer_obj, 
+        #                                     global_step=global_step)
+        #     del grad_dict
     
     
     ### optimizer updates; functions defined above

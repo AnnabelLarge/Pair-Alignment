@@ -102,28 +102,6 @@ class TransfBaseBlock(ModuleBase):
     name: str
     
     def setup(self):
-        # !!! hard code
-        # activations
-        self.act_type = 'silu'
-        self.act = nn.silu
-        self.kernel_init = nn.initializers.lecun_normal()
-
-        # normalization
-        self.norm_type = 'layer'
-        if self.causal:
-            self.norm = nn.LayerNorm(reduction_axes=-1, 
-                                     feature_axes=-1,
-                                     epsilon=1e-5)
-        elif not self.causal:
-            self.norm = nn.LayerNorm(reduction_axes= (-2,-1), 
-                                     feature_axes=-1)
-        
-        # other
-        self.output_attn_weights = False
-        self.use_bias = True
-        self.max_len = 3000
-        
-        
         ### unpack from config
         # required
         self.num_heads = self.config['num_heads']
@@ -131,16 +109,18 @@ class TransfBaseBlock(ModuleBase):
         
         # have defaults
         self.dropout = self.config.get('dropout', 0.0)
+        self.output_attn_weights = self.config.get('output_attn_weights', False)
+        self.max_position_embeddings = self.config.get('max_position_embeddings', 3000)
         
         
         ### if causal, have a causal mask ready to go
-        #   (1, 1, max_position_embeddings, max_position_embeddings)
         if self.causal:
-            self.causal_mask = nn.make_causal_mask(jnp.ones( (1, self.max_len), 
-                                                            dtype="bool"), 
-                                                    dtype="bool")
+            # causal_mask is (1, 1, max_position_embeddings, max_position_embeddings)
+            self.causal_mask_template = nn.make_causal_mask( jnp.ones( (1, self.max_position_embeddings) ), 
+                                                    dtype="bool" )
         
-        ### other layers
+        
+        ### set up layers
         # self-attention
         self.setup_attn_layer()
         
@@ -149,15 +129,22 @@ class TransfBaseBlock(ModuleBase):
         
         # dense layers (in final feedforward)
         self.first_feedforward_dense = nn.Dense(self.hidden_dim,
-                                                kernel_init = self.kernel_init,
+                                                kernel_init = nn.initializers.lecun_normal(),
                                                 use_bias=True)
         
         self.second_feedforward_dense = nn.Dense(self.hidden_dim,
-                                                 kernel_init = self.kernel_init,
+                                                 kernel_init = nn.initializers.lecun_normal(),
                                                  use_bias=True)
-    
-    
-    
+        
+        # activation
+        self.act_type = 'silu'
+        self.act = nn.silu
+
+        # normalization
+        self.norm = nn.LayerNorm(reduction_axes=-1, feature_axes=-1)
+        self.norm_type = 'Instance'
+        
+        
     def setup_attn_layer(self):
         """
         for now, this is the only difference between sinusoidal
@@ -171,29 +158,29 @@ class TransfBaseBlock(ModuleBase):
                                                          dropout_rate=self.dropout, 
                                                          decode=False, 
                                                          normalize_qk=False,
-                                                         use_bias=self.use_bias)
+                                                         use_bias=True)
         
     def __call__(self, 
-                 datamat, 
-                 padding_mask, 
+                 datamat, #(B, L, H)
+                 padding_mask,  #(B, L)
                  sow_intermediates:bool, 
                  training:bool):  
-        batch_size = datamat.shape[0]
-        max_len = datamat.shape[1]
+        B = datamat.shape[0]
+        L = datamat.shape[1]
         
-        ####################
-        ### attention part #
-        ####################
-        skip = datamat
+        # mask padding tokens of input
+        seq_padding_mask = jnp.broadcast_to( padding_mask[...,None], datamat.shape ) #(B, L, H)
+        datamat = jnp.multiply(datamat, seq_padding_mask) #(B, L, H)
         
-        ### Norm
-        datamat = self.norm(datamat,
-                            mask = padding_mask)
-        
-        # manually mask again, because layernorm leaves NaNs
-        datamat = jnp.where( padding_mask,
-                            datamat,
-                            0)
+
+        #######################
+        ### 1: attention part #
+        #######################        
+        skip = datamat #(B, L, H)
+
+        ### 1.1) norm, mask
+        datamat = self.norm(datamat)  #(B, L, H)
+        datamat = jnp.multiply(datamat, seq_padding_mask) #(B, L, H)
         
         if sow_intermediates:
             label = f'{self.name}/after first {self.norm_type}Norm'
@@ -203,45 +190,41 @@ class TransfBaseBlock(ModuleBase):
             del label
         
         
-        ### make masks
+        ### 1.2) make masks for attention (padding, plus optional causal)
         # padding mask is: (B,1,L,L)
-        attn_padding_mask = expand_padding_mask(padding_mask)
+        attn_padding_mask = expand_padding_mask(padding_mask) # (B,1,L,L)
         
         # causal mask is: (B,1,L,L)
         # (1,1,max_position_embeddings,max_position_embeddings) -> 
         #   (B,1,max_position_embeddings,max_position_embeddings) -> 
         #   (B,1,L,L)
         if self.causal:
+            # causal_mask is (1, 1, max_position_embeddings, max_position_embeddings)
             #(B,1,max_position_embeddings,max_position_embeddings)
-            causal_mask = jnp.broadcast_to( self.causal_mask, 
-                                            ( (batch_size,) + 
-                                             self.causal_mask.shape[1:]
-                                             )
-                                            )
-            causal_mask = causal_mask[:, :, :max_len, :max_len] #(B,1,L,L)
-            
+            out_shape = (B, 
+                         self.causal_mask_template.shape[1], 
+                         self.causal_mask_template.shape[2], 
+                         self.causal_mask_template.shape[3])
+            causal_mask = jnp.broadcast_to( self.causal_mask_template, out_shape)[:, :, :L, :L] #(B,1,L,L)
             attention_mask = nn.combine_masks(attn_padding_mask, 
                                               causal_mask,
-                                              dtype=bool)
+                                              dtype=bool) #(B,1,L,L)
         
         elif not self.causal:
-            attention_mask = attn_padding_mask.astype(bool)
+            attention_mask = attn_padding_mask.astype(bool) #(B,1,L,L)
         
         
-        ### self-attention
+        ### 1.3) self-attention
         datamat = self.self_attn(inputs_q = datamat, 
                                  mask=attention_mask, 
                                  deterministic=not training,
-                                 sow_weights=self.output_attn_weights)
+                                 sow_weights=self.output_attn_weights) #(B, L, H)
         
         
-        ### dropout and residual add
-        # dropout
+        ### 1.4) dropout and residual add
         datamat = self.dropout_layer(datamat,
-                                     deterministic = not training)
-        
-        # add
-        datamat = skip + datamat
+                                     deterministic = not training)  #(B, L, H)
+        datamat = skip + datamat  #(B, L, H)
         
         if sow_intermediates:
             label = f'{self.name}/after self-attention half'
@@ -251,20 +234,15 @@ class TransfBaseBlock(ModuleBase):
             del label
         
         
-        ######################
-        ### feedforward part #
-        ######################
-        skip = datamat
+        #########################
+        ### 2: feedforward part #
+        #########################
+        skip = datamat #(B, L, H)
         
         
-        ### Norm
-        datamat = self.norm(datamat,
-                            mask = padding_mask)
-        
-        # manually mask again, because layernorm leaves NaNs
-        datamat = jnp.where( padding_mask,
-                            datamat,
-                            0)
+        ### 2.1) norm, mask
+        datamat = self.norm(datamat)  #(B, L, H)
+        datamat = jnp.multiply(datamat, seq_padding_mask) #(B, L, H)
         
         if sow_intermediates:
             label = f'{self.name}/after second {self.norm_type}Norm'
@@ -274,10 +252,12 @@ class TransfBaseBlock(ModuleBase):
             del label
         
         
-        ### feedforward: dense -> relu -> dense
-        datamat = self.first_feedforward_dense(datamat)
+        ### 2.2) small MLP: dense -> silu -> mask -> dense
+        datamat = self.first_feedforward_dense(datamat) #(B, L, H)
         
-        datamat = self.act(datamat)
+        datamat = self.act(datamat) #(B, L, H)
+        datamat = jnp.multiply(datamat, seq_padding_mask) #(B, L, H)
+        
         if sow_intermediates:
             label = f'{self.name}/in feedforward, after {self.act_type}'
             self.sow_histograms_scalars(mat = datamat, 
@@ -285,16 +265,14 @@ class TransfBaseBlock(ModuleBase):
                                         which=['scalars'])
             del label
         
-        datamat = self.second_feedforward_dense(datamat)
+        datamat = self.second_feedforward_dense(datamat) #(B, L, H)
         
         
-        ### dropout and residual add
-        # dropout
+        ### 2.3) dropout, residual add mask again just in case
         datamat = self.dropout_layer(datamat,
-                                     deterministic = not training)
-        
-        # add
-        datamat = skip + datamat
+                                     deterministic = not training)  #(B, L, H)
+        datamat = skip + datamat  #(B, L, H)
+        datamat = jnp.multiply(datamat, seq_padding_mask) #(B, L, H)
         
         if sow_intermediates:
             label = f'{self.name}/after feedforward half'
@@ -319,12 +297,12 @@ class TransfBaseBlockWithAbsPosEmbedding(ModuleBase):
     
     @nn.compact
     def __call__(self, 
-                 datamat, 
-                 padding_mask, 
+                 datamat,  #(B, L, H)
+                 padding_mask,  #(B, L)
                  sow_intermediates:bool, 
                  training:bool):  
         datamat = PositionalEncoding( hidden_dim = self.config['hidden_dim'],
-                                      max_len = self.config.get('max_len',3000) )(x = datamat)
+                                      max_len = self.config.get('max_position_embeddings',3000) )(x = datamat)
         datamat = TransfBaseBlock( config=self.config,
                                    causal=self.causal,
                                    name=self.name )(datamat = datamat, 
@@ -392,8 +370,8 @@ class RoPETransfBlock(TransfBaseBlock):
                                                       hidden_dim = self.hidden_dim,
                                                       causal = self.causal,
                                                       output_attn_weights = self.output_attn_weights,
-                                                      max_position_embeddings = self.max_len,
-                                                      use_bias = self.use_bias,
+                                                      max_position_embeddings = self.max_position_embeddings,
+                                                      use_bias = True,
                                                       dropout = self.dropout)
         
         
@@ -459,61 +437,57 @@ class TapeTransfBlock(TransfBaseBlock):
     name: str
     
     def __call__(self, 
-                 datamat, 
-                 padding_mask, 
+                 datamat, #(B, L, H)
+                 padding_mask,  #(B, L)
                  sow_intermediates:bool, 
                  training:bool):
-        # !!! over-write defaults
-        self.act_type = 'gelu'
-        self.act = nn.gelu
+        B = datamat.shape[0]
+        L = datamat.shape[1]
         
-        batch_size = datamat.shape[0]
-        max_len = datamat.shape[1]
+        # mask padding tokens of input
+        seq_padding_mask = jnp.broadcast_to( padding_mask[...,None], datamat.shape ) #(B, L, H)
+        datamat = jnp.multiply(datamat, seq_padding_mask) #(B, L, H)
         
-        ####################
-        ### attention part #
-        ####################
+        
+        #######################
+        ### 1: attention part #
+        #######################
         skip = datamat
         
-        ### make masks
-        # padding mask is: (B,1,L,L)
-        padding_mask = expand_padding_mask(padding_mask)
+        ### 1.1) make masks
+        padding_mask = expand_padding_mask(padding_mask) # (B,1,L,L)
         
         # causal mask is: (B,1,L,L)
         # (1,1,max_position_embeddings,max_position_embeddings) -> 
         #   (B,1,max_position_embeddings,max_position_embeddings) -> 
         #   (B,1,L,L)
         if self.causal:
+            # causal_mask is (1, 1, max_position_embeddings, max_position_embeddings)
             #(B,1,max_position_embeddings,max_position_embeddings)
-            causal_mask = jnp.broadcast_to( self.causal_mask, 
-                                            ( (batch_size,) + 
-                                              self.causal_mask.shape[1:] 
-                                              )
-                                            )
-            causal_mask = causal_mask[:, :, :max_len, :max_len] #(B,1,L,L)
-            
-            attention_mask = nn.combine_masks(padding_mask, 
+            out_shape = (B, 
+                         self.causal_mask_template.shape[1], 
+                         self.causal_mask_template.shape[2], 
+                         self.causal_mask_template.shape[3])
+            causal_mask = jnp.broadcast_to( self.causal_mask_template, out_shape)[:, :, :L, :L] #(B,1,L,L)
+            attention_mask = nn.combine_masks(attn_padding_mask, 
                                               causal_mask,
-                                              dtype=bool)
+                                              dtype=bool) #(B,1,L,L)
         
         elif not self.causal:
-            attention_mask = padding_mask.astype(bool)
+            attention_mask = padding_mask.astype(bool) #(B,1,L,L)
         
         
-        ### self-attention
+        ### 1.2) self-attention
         datamat = self.self_attn(inputs_q = datamat, 
                                  mask=attention_mask, 
                                  deterministic=not training,
                                  sow_weights=self.output_attn_weights)
         
         
-        ### dropout and residual add
-        # dropout
+        ### 1.3) dropout and residual add
         datamat = self.dropout_layer(datamat,
-                                     deterministic = not training)
-        
-        # add
-        datamat = skip + datamat
+                                     deterministic = not training)  #(B, L, H)
+        datamat = skip + datamat  #(B, L, H)
         
         if sow_intermediates:
             label = f'{self.name}/after self-attention half'
@@ -526,13 +500,8 @@ class TapeTransfBlock(TransfBaseBlock):
         ##################
         ### First Norm   #
         ##################
-        datamat = self.norm(datamat,
-                            mask = padding_mask)
-        
-        # manually mask again, because layernorm leaves NaNs
-        datamat = jnp.where( padding_mask,
-                            datamat,
-                            0)
+        datamat = self.norm(datamat)  #(B, L, H)
+        datamat = jnp.multiply(datamat, seq_padding_mask) #(B, L, H)
         
         if sow_intermediates:
             label = f'{self.name}/after first {self.norm_type}Norm'
@@ -542,15 +511,17 @@ class TapeTransfBlock(TransfBaseBlock):
             del label
             
         
-        ######################
-        ### feedforward part #
-        ######################
+        #########################
+        ### 2: feedforward part #
+        #########################
         skip = datamat
         
-        ### feedforward: dense -> relu -> dense
+        ### 2.1) small MLP: dense -> gelu -> mask -> dense
         datamat = self.first_feedforward_dense(datamat)
         
-        datamat = self.nn.gelu(datamat)
+        datamat = self.nn.gelu(datamat) #(B, L, H)
+        datamat = jnp.multiply(datamat, seq_padding_mask) #(B, L, H)
+        
         if sow_intermediates:
             label = f'{self.name}/in feedforward, after gelu'
             self.sow_histograms_scalars(mat = datamat, 
@@ -561,13 +532,10 @@ class TapeTransfBlock(TransfBaseBlock):
         datamat = self.second_feedforward_dense(datamat)
         
         
-        ### dropout and residual add
-        # dropout
+        ### 2.2) dropout and residual add
         datamat = self.dropout_layer(datamat,
-                                     deterministic = not training)
-        
-        # add
-        datamat = skip + datamat
+                                     deterministic = not training)  #(B, L, H)
+        datamat = skip + datamat  #(B, L, H)
         
         if sow_intermediates:
             label = f'{self.name}/after feedforward half'
@@ -580,14 +548,8 @@ class TapeTransfBlock(TransfBaseBlock):
         #################
         ### Second Norm #
         #################
-        # don't need to record intermediates; I'll do that in main embedder
-        datamat = self.norm(datamat, 
-                            mask = padding_mask)
-        
-        # manually mask again, because layernorm leaves NaNs
-        datamat = jnp.where( padding_mask,
-                            datamat,
-                            0)
+        datamat = self.norm(datamat)  #(B, L, H)
+        datamat = jnp.multiply(datamat, seq_padding_mask) #(B, L, H)
         
         return datamat
         

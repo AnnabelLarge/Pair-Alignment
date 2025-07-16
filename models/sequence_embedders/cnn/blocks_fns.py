@@ -70,7 +70,6 @@ class ConvnetBlock(ModuleBase):
     
     def setup(self):
         ### unpack from config
-        # ignore config['kern_size_lst'] here
         self.hidden_dim = self.config['hidden_dim']
         self.dropout = self.config.get('dropout', 0.0)
         
@@ -95,17 +94,17 @@ class ConvnetBlock(ModuleBase):
         
         
     def __call__(self, 
-                 datamat: jnp.array, #(B, L, H_in)
+                 datamat: jnp.array, #(B, L, H)
                  padding_mask: jnp.array, #(B, L) 
                  sow_intermediates:bool, 
                  training:bool):
         # mask for padding tokens; broadcast to the datamat input (which will
         # not change in shape through this whole operation)
-        mask = jnp.broadcast_to( padding_mask[...,None], datamat.shape ) #(B, L, H_in)
-        datamat = jnp.multiply(datamat, mask) #(B, L, H_in)
+        mask = jnp.broadcast_to( padding_mask[...,None], datamat.shape ) #(B, L, H)
+        datamat = jnp.multiply(datamat, mask) #(B, L, H)
         
         # skip connection
-        skip = datamat #(B, L, H_in)
+        skip = datamat #(B, L, H)
 
         if sow_intermediates:
             self.sow_histograms_scalars(mat = datamat, 
@@ -113,8 +112,8 @@ class ConvnetBlock(ModuleBase):
                                         which=['scalars'])
         
         ### 1.) norm, mask padding tokens
-        datamat = self.norm(datamat)  #(B, L, H_in)
-        datamat = jnp.multiply(datamat, mask) #(B, L, H_in)
+        datamat = self.norm(datamat)  #(B, L, H)
+        datamat = jnp.multiply(datamat, mask) #(B, L, H)
         
         if sow_intermediates:
             self.sow_histograms_scalars(mat = datamat, 
@@ -123,8 +122,8 @@ class ConvnetBlock(ModuleBase):
         
         
         ### 2.) convolution, mask padding tokens
-        datamat = self.conv(datamat) #(B, L, H_in)
-        datamat = jnp.multiply(datamat, mask) #(B, L, H_in)
+        datamat = self.conv(datamat) #(B, L, H)
+        datamat = jnp.multiply(datamat, mask) #(B, L, H)
         
         if sow_intermediates:
             self.sow_histograms_scalars(mat = datamat, 
@@ -133,7 +132,7 @@ class ConvnetBlock(ModuleBase):
         
         
         ### 3.) activation (silu)
-        datamat = self.act(datamat) #(B, L, H_in)
+        datamat = self.act(datamat) #(B, L, H)
         
         if sow_intermediates:
             self.sow_histograms_scalars(mat = datamat, 
@@ -143,7 +142,7 @@ class ConvnetBlock(ModuleBase):
         
         ### 4.) dropout
         datamat = self.dropout_layer(datamat, 
-                                     deterministic = not training) #(B, L, H_in)
+                                     deterministic = not training) #(B, L, H)
         
         if sow_intermediates and (self.dropout > 0):
             self.sow_histograms_scalars(mat = datamat, 
@@ -153,7 +152,7 @@ class ConvnetBlock(ModuleBase):
         
         ### 5.) residual add to the block input; again, mask padding tokens
         datamat = datamat + skip
-        datamat = jnp.multiply(datamat, mask) #(B, L, H_in)
+        datamat = jnp.multiply(datamat, mask) #(B, L, H)
 
         return datamat
 
