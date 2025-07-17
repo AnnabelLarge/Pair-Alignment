@@ -24,13 +24,14 @@ import unittest
 from tests.data_processing import (str_aligns_to_tensor,
                                    summarize_alignment)
 from models.simple_site_class_predict.model_functions import (rate_matrix_from_exch_equl,
-                                                              get_cond_logprob_emit_at_match_per_class,
-                                                              get_joint_logprob_emit_at_match_per_class,
-                                                              lse_over_match_logprobs_per_class,
+                                                              cond_logprob_emit_at_match_per_mixture,
+                                                              joint_logprob_emit_at_match_per_mixture,
+                                                              lse_over_match_logprobs_per_mixture,
                                                               joint_prob_from_counts)
 
 THRESHOLD = 1e-6
 NUM_CLASSES = 3
+NUM_RATE_MULTS = 4
 
 
 class TestAlignmentLoglikeGTRMixture(unittest.TestCase):
@@ -40,6 +41,7 @@ class TestAlignmentLoglikeGTRMixture(unittest.TestCase):
     B: batch (samples)
     L: length (number of alignment columns)
     C: hidden site classes
+    K: rate multipliers
     T: branch lengths (time)
     A: alphabet
     
@@ -78,14 +80,13 @@ class TestAlignmentLoglikeGTRMixture(unittest.TestCase):
                                         norm=True) #(C=1,A,A)
         
         # mixture model; NUM_CLASSES copies of the same component
-        equilibrium_distributions_copied = np.repeat(equilibrium_distributions[None,...], 
-                                                     NUM_CLASSES,
-                                                     axis=0) #(C=NUM_CLASSES,A)
-        Q_copied = rate_matrix_from_exch_equl(exchangeabilities,
-                                        equilibrium_distributions_copied,
-                                        norm=True) #(C=NUM_CLASSES,A,A)
+        equilibrium_distributions_copied = np.repeat( equilibrium_distributions[None,:], NUM_CLASSES, axis=0)
+        out_shape = (NUM_CLASSES, NUM_RATE_MULTS, Q.shape[-2], Q.shape[-1])
+        Q_copied = np.broadcast_to( Q[:,None,:,:], out_shape )
         
         class_probs = np.array([1/NUM_CLASSES] * NUM_CLASSES) #(C=NUM_CLASSES)
+        rate_mult_probs = np.array( [ (1/NUM_CLASSES) * (1/NUM_RATE_MULTS) ] * (NUM_CLASSES * NUM_RATE_MULTS) )
+        rate_mult_probs = np.reshape( rate_mult_probs, (NUM_CLASSES, NUM_RATE_MULTS) ) #(C, K)
         
         # other parameters
         P_emit = 0.995
@@ -117,13 +118,12 @@ class TestAlignmentLoglikeGTRMixture(unittest.TestCase):
         
         
         ### score with original model
-        log_cond,_ = get_cond_logprob_emit_at_match_per_class(t_array = t_array,
-                                                              scaled_rate_mat_per_class = Q) #(T,C=1,A,A)
-        log_joint = get_joint_logprob_emit_at_match_per_class(cond_logprob_emit_at_match_per_class = log_cond,
-                                                              log_equl_dist_per_class = np.log(equilibrium_distributions[None,:])) #(T,C=1,A,A)
+        log_cond = cond_logprob_emit_at_match_per_mixture(t_array = t_array,
+                                                              scaled_rate_mat_per_mixture = Q) #(T,C=1,A,A)
+        log_joint = joint_logprob_emit_at_match_per_mixture(cond_logprob_emit_at_match_per_mixture = log_cond,
+                                                              log_equl_dist_per_mixture = np.log(equilibrium_distributions[None,:])) #(T,C=1,A,A)
         del Q, log_cond
-        
-        scoring_matrices_dict = {'joint_logprob_emit_at_match': log_joint[:,0,...],
+        scoring_matrices_dict = {'joint_logprob_emit_at_match': log_joint[:,0,0,...],
                                  'all_transit_matrices': 
                                      {'joint': np.log(np.array([P_emit, 1 - P_emit]))
                                       } 
@@ -131,16 +131,16 @@ class TestAlignmentLoglikeGTRMixture(unittest.TestCase):
         out = common_scoring_fn( scoring_matrices_dict = scoring_matrices_dict )
         original_scores = out['joint_neg_logP']
         
-        
         ### score with mixture of same model
-        log_cond_mix,_ = get_cond_logprob_emit_at_match_per_class(t_array = t_array,
-                                                              scaled_rate_mat_per_class = Q_copied) #(T,C=NUM_CLASSES,A,A)
-        log_joint_mix = get_joint_logprob_emit_at_match_per_class(cond_logprob_emit_at_match_per_class = log_cond_mix,
-                                                              log_equl_dist_per_class = np.log(equilibrium_distributions_copied)) #(T,C=NUM_CLASSES,A,A)
+        log_cond_mix = cond_logprob_emit_at_match_per_mixture(t_array = t_array,
+                                                              scaled_rate_mat_per_mixture = Q_copied) #(T,C=NUM_CLASSES,A,A)
+        log_joint_mix = joint_logprob_emit_at_match_per_mixture(cond_logprob_emit_at_match_per_mixture = log_cond_mix,
+                                                              log_equl_dist_per_mixture = np.log(equilibrium_distributions_copied)) #(T,C=NUM_CLASSES,A,A)
         del Q_copied, log_cond_mix
         
-        mix_scoring_matrix = lse_over_match_logprobs_per_class(log_class_probs = np.log(class_probs),
-                                                joint_logprob_emit_at_match_per_class = log_joint_mix) #(T,A,A)
+        mix_scoring_matrix = lse_over_match_logprobs_per_mixture(log_class_probs = np.log(class_probs),
+                                                                 log_rate_mult_probs = np.log(rate_mult_probs),
+                                                                 logprob_emit_at_match_per_mixture = log_joint_mix) #(T,A,A)
         
         mixture_scoring_matrices_dict = {'joint_logprob_emit_at_match': mix_scoring_matrix,
                                          'all_transit_matrices': 

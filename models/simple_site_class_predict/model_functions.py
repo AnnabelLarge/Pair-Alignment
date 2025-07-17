@@ -291,7 +291,7 @@ def scale_rate_matrix(subst_rate_mat: ArrayLike,
 ### functions used to calculate scoring matrix for substitution sites   #######
 ###############################################################################
 def cond_logprob_emit_at_match_per_mixture( t_array: ArrayLike,
-                                                scaled_rate_mat_per_mixture: ArrayLike ):
+                                            scaled_rate_mat_per_mixture: ArrayLike ):
     """
     P(y|x,t,c,k) = expm( \rho_{c,k} * Q_c * t )
 
@@ -448,7 +448,7 @@ def lse_over_equl_logprobs_per_mixture(log_class_probs: ArrayLike,
 ### F81 solution   ############################################################
 ###############################################################################
 def fill_f81_logprob_matrix(equl: jnp.array,
-                            rate_multiplier: jnp.array, 
+                            rate_multipliers: jnp.array, 
                             t_array: jnp.array, 
                             norm_rate_matrix: bool = True,
                             return_cond: bool = False):
@@ -465,7 +465,7 @@ def fill_f81_logprob_matrix(equl: jnp.array,
     equl : ArrayLike, (C, A)
         log-transformed equilibrium distribution
     
-    rate_multiplier : ArrayLike, (C, K)
+    rate_multipliers : ArrayLike, (C, K)
         rate multiplier k for site class c; \rho_{c,k}
     
     t_array : ArrayLike, (T,) or (B,)
@@ -481,8 +481,8 @@ def fill_f81_logprob_matrix(equl: jnp.array,
     
     """
     T = t_array.shape[0]
-    C = rate_multiplier.shape[0]
-    K = rate_multiplier.shape[1]
+    C = rate_multipliers.shape[0]
+    K = rate_multipliers.shape[1]
     A = equl.shape[-1]
     
     # possibly normalize to one substitution per time t
@@ -495,12 +495,12 @@ def fill_f81_logprob_matrix(equl: jnp.array,
         norm_factor = jnp.ones( (C, K) ) #(C, K)
     
     # broadcast to compatible dims
-    rate_multiplier = rate_multiplier[None,...] #(1, C, K)
+    rate_multipliers = rate_multipliers[None,...] #(1, C, K)
     norm_factor = norm_factor[None,...] #(1, C, K)
     t_array = t_array[:, None, None] #(T, 1, 1)
     
     # the exponential operand
-    oper = -( rate_multiplier * norm_factor * t_array ) #(T, C, K)
+    oper = -( rate_multipliers * norm_factor * t_array ) #(T, C, K)
     exp_oper = jnp.exp(oper) #(T, C, K)
 
     # broadcast again

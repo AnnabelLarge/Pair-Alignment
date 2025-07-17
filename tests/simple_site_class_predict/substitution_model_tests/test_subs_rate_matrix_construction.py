@@ -27,7 +27,7 @@ import numpy.testing as npt
 import unittest
 
 from models.simple_site_class_predict.emission_models import (EqulDistLogprobsFromFile,
-                                                              GTRRateMatFromFile)
+                                                              GTRLogprobsFromFile)
 from models.simple_site_class_predict.model_functions import (upper_tri_vector_to_sym_matrix, 
                                                               rate_matrix_from_exch_equl)
 
@@ -90,7 +90,7 @@ def construct_fake_rate_matrix():
             'true': true, #(C,A,A)
             'true_normed': true_normed} #(C,A,A)
 
-def construct_lg_rate_matrix():
+def construct_lg_rate_matrix(req_files_path):
     """
     PURPOSE: load the true LG08 rate matrix
     
@@ -99,7 +99,7 @@ def construct_lg_rate_matrix():
 
     """
     # read the LG rate matrix (true values)
-    df = pd.read_csv('tests/substitution_model_tests/req_files/LG08_rate_matrix.txt',sep=' ',header=None,index_col=0)
+    df = pd.read_csv(f'{req_files_path}/LG08_rate_matrix.txt',sep=' ',header=None,index_col=0)
     df.columns = df.index
 
     # rearrange row/col order
@@ -149,7 +149,11 @@ class TestSubsRateMatrixConstruction(unittest.TestCase):
         - GTRRateMatFromFile
         
     """
-    def testupper_tri_vector_to_sym_matrix(self):
+    def setUp(self):
+        self.req_files_path = './tests/simple_site_class_predict/substitution_model_tests/req_files'
+        self.path = './tests/simple_site_class_predict/substitution_model_tests'
+    
+    def test_upper_tri_vector_to_sym_matrix(self):
         """
         PURPOSE: make sure upper_tri_vector_to_sym_matrix fills in
           a symmetric rate matrix correctly
@@ -163,7 +167,7 @@ class TestSubsRateMatrixConstruction(unittest.TestCase):
     
         npt.assert_allclose(true_sym_matrix, pred_sym_matrix, atol=THRESHOLD)
     
-    def testrate_matrix_from_exch_equl(self):
+    def test_rate_matrix_from_exch_equl(self):
         """
         PURPOSE: compare output from rate_matrix_from_exch_equl to
           ground truth (calculated by hand)
@@ -269,10 +273,11 @@ class TestSubsRateMatrixConstruction(unittest.TestCase):
             values and calculate a rate matrix; compare to ground truth 
             (LG rate matrix, from cherryML repo)
         """
-        true = construct_lg_rate_matrix() #(A,A)
+        true = construct_lg_rate_matrix(req_files_path = self.req_files_path) #(A,A)
         
         # equlibrium distribution
-        config = {'filenames': {'equl_dist': 'tests/substitution_model_tests/req_files/LG08_equl_dist.npy'}}
+        # self.req_files_path
+        config = {'filenames': {'equl_dist': f'{self.req_files_path}/LG08_equl_dist.npy'}}
         my_equl_fn = EqulDistLogprobsFromFile(config=config,
                                               name = 'equl_fn')
         logprob_equl = my_equl_fn.apply(variables = {}) #(A,)
@@ -281,13 +286,19 @@ class TestSubsRateMatrixConstruction(unittest.TestCase):
         config = {'num_mixtures': 1,
                   'norm_rate_matrix': True,
                   'filenames': {'rate_mult': None,
-                                'exch': 'tests/substitution_model_tests/req_files/LG08_exchangeability_vec.npy'}}
-        my_mod = GTRRateMatFromFile(config=config,
+                                'exch': f'{self.req_files_path}/LG08_exchangeability_vec.npy'}}
+        my_mod = GTRLogprobsFromFile(config=config,
                                     name='my_mod')
 
-        pred = my_mod.apply(variables = {},
-                            logprob_equl = logprob_equl)[0,...] #(A,A)
+        _, out_dict = my_mod.apply(variables = {},
+                            logprob_equl = logprob_equl,
+                            t_array = np.ones( (5,) ),
+                            rate_multipliers = np.ones( (5,) ),
+                            sow_intermediates = False,
+                            return_cond = False,
+                            return_intermeds = True)
         
+        pred = out_dict['rate_matrix'][0,...]
         npt.assert_allclose(true, pred, atol=THRESHOLD)
     
     def test_GTRRateMatFromFile_with_full_rate_mat(self):
@@ -296,10 +307,10 @@ class TestSubsRateMatrixConstruction(unittest.TestCase):
             exchangeability matrix and calculate a rate matrix; compare to 
             ground truth (LG rate matrix, from cherryML repo)
         """
-        true = construct_lg_rate_matrix() #(A,A)
+        true = construct_lg_rate_matrix(req_files_path = self.req_files_path) #(A,A)
         
         # equlibrium distribution
-        config = {'filenames': {'equl_dist': 'tests/substitution_model_tests/req_files/LG08_equl_dist.npy'}}
+        config = {'filenames': {'equl_dist': f'{self.req_files_path}/LG08_equl_dist.npy'}}
         my_equl_fn = EqulDistLogprobsFromFile(config=config,
                                               name = 'equl_fn')
         logprob_equl = my_equl_fn.apply(variables = {}) #(A,)
@@ -308,13 +319,19 @@ class TestSubsRateMatrixConstruction(unittest.TestCase):
         config = {'num_mixtures': 1,
                   'norm_rate_matrix': True,
                   'filenames': {'rate_mult': None,
-                                'exch': 'tests/substitution_model_tests/req_files/LG08_exchangeability_R.npy'}}
-        my_mod = GTRRateMatFromFile(config=config,
+                                'exch': f'{self.req_files_path}/LG08_exchangeability_R.npy'}}
+        my_mod = GTRLogprobsFromFile(config=config,
                                     name='my_mod')
 
-        pred = my_mod.apply(variables = {},
-                            logprob_equl = logprob_equl)[0,...] #(A,A)
+        _, out_dict = my_mod.apply(variables = {},
+                            logprob_equl = logprob_equl,
+                            t_array = np.ones( (5,) ),
+                            rate_multipliers = np.ones( (5,) ),
+                            sow_intermediates = False,
+                            return_cond = False,
+                            return_intermeds = True)
         
+        pred = out_dict['rate_matrix'][0,...]
         npt.assert_allclose(true, pred, atol=THRESHOLD)
         
 if __name__ == '__main__':

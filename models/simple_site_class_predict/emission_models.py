@@ -948,15 +948,12 @@ class GTRLogprobs(ModuleBase):
         # init from random
         elif self.random_init_exchanges:
             A = emission_alphabet_size
-            num_exchange = (A * (A-1)) / 2
+            num_exchange = int( (A * (A-1)) / 2 )
             self.exchangeabilities_logits_vec = self.param("exchangeabilities", 
                                                            nn.initializers.normal(),
                                                            (num_exchange,),
                                                            jnp.float32 ) #(N,)
         
-        # if this is true, then intermediates can NEVER be output
-        self.never_return_intermeds = False
-
         
     def __call__(self,
                  logprob_equl: jnp.array,
@@ -1001,9 +998,6 @@ class GTRLogprobs(ModuleBase):
         ArrayLike, (T, C, K, A, A)
             either joint or conditional logprob of emissions at match sites
         """
-        # check self.never_return_intermeds return_intermeds
-        return_intermeds = return_intermeds if not self.never_return_intermeds else False
-        
         # undo log transform on equilibrium
         equl = jnp.exp(logprob_equl) #(C, A)
         
@@ -1129,9 +1123,6 @@ class GTRLogprobsFromFile(GTRLogprobs):
         else:
             self.exchangeabilities_mat = exch_from_file #(A, A)
         
-        # disable returning intermediates
-        self.never_return_intermeds = True
-        
         
     def _get_square_exchangeabilities_matrix(self,
                                              *args,
@@ -1216,10 +1207,7 @@ class HKY85Logprobs(GTRLogprobs):
                                            min_val = self.exchange_min_val,
                                            max_val = self.exchange_max_val)
         
-        # Used to overwrite return_intermeds as needed
-        self.never_return_intermeds = False
-  
-    
+        
     def _get_square_exchangeabilities_matrix(self,
                                              sow_intermediates: bool):
         ### apply activation of choice
@@ -1310,9 +1298,7 @@ class HKY85LogprobsFromFile(GTRLogprobsFromFile):
         
         self.exchangeabilities_mat = upper_tri_vector_to_sym_matrix( upper_triag_values ) #(4, 4)
         
-        # disable returning intermediates
-        self.never_return_intermeds = True
- 
+    
     
 ###############################################################################
 ### PROBABILITY MATRICES: F81   ###############################################
@@ -1393,7 +1379,7 @@ class F81Logprobs(ModuleBase):
         # undo log transform on equilibrium
         equl = jnp.exp(logprob_equl) #(C, A)
         
-        logprobs = fill_f81_logprob_matrix( equl = prob_equl, 
+        logprobs = fill_f81_logprob_matrix( equl = equl, 
                                         rate_multipliers = rate_multipliers, 
                                         norm_rate_matrix = self.norm_rate_matrix,
                                         t_array = t_array,

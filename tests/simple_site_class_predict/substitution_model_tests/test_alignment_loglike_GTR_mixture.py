@@ -23,9 +23,9 @@ from tests.data_processing import (str_aligns_to_tensor,
                                    summarize_alignment)
 
 from models.simple_site_class_predict.model_functions import (rate_matrix_from_exch_equl,
-                                                              get_cond_logprob_emit_at_match_per_class,
-                                                              get_joint_logprob_emit_at_match_per_class,
-                                                              lse_over_match_logprobs_per_class,
+                                                              cond_logprob_emit_at_match_per_mixture,
+                                                              joint_logprob_emit_at_match_per_mixture,
+                                                              lse_over_match_logprobs_per_mixture,
                                                               joint_prob_from_counts)
 
 
@@ -41,6 +41,7 @@ class TestAlignmentLoglikeGTRMixture(unittest.TestCase):
     B: batch (samples)
     L: length (number of alignment columns)
     C: hidden site classes
+    K: rate multipliers
     T: branch lengths (time)
     A: alphabet
     
@@ -79,12 +80,21 @@ class TestAlignmentLoglikeGTRMixture(unittest.TestCase):
                                               equilibrium_distributions_2]) #(C,A)
         del equilibrium_distributions_1, equilibrium_distributions_2
         
-        Q = rate_matrix_from_exch_equl(exchangeabilities,
-                                        equilibrium_distributions,
-                                        norm=True) #(C,A,A)
+        raw_Q = rate_matrix_from_exch_equl(exchangeabilities,
+                                           equilibrium_distributions,
+                                           norm=True) #(C,A,A)
+        
+        rate_mults = np.array( [[  1,   2,   3,   4],
+                                [0.1, 0.2, 0.3, 0.4]] ) #(C, K)
+        Q = np.multiply( raw_Q[:,None,...], rate_mults[...,None, None] ) #(C, K, A, A)
         
         class_probs = np.array([0.4, 0.6]) #(C)
+        rate_mult_probs = np.array( [[0.25, 0.25, 0.25, 0.25],
+                                     [0.1,  0.2,  0.3,  0.4]] ) #(C,K)
+        
         log_class_probs = np.log(class_probs) #(C)
+        log_rate_mult_probs = np.log(rate_mult_probs) #(C,K)
+        
         P_emit = 0.995
         t_array = np.array( [0.3, 1.0, 0.2] ) #(T)
         
@@ -92,13 +102,14 @@ class TestAlignmentLoglikeGTRMixture(unittest.TestCase):
         B = fake_aligns.shape[0]
         L = fake_aligns.shape[1]
         C = Q.shape[0]
+        K = rate_mult_probs.shape[1]
         T = t_array.shape[0]
         A = Q.shape[1]
         
-        log_cond,_ = get_cond_logprob_emit_at_match_per_class(t_array = t_array,
-                                                              scaled_rate_mat_per_class = Q) #(T,C,A,A)
-        log_joint = get_joint_logprob_emit_at_match_per_class(cond_logprob_emit_at_match_per_class = log_cond,
-                                                              log_equl_dist_per_class = np.log(equilibrium_distributions)) #(T,C,A,A)
+        log_cond = cond_logprob_emit_at_match_per_mixture(t_array = t_array,
+                                                              scaled_rate_mat_per_mixture = Q) #(T,C,A,A)
+        log_joint = joint_logprob_emit_at_match_per_mixture(cond_logprob_emit_at_match_per_mixture = log_cond,
+                                                              log_equl_dist_per_mixture = np.log(equilibrium_distributions)) #(T,C,A,A)
         del Q, log_cond
         
         ### manually score each site
@@ -110,12 +121,13 @@ class TestAlignmentLoglikeGTRMixture(unittest.TestCase):
                     if alignment_tok == 1:
                         prob_of_this_column = 0
                         for c in range(C):
-                            mixture_joint_matrix = np.exp(log_joint[t,c,...])
-                            mixture_prob = class_probs[c]
-                            
-                            # P(c) P(x,y|c,t)
-                            prob_of_this_column += (mixture_prob *
-                                                   mixture_joint_matrix[anc_tok-3, desc_tok-3] )
+                            for k in range(K):
+                                mixture_joint_matrix = np.exp(log_joint[t,c,k,...])
+                                mixture_prob = class_probs[c] * rate_mult_probs[c,k]
+                                
+                                # P(c) P(x,y|c,t)
+                                prob_of_this_column += (mixture_prob *
+                                                       mixture_joint_matrix[anc_tok-3, desc_tok-3] )
                         
                         # scale final emission score by P(emit)
                         prob_of_this_column = prob_of_this_column * P_emit
@@ -126,8 +138,9 @@ class TestAlignmentLoglikeGTRMixture(unittest.TestCase):
         
         
         ### calculate with my function
-        pred_scoring_matrix = lse_over_match_logprobs_per_class(log_class_probs = log_class_probs,
-                                               joint_logprob_emit_at_match_per_class = log_joint) #(T,A,A)
+        pred_scoring_matrix = lse_over_match_logprobs_per_mixture(log_class_probs = log_class_probs,
+                                                                  log_rate_mult_probs = log_rate_mult_probs,
+                                                                  logprob_emit_at_match_per_mixture = log_joint) #(T,A,A)
         
         fake_batch = (match_counts, 
                       np.zeros((B,A)),
