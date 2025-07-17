@@ -99,6 +99,7 @@ def eval_one_batch( batch,
                     pairhmm_instance,
                     interms_for_tboard,
                     return_all_loglikes: bool,
+                    *args,
                     **kwargs):
     """
     WARNING: might have to pull trainstate and instance out of parted+jit 
@@ -133,6 +134,7 @@ def eval_one_batch( batch,
                                           batch = batch,
                                           t_array = t_array,
                                           mutable=['histograms','scalars'] if finalpred_sow_outputs else [],
+                                          return_intermeds = False,
                                           method=pairhmm_instance.calculate_all_loglikes)
         
         

@@ -254,10 +254,11 @@ class NeuralCondTKF(ModuleBase):
         # logprob_emit_match is either (T, B, L, A, A) or (B, L, A, A)
         # subs_model_params is a dictionary of parameters; see module for more details
         logprob_emit_match, subs_model_params = self.subs_module(datamat = sub_feats,
-                                                                log_equl = logprob_emit_indel,
-                                                                t_array = t_array,
-                                                                unique_time_per_sample = self.unique_time_per_sample,
-                                                                sow_intermediates = sow_intermediates)
+                                                                 padding_mask = padding_mask,
+                                                                 log_equl = logprob_emit_indel,
+                                                                 t_array = t_array,
+                                                                 unique_time_per_sample = self.unique_time_per_sample,
+                                                                 sow_intermediates = sow_intermediates)
         
         
         ### transition model; used to score markovian alignment path
