@@ -25,6 +25,10 @@ from models.simple_site_class_predict.emission_models import (EqulDistLogprobsFr
                                                               GTRLogprobsFromFile,
                                                               SiteClassLogprobs,
                                                               SiteClassLogprobsFromFile,
+                                                              RateMultipliersPerClass,
+                                                              IndpRateMultipliers,
+                                                              RateMultipliersPerClassFromFile,
+                                                              IndpRateMultipliersFromFile,
                                                               HKY85Logprobs,
                                                               HKY85LogprobsFromFile,
                                                               F81Logprobs,
@@ -473,7 +477,10 @@ class IndpSites(ModuleBase):
                       'exchangeabilities': subst_module_intermeds.get('exchangeabilities',None), #(A,A) or None
                       'cond_logprob_emit_at_match': cond_logprob_emit_at_match, #(T, A, A)
                       'cond_subst_logprobs_per_mixture': cond_subst_logprobs_per_mixture, # (T, C, K, A, A)
-                      'joint_subst_logprobs_per_mixture': joint_subst_logprobs_per_mixture} # (T, C, K, A, A) 
+                      'joint_subst_logprobs_per_mixture': joint_subst_logprobs_per_mixture, # (T, C, K, A, A) 
+                      'log_equl_dist_per_mixture': log_equl_dist_per_mixture, #(C, A)
+                      'log_class_probs': log_class_probs, #(C,)
+                      'log_rate_mult_probs': log_rate_mult_probs } #(K,C)
             out_dict = {**out_dict, **to_add}
         
         return out_dict

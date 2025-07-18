@@ -239,7 +239,7 @@ class RateMultipliersPerClass(ModuleBase):
     ------------
     setup
     __call__
-    _set_model_simplifcation_flags
+    _set_model_simplification_flags
     _init_prob_logits
     _init_rate_logits
     _get_norm_factor
@@ -283,6 +283,7 @@ class RateMultipliersPerClass(ModuleBase):
         # also decide norm_rate_mult here; sometimes I read this from config
         #   file, but at other times, I never have to normalize my rate 
         #   multipliers
+        self._set_model_simplification_flags
         self._set_model_simplification_flags()
         
             
@@ -387,7 +388,7 @@ class RateMultipliersPerClass(ModuleBase):
         return (log_rate_mult_probs, rate_multipliers)
         
     
-    def _set_model_simplifcation_flags(self):
+    def _set_model_simplification_flags(self):
         """
         If C = 1 and K = 1: no mixtures
             > prob_rate_mult_is_one = True
@@ -534,7 +535,7 @@ class IndpRateMultipliers(RateMultipliersPerClass):
     
     Methods here
     ------------
-    _set_model_simplifcation_flags
+    _set_model_simplification_flags
     _init_prob_logits
     _init_rate_logits
     _get_norm_factor
@@ -553,7 +554,7 @@ class IndpRateMultipliers(RateMultipliersPerClass):
     config: dict
     name: str
       
-    def _set_model_simplifcation_flags(self):
+    def _set_model_simplification_flags(self):
         """
         If C = 1 and K = 1: no mixtures
             > prob_rate_mult_is_one = True
@@ -689,7 +690,7 @@ class RateMultipliersPerClassFromFile(RateMultipliersPerClass):
     
     Methods inherited from RateMultipliersPerClass
     ------------------------------------------------
-    _set_model_simplifcation_flags
+    _set_model_simplification_flags
     _get_norm_factor
     
     """
@@ -700,7 +701,7 @@ class RateMultipliersPerClassFromFile(RateMultipliersPerClass):
         out_size = ( self.num_mixtures, self.k_rate_mults )
         
         # possibly simplify model setup
-        self._set_model_simplifcation_flags()
+        self._set_model_simplification_flags()
         
         
         ### rate files: rate multipliers
@@ -777,7 +778,7 @@ class IndpRateMultipliersFromFile(IndpRateMultipliers):
     
     Methods inherited from IndpRateMultipliers
     -------------------------------------------
-    _set_model_simplifcation_flags
+    _set_model_simplification_flags
     _get_norm_factor
     _maybe_duplicate
     
@@ -788,7 +789,7 @@ class IndpRateMultipliersFromFile(IndpRateMultipliers):
         self.k_rate_mults = self.config['k_rate_mults']
         
         # possibly simplify model setup
-        self._set_model_simplifcation_flags()
+        self._set_model_simplification_flags()
         
         
         ### rate files: rate multipliers

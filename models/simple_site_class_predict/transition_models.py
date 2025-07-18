@@ -120,7 +120,7 @@ class GeomLenTransitionLogprobs(ModuleBase):
                                         label=f'{self.name}/geom_prob_emit', 
                                         which='scalars')
         
-        out_vec = safe_log( jnp.array( [p_emit, 1-p_emit] ) ) #(2,)
+        out_vec = safe_log( jnp.concatenate( [p_emit, 1-p_emit] ) ) #(2,)
         
         out_dict = {'joint': out_vec,
                     'marginal': out_vec,

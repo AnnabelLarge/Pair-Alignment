@@ -1108,7 +1108,7 @@ def joint_prob_from_counts( batch: tuple[ArrayLike],
                             scoring_matrices_dict: dict,
                             t_array: ArrayLike or None,
                             exponential_dist_param: float,
-                            norm_loss_by: str or None,
+                            norm_reported_loss_by: str or None,
                             return_intermeds: bool=False ):
     """
     score an alignment from summary counts
@@ -1169,7 +1169,7 @@ def joint_prob_from_counts( batch: tuple[ArrayLike],
         when marginalizing over time, use an exponential prior; this is the 
         parameter for that exponential distribution
     
-    norm_loss_by : {desc_len, align_len}
+    norm_reported_loss_by : {desc_len, align_len}
         how to normalize the loss, if including indels (if not scoring indels, 
         normalization length is already decided)
         
@@ -1292,12 +1292,12 @@ def joint_prob_from_counts( batch: tuple[ArrayLike],
     
     
     # normalize by some length    
-    if (norm_loss_by == 'desc_len') and score_indels:
+    if (norm_reported_loss_by == 'desc_len') and score_indels:
         length_for_normalization = ( subCounts.sum(axis=(-2, -1)) + 
                                      insCounts.sum(axis=(-1))
                                      )
     
-    elif (norm_loss_by == 'align_len') and score_indels:
+    elif (norm_reported_loss_by == 'align_len') and score_indels:
         length_for_normalization = ( subCounts.sum(axis=(-2, -1)) + 
                                      insCounts.sum(axis=(-1)) + 
                                      delCounts.sum(axis=(-1))
@@ -1323,7 +1323,7 @@ def cond_prob_from_counts( batch: tuple[ArrayLike],
                             scoring_matrices_dict: dict,
                             t_array: ArrayLike or None,
                             exponential_dist_param: float,
-                            norm_loss_by: str or None,
+                            norm_reported_loss_by: str or None,
                             return_intermeds: bool=False ):
     """
     score an alignment from summary counts
@@ -1384,7 +1384,7 @@ def cond_prob_from_counts( batch: tuple[ArrayLike],
         when marginalizing over time, use an exponential prior; this is the 
         parameter for that exponential distribution
     
-    norm_loss_by : {desc_len, align_len}
+    norm_reported_loss_by : {desc_len, align_len}
         how to normalize the loss, if including indels (if not scoring indels, 
         normalization length is already decided)
         
@@ -1507,12 +1507,12 @@ def cond_prob_from_counts( batch: tuple[ArrayLike],
     
     
     # normalize by some length    
-    if (norm_loss_by == 'desc_len') and score_indels:
+    if (norm_reported_loss_by == 'desc_len') and score_indels:
         length_for_normalization = ( subCounts.sum(axis=(-2, -1)) + 
                                      insCounts.sum(axis=(-1))
                                      )
     
-    elif (norm_loss_by == 'align_len') and score_indels:
+    elif (norm_reported_loss_by == 'align_len') and score_indels:
         length_for_normalization = ( subCounts.sum(axis=(-2, -1)) + 
                                      insCounts.sum(axis=(-1)) + 
                                      delCounts.sum(axis=(-1))
@@ -1575,10 +1575,6 @@ def anc_marginal_probs_from_counts( batch: tuple[ArrayLike],
         scoring_matrices_dict['all_transit_matrices']['marginal'] : ArrayLike
             if score_indels: (2,2)
             elif not score indels: (2,)
-        
-    norm_loss_by : {desc_len, align_len}
-        how to normalize the loss, if including indels (if not scoring indels, 
-        normalization length is already decided)
         
     Returns
     -------
@@ -1683,10 +1679,6 @@ def desc_marginal_probs_from_counts( batch: tuple[ArrayLike],
         scoring_matrices_dict['all_transit_matrices']['marginal'] : ArrayLike
             if score_indels: (2,2)
             elif not score indels: (2,)
-        
-    norm_loss_by : {desc_len, align_len}
-        how to normalize the loss, if including indels (if not scoring indels, 
-        normalization length is already decided)
         
     Returns
     -------

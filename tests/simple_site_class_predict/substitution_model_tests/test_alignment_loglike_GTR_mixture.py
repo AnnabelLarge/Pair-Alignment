@@ -28,7 +28,11 @@ from models.simple_site_class_predict.model_functions import (rate_matrix_from_e
                                                               lse_over_match_logprobs_per_mixture,
                                                               joint_prob_from_counts)
 
+from models.simple_site_class_predict.emission_models import GTRLogprobs
 
+class GTRLogprobsForDebug(GTRLogprobs):
+    def _get_square_exchangeabilities_matrix(self,*args,**kwargs):
+        return self.config['exchangeabilities_mat']
 
 
 THRESHOLD = 1e-6
@@ -123,9 +127,11 @@ class TestAlignmentLoglikeGTRMixture(unittest.TestCase):
                         for c in range(C):
                             for k in range(K):
                                 mixture_joint_matrix = np.exp(log_joint[t,c,k,...])
+                                
+                                # P(c) P(k|c) = P(c,k)
                                 mixture_prob = class_probs[c] * rate_mult_probs[c,k]
                                 
-                                # P(c) P(x,y|c,t)
+                                # P(c,k) P(x,y|c,k,t) P(x,y,c,k|t)
                                 prob_of_this_column += (mixture_prob *
                                                        mixture_joint_matrix[anc_tok-3, desc_tok-3] )
                         
