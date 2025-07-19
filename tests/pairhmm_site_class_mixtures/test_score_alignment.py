@@ -7,8 +7,6 @@ Created on Mon May  5 09:47:56 2025
 
 About:
 ======
-4th test for substitution models
-
 Confirm that scoring function for aggregated counts is working as expected
 
 """
@@ -47,10 +45,9 @@ def generate_fake_alignment():
 
 class TestScoreAlignment(unittest.TestCase):
     """
-    SUBSTITUTION PROCESS SCORING TEST 4
-    
     B: batch (samples)
     C: hidden site classes
+    K: rate multipliers
     T: branch lengths (time)
     A: alphabet
     

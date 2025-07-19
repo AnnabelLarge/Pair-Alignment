@@ -19,20 +19,23 @@ from tests.data_processing import (str_aligns_to_tensor,
                                    summarize_alignment)
 from models.simple_site_class_predict.IndpSites import IndpSitesLoadAll
 from models.simple_site_class_predict.model_functions import (anc_marginal_probs_from_counts,
-                                                              desc_marginal_probs_from_counts,
                                                               cond_prob_from_counts,
                                                               joint_prob_from_counts)
 
 THRESHOLD = 1e-6
 
 
-class TestTKFJointCondAncMarg(unittest.TestCase):
+class TestJointCondMargWithScoringFuncs(unittest.TestCase):
     """
     Check that cond = joint / anc for indp sites model using a tkf model
     
     This isn't a problem for tkf91, but it's a bit fiddly with tkf92
     """
     def setUp(self):
+        self.path = f'tests/pairhmm_site_class_mixtures'
+        self.req_files_path = f'{self.path}/req_files'
+        
+        
         ###############################
         ### generate fake alignments  #
         ###############################
@@ -64,10 +67,10 @@ class TestTKFJointCondAncMarg(unittest.TestCase):
                       'r_extend': np.array([0.9])}
         
         # save params to files to load
-        with open('./tests/neural_hmm/vs_simple_site_class/req_files/equl_dist.npy','wb') as g:
+        with open(f'{self.req_files_path}/equl_dist.npy','wb') as g:
             np.save(g, self.training_dset_emit_counts/self.training_dset_emit_counts.sum())
         
-        with open('./tests/neural_hmm/vs_simple_site_class/req_files/tkf_params_file.pkl','wb') as g:
+        with open(f'{self.req_files_path}/tkf_params_file.pkl','wb') as g:
             pickle.dump(tkf_params, g)
         
         # declare dims
@@ -83,21 +86,24 @@ class TestTKFJointCondAncMarg(unittest.TestCase):
         # init object
         pairhmm_config = {'num_mixtures':1,
                          'num_tkf_fragment_classes': 1,
+                         'k_rate_mults':1,
                          'subst_model_type': subst_model_type,
                          'indel_model_type': indel_model_type,
+                         'indp_rate_mults': False,
                          'times_from': 't_array_from_file',
                          'exponential_dist_param': 1.1,
                          'training_dset_emit_counts': self.training_dset_emit_counts,
                          'emission_alphabet_size': self.A,
                          'tkf_function_name': 'regular',
-                         'filenames': {'exch': './tests/neural_hmm/vs_simple_site_class/req_files/LG08_exchangeability_vec.npy',
-                                       'equl_dist': './tests/neural_hmm/vs_simple_site_class/req_files/equl_dist.npy',
-                                       'tkf_params_file': './tests/neural_hmm/vs_simple_site_class/req_files/tkf_params_file.pkl'}}
+                         'filenames': {'exch': f'{self.req_files_path}/LG08_exchangeability_vec.npy',
+                                       'equl_dist': f'{self.req_files_path}/equl_dist.npy',
+                                       'tkf_params_file': f'{self.req_files_path}/tkf_params_file.pkl'}}
         pairhmm = IndpSitesLoadAll(config=pairhmm_config,
                             name='pairhmm')
         
         scoring_mat_dict = pairhmm.apply( variables={},
                                           t_array=self.t_array,
+                                          return_intermeds=True,
                                           sow_intermediates=False,
                                           method = '_get_scoring_matrices')
         
@@ -109,7 +115,7 @@ class TestTKFJointCondAncMarg(unittest.TestCase):
                                            scoring_matrices_dict = scoring_mat_dict,
                                            t_array = self.t_array,
                                            exponential_dist_param = pairhmm_config['exponential_dist_param'],
-                                           norm_loss_by = 'desc_len',
+                                           norm_reported_loss_by = 'desc_len',
                                            return_intermeds= True )
         
         to_add = anc_marginal_probs_from_counts( batch = self.pairhmm_batch,
@@ -127,7 +133,7 @@ class TestTKFJointCondAncMarg(unittest.TestCase):
                                         scoring_matrices_dict = scoring_mat_dict,
                                         t_array = self.t_array,
                                         exponential_dist_param = pairhmm_config['exponential_dist_param'],
-                                        norm_loss_by = 'desc_len',
+                                        norm_reported_loss_by = 'desc_len',
                                         return_intermeds= True )
         
         scores = {**scores, **to_add}

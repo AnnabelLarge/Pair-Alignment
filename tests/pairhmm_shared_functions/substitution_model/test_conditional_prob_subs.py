@@ -8,8 +8,6 @@ Created on Fri May  2 20:28:18 2025
 
 About:
 ======
-2nd test for substitution models
-
 Confirm that conditional probability of emission is calculated correclty,
   using the corresponding function from cherryML
 """
@@ -85,8 +83,6 @@ def cherryml_matrix_exp(Q, exponents):
 
 class TestConditionalProbSubs(unittest.TestCase):
     """
-    SUBSTITUTION PROCESS SCORING TEST 2
-    
     C: hidden site classes
     K: rate multipliers
     T: branch lengths (time)
@@ -99,17 +95,12 @@ class TestConditionalProbSubs(unittest.TestCase):
         implementation from cherryML
       
     """
-    def test_class_and_rate_mult_mixtures(self):
+    def setUp(self):
         """
-        PURPOSE: cond_logprob_emit_at_match_per_mixture, which gets the 
-            conditional probability of substitution x->y for every match site;
-            use cherryML function as reference implementation
-            
-            
         C = 2
         K = 4
         """
-        # params to work with
+        ### params to work with
         exchangeabilities = np.array([[0, 1, 2, 3],
                                       [1, 0, 4, 5],
                                       [2, 4, 0, 6],
@@ -119,12 +110,10 @@ class TestConditionalProbSubs(unittest.TestCase):
         equilibrium_distribution_2 = np.array([0.4, 0.3, 0.2, 0.1])
         equilibrium_distributions = np.stack([equilibrium_distribution_1,
                                               equilibrium_distribution_2]) #(C,A)
-        del equilibrium_distribution_1, equilibrium_distribution_2
         
         raw_Q = rate_matrix_from_exch_equl(exchangeabilities,
                                             equilibrium_distributions,
                                           norm=True) #(C,A,A)
-        del exchangeabilities, equilibrium_distributions
         
         rate_mults = np.array([[  1,   2,   3,   4],
                                 [0.1, 0.2, 0.3, 0.4]]) #(C,K)
@@ -132,12 +121,14 @@ class TestConditionalProbSubs(unittest.TestCase):
         
         t_array = np.array( [0.3, 1, 1.5] ) #(T,)
        
+        # dims
         C = Q.shape[0]
         K = rate_mults.shape[1]
         T = t_array.shape[0]
         A = Q.shape[1]
 
-        # with cherryML function
+
+        ### cherryML implementation, per mixture
         cherryml_results = np.zeros( (T,C,K,A,A) )
         for c in range(C):
             for k in range(K):
@@ -145,13 +136,34 @@ class TestConditionalProbSubs(unittest.TestCase):
                                           exponents=t_array) #(A, A)
                 for t in range(T):
                     cherryml_results[t,c,k,...] = out[t,...]
+                    
+        # make attributes for later
+        self.exchangeabilities = exchangeabilities
+        self.equilibrium_distributions = equilibrium_distributions
+        self.rate_mults = rate_mults
+        self.Q = Q
+        self.t_array = t_array
+        self.cherryml_results = cherryml_results
+        self.C = C
+        self.K = K
+        self.T = T
+        self.A = A
         
-        # with my functions
-        log_pred = cond_logprob_emit_at_match_per_mixture(t_array = t_array,
-                                                          scaled_rate_mat_per_mixture = Q) #(T,C,K,A,A)
+        
+    def test_class_and_rate_mult_mixtures(self):
+        """
+        PURPOSE: cond_logprob_emit_at_match_per_mixture, which gets the 
+            conditional probability of substitution x->y for every match site;
+            use cherryML function as reference implementation
+            
+        C = 2
+        K = 4
+        """
+        log_pred = cond_logprob_emit_at_match_per_mixture(t_array = self.t_array,
+                                                          scaled_rate_mat_per_mixture = self.Q) #(T,C,K,A,A)
         pred = np.exp(log_pred) #(T,C,K,A,A)
         
-        npt.assert_allclose(cherryml_results, pred, atol=THRESHOLD)
+        npt.assert_allclose(self.cherryml_results, pred, atol=THRESHOLD)
     
     
     def test_GTRLogprobs_fw(self):
@@ -161,64 +173,27 @@ class TestConditionalProbSubs(unittest.TestCase):
         C = 2
         K = 4
         """
-        # params to work with
-        exchangeabilities = np.array([[0, 1, 2, 3],
-                                      [1, 0, 4, 5],
-                                      [2, 4, 0, 6],
-                                      [3, 5, 6, 0]]) #(A,A)
-        
-        equilibrium_distribution_1 = np.array([0.1, 0.2, 0.3, 0.4])
-        equilibrium_distribution_2 = np.array([0.4, 0.3, 0.2, 0.1])
-        equilibrium_distributions = np.stack([equilibrium_distribution_1,
-                                              equilibrium_distribution_2]) #(C,A)
-        del equilibrium_distribution_1, equilibrium_distribution_2
-        
-        raw_Q = rate_matrix_from_exch_equl(exchangeabilities,
-                                           equilibrium_distributions,
-                                          norm=True) #(C,A,A)
-        
-        rate_mults = np.array([[  1,   2,   3,   4],
-                               [0.1, 0.2, 0.3, 0.4]]) #(C,K)
-        Q = np.multiply( raw_Q[:,None,:,:], rate_mults[...,None,None] ) #(C, K, A, A)
-        
-        t_array = np.array( [0.3, 1, 1.5] ) #(T,)
-       
-        C = Q.shape[0]
-        K = rate_mults.shape[1]
-        T = t_array.shape[0]
-        A = Q.shape[1]
-
-        # with cherryML function
-        cherryml_results = np.zeros( (T,C,K,A,A) )
-        for c in range(C):
-            for k in range(K):
-                out = cherryml_matrix_exp(Q=Q[c,k,...],
-                                          exponents=t_array) #(A, A)
-                for t in range(T):
-                    cherryml_results[t,c,k,...] = out[t,...]
-        
-        # with my model
-        my_model = GTRLogprobsForDebug(config={'emission_alphabet_size': A,
-                                               'exchangeabilities_mat': exchangeabilities})
+        my_model = GTRLogprobsForDebug(config={'emission_alphabet_size': self.A,
+                                               'exchangeabilities_mat': self.exchangeabilities})
         
         init_params = my_model.init(rngs = jax.random.key(0),
-                                    logprob_equl = np.log(equilibrium_distributions),
-                                    rate_multipliers = rate_mults,
-                                    t_array = t_array,
+                                    logprob_equl = np.log(self.equilibrium_distributions),
+                                    rate_multipliers = self.rate_mults,
+                                    t_array = self.t_array,
                                     sow_intermediates=False,
                                     return_cond=True,
                                     return_intermeds=False)
         
         log_pred,_ = my_model.apply(variables = init_params,
-                                  logprob_equl = np.log(equilibrium_distributions),
-                                  rate_multipliers = rate_mults,
-                                  t_array = t_array,
+                                  logprob_equl = np.log(self.equilibrium_distributions),
+                                  rate_multipliers = self.rate_mults,
+                                  t_array = self.t_array,
                                   sow_intermediates=False,
                                   return_cond=True,
                                   return_intermeds=False)
         pred = np.exp(log_pred) #(T,C,K,A,A)
         
-        npt.assert_allclose(cherryml_results, pred, atol=THRESHOLD)
+        npt.assert_allclose(self.cherryml_results, pred, atol=THRESHOLD)
         
     
 

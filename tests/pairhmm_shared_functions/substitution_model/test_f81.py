@@ -22,12 +22,8 @@ import numpy as np
 import numpy.testing as npt
 import unittest
 
-from models.simple_site_class_predict.emission_models import F81Logprobs
-from models.simple_site_class_predict.emission_models import GTRLogprobs
-
-from models.simple_site_class_predict.model_functions import (upper_tri_vector_to_sym_matrix,
-                                                              rate_matrix_from_exch_equl,
-                                                              cond_logprob_emit_at_match_per_mixture)
+from models.simple_site_class_predict.emission_models import F81Logprobs,GTRLogprobs
+from models.simple_site_class_predict.model_functions import upper_tri_vector_to_sym_matrix
 
 THRESHOLD = 1e-6
 

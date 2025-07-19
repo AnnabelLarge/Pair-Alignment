@@ -13,9 +13,6 @@ standalone functions for pairHMM models; are NOT flax modules and do NOT
 
 functions:
 ---------
-'get_cond_transition_logprobs',
-'get_tkf91_single_seq_marginal_transition_logprobs',
-'get_tkf92_single_seq_marginal_transition_logprobs',
 'all_loglikes_forward',
 'anc_marginal_probs_from_counts',
 'approx_beta',
@@ -27,8 +24,11 @@ functions:
 'cond_prob_from_counts',
 'desc_marginal_probs_from_counts',
 'fill_f81_logprob_matrix',
+'get_cond_transition_logprobs',
 'get_joint_loglike_emission_branch_len_per_samp',
 'get_joint_loglike_emission_time_grid',
+'get_tkf91_single_seq_marginal_transition_logprobs',
+'get_tkf92_single_seq_marginal_transition_logprobs',
 'joint_logprob_emit_at_match_per_mixture',
 'joint_only_forward',
 'joint_prob_from_counts',
@@ -38,14 +38,17 @@ functions:
 'lse_over_equl_logprobs_per_mixture',
 'lse_over_match_logprobs_per_mixture',
 'marginalize_over_times',
+'maybe_write_matrix_to_ascii',
 'rate_matrix_from_exch_equl',
 'regular_tkf',
 'safe_log',
 'scale_rate_matrix',
+'scale_rate_multipliers',
 'stable_log_one_minus_x',
 'switch_tkf',
 'true_beta',
-'upper_tri_vector_to_sym_matrix'
+'upper_tri_vector_to_sym_matrix',
+'write_matrix_to_npy'
 
 
 internal:
@@ -876,7 +879,7 @@ def approx_tkf( mu, offset, t_array ):
 ### conditional transition matrices                    ########################
 ###############################################################################
 def get_tkf91_single_seq_marginal_transition_logprobs(offset,
-                                **kwargs):
+                                                      **kwargs):
     """
     For scoring single-sequence marginals under TKF91 model
     

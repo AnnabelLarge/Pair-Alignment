@@ -8,8 +8,6 @@ Created on Mon May  5 09:47:56 2025
 
 ABOUT:
 ======
-7th test for substitution models
-
 C mixtures of the same model should achieve the same loglikelihood as just
   one copy of the model
 
@@ -34,10 +32,8 @@ NUM_CLASSES = 3
 NUM_RATE_MULTS = 4
 
 
-class TestAlignmentLoglikeGTRMixture(unittest.TestCase):
+class TestMixtureModelDegeneracy(unittest.TestCase):
     """
-    SUBSTITUTION PROCESS SCORING TEST 7
-    
     B: batch (samples)
     L: length (number of alignment columns)
     C: hidden site classes
@@ -113,7 +109,7 @@ class TestAlignmentLoglikeGTRMixture(unittest.TestCase):
                                     score_indels = False,
                                     t_array = t_array,
                                     exponential_dist_param = np.array([1.1]),
-                                    norm_loss_by = None
+                                    norm_reported_loss_by = None
                                     )
         
         

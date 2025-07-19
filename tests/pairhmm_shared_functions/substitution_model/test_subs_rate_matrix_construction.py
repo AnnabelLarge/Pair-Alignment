@@ -8,8 +8,6 @@ Created on Fri May  2 19:23:54 2025
 
 ABOUT:
 ======
-1st test for substitution models
-
 Confirm that rate matrix is constructed correctly
     1. by hand
     2. compared to LG08 rate matrix
@@ -150,8 +148,8 @@ class TestSubsRateMatrixConstruction(unittest.TestCase):
         
     """
     def setUp(self):
-        self.req_files_path = './tests/simple_site_class_predict/substitution_model_tests/req_files'
-        self.path = './tests/simple_site_class_predict/substitution_model_tests'
+        self.path = './tests/pairhmm_shared_functions/substitution_model'
+        self.req_files_path = f'{self.path}/req_files'
     
     def test_upper_tri_vector_to_sym_matrix(self):
         """
@@ -184,7 +182,7 @@ class TestSubsRateMatrixConstruction(unittest.TestCase):
         
         npt.assert_allclose(true, pred, atol=THRESHOLD)
     
-    def testrate_matrix_from_exch_equl_normalized_matrix(self):
+    def test_rate_matrix_from_exch_equl_normalized_matrix(self):
         """
         PURPOSE: compare output from rate_matrix_from_exch_equl to
           ground truth (calculated by hand), including rate matrix 

@@ -31,9 +31,6 @@ def TKF_coeffs (lam, mu, t):
 
 class TestOriginalTKFParamFns(unittest.TestCase):
     """
-    INDEL PROCESS SCORING TEST 1
-    
-    
     About
     ------
     make sure my method 'tkf_params' returns the same thing as Ian's 
