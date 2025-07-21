@@ -309,10 +309,12 @@ class IndpSites(ModuleBase):
         #########################
         # time marginalization hidden in joint_prob_from_counts function
         #
-        # aux_dict has the following keys (when return_intermeds is True)
+        # aux_dict has the following keys 
         #   joint_neg_logP (B)
         #   joint_neg_logP_length_normed (B)
         #   align_length_for_normalization (B,)
+        #
+        # (extra keys when return_intermeds is True)
         #   joint_transit_score, (B,)
         #   joint_emission_score, (B,)
         aux_dict = joint_prob_from_counts( batch = batch,
@@ -324,10 +326,6 @@ class IndpSites(ModuleBase):
                                            norm_reported_loss_by = self.norm_reported_loss_by,
                                            return_intermeds=return_intermeds )
         aux_dict['used_approx'] = scoring_matrices_dict['used_approx']
-        
-        if return_intermeds:
-            aux_dict['joint_transit_score'] = scoring_matrices_dict['joint_transit_score']
-            aux_dict['joint_emission_score'] = scoring_matrices_dict['joint_emission_score']
         
         
         #####################################

@@ -1,5 +1,6 @@
 Status:
 =======
+7/21/25: all pass
 
 
 Summary: 
@@ -8,9 +9,14 @@ Test functions related to independent sites mixtures (pairhmm models)
 
 All functions tested: 
 ----------------------
+  - lse_over_match_logprobs_per_mixture
+  - joint_prob_from_counts
+  - anc_marginal_probs_from_counts
+  - cond_prob_from_counts
 
 All flax modules tested:
 -------------------------
+  - simple_site_class_predict.IndpSites
 
 
 All tests:
@@ -42,7 +48,7 @@ test_joint_cond_marg_with_scoring_funcs
 ----------------------------------------
 CALCULATION TESTED: P(x,y|t) = P(y|x,t) * P(x)
 
-ABOUT: make sure that you recover the conditional log-probability from the ancestor and joint log-probabilities
+ABOUT: make sure that you recover the conditional log-probability from the ancestor and joint log-probabilities (from functions alone)
 
 functions tested:
   - joint_prob_from_counts
@@ -51,6 +57,16 @@ functions tested:
 
 
 
+test_indp_site_classes_loglikes
+----------------------------------------
+CALCULATION TESTED: P(x,y|t), P(y|x,t), P(x), and P(y)
+
+ABOUT: using the full IndpSites flax module, calculate all four probabilities of interest, and compare against hand-done calculations
+
+flax modules tested:
+  - IndpSites.__call__
+  - IndpSites._get_scoring_matrices
+  - IndpSites.calculate_all_loglikes
 
 
 
@@ -58,22 +74,4 @@ functions tested:
 
 TODO:
 =====
-INPROGRESS <- work on this one next; going to assert that likelihood with IndpSites is the same as hand-done calculations
-  > not that important, but for completion: some explicit test of cond_prob_from_counts and anc_marginal_probs_from_counts, desc_marginal_probs_from_counts against hand-done calculations... it's implied that these work though, since test_joint_cond_marg_with_scoring_funcs test passes (and hopefully, this INPROGRESS script will pass)
-
-test_time_marginalization
-test_full_model_validity
-
-
-
-
-template:
-=========
-
-CALCULATION TESTED:
-
-ABOUT: 
-
-functions tested:
-
-flax models tested:
+not that important, but for completion: some explicit test of cond_prob_from_counts and anc_marginal_probs_from_counts, desc_marginal_probs_from_counts against hand-done calculations... it's implied that these work though
