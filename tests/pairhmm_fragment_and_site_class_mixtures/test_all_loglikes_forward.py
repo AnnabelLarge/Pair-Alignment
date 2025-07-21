@@ -26,8 +26,7 @@ from tests.data_processing import (str_aligns_to_tensor,
 
 from models.simple_site_class_predict.transition_models import TKF92TransitionLogprobs
 from models.simple_site_class_predict.model_functions import (switch_tkf,
-                                                              MargTKF92TransitionLogprobs,
-                                                              CondTransitionLogprobs,
+                                                              get_tkf92_single_seq_marginal_transition_logprobs,
                                                               joint_only_forward,
                                                               all_loglikes_forward)
 
@@ -108,7 +107,7 @@ class TestAllLoglikesForward(unittest.TestCase):
                                                 class_probs = class_probs,
                                                 method = 'fill_joint_tkf92') #(T, C, C, 4, 4)
         
-        self.marg_logprob_transit = MargTKF92TransitionLogprobs( offset = offset,
+        self.marg_logprob_transit = get_tkf92_single_seq_marginal_transition_logprobs( offset = offset,
                                                             class_probs = class_probs,
                                                             r_ext_prob = r )
         
@@ -119,7 +118,7 @@ class TestAllLoglikesForward(unittest.TestCase):
                                          joint_logprob_emit_at_match = self.joint_logprob_emit_at_match,
                                          all_transit_matrices = {'joint': self.joint_logprob_transit,
                                                                  'marginal': self.marg_logprob_transit},
-                                         unique_time_per_branch = False )
+                                         unique_time_per_sample = False )
         
         self.pred_joint = -pred_out['joint_neg_logP'] #(B,)
         self.pred_anc_marg = -pred_out['anc_neg_logP'] #(B,)
@@ -130,7 +129,8 @@ class TestAllLoglikesForward(unittest.TestCase):
                                   joint_logprob_emit_at_match = self.joint_logprob_emit_at_match,
                                   logprob_emit_at_indel = self.logprob_emit_at_indel,
                                   joint_logprob_transit = self.joint_logprob_transit,
-                                  unique_time_per_branch = False ) #(L_align, T, C, B)
+                                  unique_time_per_sample = False,
+                                  return_all_intermeds = True ) #(L_align, T, C, B)
         
         # (L_align, T, C, B) -> (T, B)
         true_joint = logsumexp(tmp[-1,...], axis=1)

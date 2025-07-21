@@ -92,7 +92,7 @@ class TestScoreAlignment(unittest.TestCase):
                                       scoring_matrices_dict = scoring_matrices_dict,
                                       t_array = np.zeros(1,),
                                       exponential_dist_param = None,
-                                      norm_loss_by = None )
+                                      norm_reported_loss_by = None )
         
         pred_scores = -out['joint_neg_logP']
         
@@ -170,7 +170,7 @@ class TestScoreAlignment(unittest.TestCase):
                                       scoring_matrices_dict = scoring_matrices_dict,
                                       t_array = np.zeros(1,),
                                       exponential_dist_param = None,
-                                      norm_loss_by = None )
+                                      norm_reported_loss_by = None )
         
         pred_scores = -out['joint_neg_logP']
         

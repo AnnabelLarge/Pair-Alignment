@@ -25,20 +25,13 @@ from tests.data_processing import (str_aligns_to_tensor,
                                    summarize_alignment)
 
 from models.simple_site_class_predict.transition_models import TKF92TransitionLogprobs
-from models.simple_site_class_predict.model_functions import (switch_tkf,
-                                                              approx_tkf,
-                                                              regular_tkf,
-                                                              MargTKF92TransitionLogprobs,
-                                                              CondTransitionLogprobs,
+from models.simple_site_class_predict.model_functions import (regular_tkf,
                                                               joint_only_forward)
 
 THRESHOLD = 1e-6
 
 class TestJointOnlyForwardUniqBranchLen(unittest.TestCase):
     """
-    FORWARD-BACKWARD TEST 2
-    
-    
     About
     ------
     compare forward algo implementation to manual enumeration over all 
@@ -116,7 +109,8 @@ class TestJointOnlyForwardUniqBranchLen(unittest.TestCase):
                                                joint_logprob_emit_at_match = self.joint_logprob_emit_at_match,
                                                logprob_emit_at_indel = self.logprob_emit_at_indel,
                                                joint_logprob_transit = self.joint_logprob_transit,
-                                               unique_time_per_branch = True)
+                                               unique_time_per_sample = True,
+                                               return_all_intermeds = True)
         
         # (L_align, C, B) -> (B)
         pred = logsumexp(forward_intermeds[-1,...], axis=0)

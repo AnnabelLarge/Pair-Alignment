@@ -1894,7 +1894,7 @@ def joint_only_forward(aligned_inputs,
                        logprob_emit_at_indel,
                        joint_logprob_transit,
                        unique_time_per_sample: bool, 
-                       return_all_intermeds = False):
+                       return_all_intermeds: bool = False):
     """
     forward algo ONLY to find joint loglike
     
