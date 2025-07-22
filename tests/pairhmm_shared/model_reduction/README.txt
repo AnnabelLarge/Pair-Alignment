@@ -4,6 +4,7 @@ ABOUT: With just one site class and one rate multiplier, both indp-sites and fra
 
 MODELS TESTED:
   - f81 + tkf92
+  - gtr + tkf92 (needs to train a long time to reach equilibrium, but seems to be trending in the right direction)
 
 
 FOLDER CONTENTS:
@@ -12,7 +13,9 @@ FOLDER CONTENTS:
 config files (run these to recreate results):
 ----------------------------------------------
 CONFIG_frag-mix-code_f81_tkf92.json
+CONFIG_frag-mix-code_gtr_tkf92.json
 CONFIG_indp-sites-code_f81_tkf92.json
+CONFIG_indp-sites-code_gtr_tkf92.json
 
 
 results from overtraining:
