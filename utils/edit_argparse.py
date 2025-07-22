@@ -41,7 +41,6 @@ def fill_with_default_values(args):
         # missing some things from tkf models
         args.times_from = None
         
-    
     elif args.pred_model_type.startswith('neural_hmm'):
         # keep bos for now
         if 'full_alphabet_size' not in provided_args:
@@ -109,7 +108,7 @@ def share_top_level_args(args):
     elif args.pred_model_type in ['pairhmm_indp_sites',
                                   'pairhmm_frag_and_site_classes']:
         args.pred_config['gap_tok'] = args.gap_tok
-        args.pred_config['norm_loss_by'] = args.norm_loss_by
+        args.pred_config['norm_reported_loss_by'] = args.norm_reported_loss_by
         args.pred_config['emission_alphabet_size'] = args.emission_alphabet_size
     
 

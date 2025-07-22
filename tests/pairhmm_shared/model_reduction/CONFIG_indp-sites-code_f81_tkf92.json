@@ -1,0 +1,53 @@
+{
+    "training_wkdir": "RESULTS_indp-sites",
+    "rng_seednum": 0,
+
+    "data_dir": "example_data",
+    "train_dset_splits": ["sevenSamp"],
+    "test_dset_splits": ["sevenSamp"],
+    "toss_alignments_longer_than": null,
+    "bos_eos_as_match": false,
+    "batch_size": 7,
+    "emission_alphabet_size": 20,
+    "gap_tok": 43,
+
+    "num_epochs": 5000,
+    "optimizer_config": {
+        "init_value": 0.005,
+        "peak_value": 0.005,
+        "end_value": 0.005,
+        "warmup_steps": 0,
+        "weight_decay": 0,
+        "every_k_schedule": 1
+    },
+    "early_stop_cond1_atol": 1e-3,
+    "early_stop_cond2_gap": 3,
+    "patience": 5000,
+    "update_grads": true,
+
+    "interms_for_tboard": {
+        "finalpred_sow_outputs": true,
+        "forward_pass_outputs": true,
+        "gradients": true
+    },
+    "save_arrs": true,
+    "save_per_sample_losses": true,
+    "norm_reported_loss_by": "desc_len",
+
+    "pred_model_type": "pairhmm_indp_sites",
+    "pred_config": {
+        "load_all": false,
+        "num_mixtures": 1,
+
+        "subst_model_type": "f81",
+        "k_rate_mults": 1,
+        "indp_rate_mults": false,
+        "norm_rate_matrix": true,
+        "norm_rate_mults": true,
+
+        "indel_model_type": "tkf92",
+
+        "times_from": "t_per_sample"
+        }
+    
+}

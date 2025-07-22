@@ -28,6 +28,10 @@ from models.simple_site_class_predict.emission_models import (EqulDistLogprobsFr
                                                               GTRLogprobsFromFile,
                                                               SiteClassLogprobs,
                                                               SiteClassLogprobsFromFile,
+                                                              RateMultipliersPerClass,
+                                                              IndpRateMultipliers,
+                                                              RateMultipliersPerClassFromFile,
+                                                              IndpRateMultipliersFromFile,
                                                               HKY85Logprobs,
                                                               HKY85LogprobsFromFile,
                                                               F81Logprobs,
@@ -253,11 +257,11 @@ class FragAndSiteClasses(ModuleBase):
         ### for REPORTING ONLY (not the objective function), normalize by length
         if self.norm_reported_loss_by == 'desc_len':
             # where descendant is not pad or gap
-            banned_toks = [0,1,2,self.gap_tok]
+            banned_toks = np.array( [0,1,2,self.gap_tok] )
             
         elif self.norm_reported_loss_by == 'align_len':
             # where descendant is not pad (but could be gap)
-            banned_toks = [0,1,2]
+            banned_toks = np.array( [0,1,2] )
         
         mask = ~jnp.isin( aligned_inputs[...,1], banned_toks)
         length_for_normalization = mask.sum(axis=1)
@@ -313,9 +317,9 @@ class FragAndSiteClasses(ModuleBase):
             unique_time_per_sample = False
             
         # get lengths, not including <bos> and <eos>
-        align_len = ~jnp.isin( aligned_inputs[...,0], [0,1,2] )
-        anc_len = ~jnp.isin( aligned_inputs[...,0], [0,1,2,self.gap_tok] )
-        desc_len = ~jnp.isin( aligned_inputs[...,1], [0,1,2,self.gap_tok] )
+        align_len = ~jnp.isin( aligned_inputs[...,0], np.array( [0,1,2] ) )
+        anc_len = ~jnp.isin( aligned_inputs[...,0], np.array( [0,1,2,self.gap_tok] ) )
+        desc_len = ~jnp.isin( aligned_inputs[...,1], np.array( [0,1,2,self.gap_tok] ) )
         align_len = align_len.sum(axis=1)
         anc_len = anc_len.sum(axis=1)
         desc_len = desc_len.sum(axis=1)
@@ -393,8 +397,7 @@ class FragAndSiteClasses(ModuleBase):
         if write_time_static_objs:
             with open(f'{out_folder}/activations_and_times_used.tsv','w') as g:
                 if not self.config['load_all']:
-                    act = self.rate_mult_module.rate_mult_activation
-                    g.write(f'activation for rate multipliers: {act}\n')
+                    g.write(f'activation for rate multipliers: bound_sigmoid\n')
                     g.write(f'activation for exchangeabiliites: bound_sigmoid\n')
                 
                 if self.times_from in ['geometric','t_array_from_file']:
@@ -539,7 +542,7 @@ class FragAndSiteClasses(ModuleBase):
                                          max_val = offs_max_val).item() #float
                 lam = mu * (1 - offset)  #float
                 
-                with open(f'{out_folder}/ASCII_tkf92_indel_params.txt','w') as g:
+                with open(f'{out_folder}/ASCII_{prefix}_tkf92_indel_params.txt','w') as g:
                     g.write(f'insert rate, lambda: {lam}\n')
                     g.write(f'deletion rate, mu: {mu}\n')
                     g.write(f'offset: {offset}\n\n')
@@ -559,7 +562,7 @@ class FragAndSiteClasses(ModuleBase):
                 
                 mean_indel_lengths = 1 / (1 - r_extend) #(C)
                 
-                with open(f'{out_folder}/ASCII_tkf92_indel_params.txt','a') as g:
+                with open(f'{out_folder}/ASCII_{prefix}_tkf92_indel_params.txt','a') as g:
                     g.write(f'extension prob, r: ')
                     [g.write(f'{elem}\t') for elem in r_extend]
                     g.write('\n')
@@ -569,54 +572,10 @@ class FragAndSiteClasses(ModuleBase):
                 
                 out_dict['r_extend'] = r_extend #(C,)
             
-                with open(f'{out_folder}/PARAMS-DICT_tkf92_indel_params.pkl','wb') as g:
+                with open(f'{out_folder}/PARAMS-DICT_{prefix}_tkf92_indel_params.pkl','wb') as g:
                     pickle.dump(out_dict, g)
                 del out_dict
                 
-        
-    # don't think I need this anymore
-    # def return_bound_sigmoid_limits(self):
-    #     ### rate_matrix_module
-    #     # exchangeabilities
-    #     exchange_min_val = self.rate_matrix_module.exchange_min_val
-    #     exchange_max_val = self.rate_matrix_module.exchange_max_val
-    #     params_range = { "exchange_min_val": exchange_min_val,
-    #                      "exchange_max_val": exchange_max_val }
-        
-    #     #rate multiplier
-    #     if self.rate_mult_activation == 'bound_sigmoid':
-    #         rate_mult_min_val = self.rate_matrix_module.rate_mult_min_val
-    #         rate_mult_max_val = self.rate_matrix_module.rate_mult_max_val
-    #         to_add = {"rate_mult_min_val": rate_mult_min_val,
-    #                   "rate_mult_max_val": rate_mult_max_val}
-    #         params_range = {**params_range, **to_add}
-        
-        
-    #     ### transitions_module
-    #     # insert rate lambda
-    #     mu_min_val = self.transitions_module.mu_min_val
-    #     mu_max_val = self.transitions_module.mu_max_val
-        
-    #     # offset (for deletion rate mu)
-    #     offs_min_val = self.transitions_module.offs_min_val
-    #     offs_max_val = self.transitions_module.offs_max_val
-        
-    #     # r extension probability
-    #     r_extend_min_val = self.transitions_module.r_extend_min_val
-    #     r_extend_max_val = self.transitions_module.r_extend_max_val
-        
-    #     to_add = {"mu_min_val": mu_min_val,
-    #               "mu_max_val": mu_max_val,
-    #               "offs_min_val": offs_min_val,
-    #               "offs_max_val": offs_max_val,
-    #               "r_extend_min_val": r_extend_min_val,
-    #               "r_extend_max_val": r_extend_max_val}
-            
-    #     params_range = {**params_range, **to_add} 
-        
-    #     return params_range
-
-
     def _get_scoring_matrices( self,
                                t_array,
                                sow_intermediates: bool,

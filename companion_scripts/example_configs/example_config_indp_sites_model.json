@@ -1,5 +1,5 @@
 {
-    "training_wkdir": "RESULTS_indp_sites",
+    "training_wkdir": "RESULTS",
     "rng_seednum": 0,
 
     "data_dir": "example_data",
@@ -9,10 +9,9 @@
     "bos_eos_as_match": false,
     "batch_size": 7,
     "emission_alphabet_size": 20,
-    "norm_loss_by": "desc_len",
     "gap_tok": 43,
 
-    "num_epochs": 1000,
+    "num_epochs": 3,
     "optimizer_config": {
         "init_value": 0.005,
         "peak_value": 0.005,
@@ -23,7 +22,7 @@
     },
     "early_stop_cond1_atol": 1e-3,
     "early_stop_cond2_gap": 3,
-    "patience": 1000,
+    "patience": 10,
     "update_grads": true,
 
     "interms_for_tboard": {
@@ -33,19 +32,18 @@
     },
     "save_arrs": true,
     "save_per_sample_losses": true,
-    "histogram_output_freq": 500,
+    "norm_reported_loss_by": "desc_len",
 
     "pred_model_type": "pairhmm_indp_sites",
     "pred_config": {
         "load_all": false,
-        "num_mixtures": 1,
-        "random_init_exchanges": true,
-        "norm_loss_by_length": false,
+        "num_mixtures": 2,
 
-        "subst_model_type": "gtr",
+        "subst_model_type": "f81",
+        "k_rate_mults": 4,
+        "indp_rate_mults": false,
         "norm_rate_matrix": true,
         "norm_rate_mults": true,
-        "rate_mult_activation": "bound_sigmoid",
 
         "indel_model_type": "tkf92",
 

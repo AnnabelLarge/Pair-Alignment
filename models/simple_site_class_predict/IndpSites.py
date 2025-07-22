@@ -517,7 +517,7 @@ class IndpSites(ModuleBase):
         
         # final conditional and joint prob of match (before and after LSE over classes)
         for loss_type in ['joint', 'cond']:
-            for suffix in ['logprob_emit_at_match', 'logprobs_per_mixture']:
+            for suffix in ['logprob_emit_at_match', 'subst_logprobs_per_mixture']:
                 mat = np.exp (out[f'{loss_type}_{suffix}'] ) 
                 new_key = f'{prefix}_{loss_type}_{suffix}'.replace('log','')
                 write_matrix_to_npy( out_folder, mat, new_key )
@@ -671,7 +671,7 @@ class IndpSites(ModuleBase):
                                                  max_val = offs_max_val).item() #float
                         lam = mu * (1 - offset)  #float
                         
-                        with open(f'{out_folder}/ASCII_{self.indel_model_type}_indel_params.txt','w') as g:
+                        with open(f'{out_folder}/ASCII_{prefix}_{self.indel_model_type}_indel_params.txt','w') as g:
                             g.write(f'insert rate, lambda: {lam}\n')
                             g.write(f'deletion rate, mu: {mu}\n')
                             g.write(f'offset: {offset}\n\n')
@@ -692,7 +692,7 @@ class IndpSites(ModuleBase):
                         
                         mean_indel_lengths = 1 / (1 - r_extend) #(C)
                         
-                        with open(f'{out_folder}/ASCII_{self.indel_model_type}_indel_params.txt','a') as g:
+                        with open(f'{out_folder}/ASCII_{prefix}_{self.indel_model_type}_indel_params.txt','a') as g:
                             g.write(f'extension prob, r: ')
                             [g.write(f'{elem}\t') for elem in r_extend]
                             g.write('\n')
@@ -702,62 +702,9 @@ class IndpSites(ModuleBase):
                         
                         out_dict['r_extend'] = r_extend #(C,)
                     
-                    with open(f'{out_folder}/PARAMS-DICT_{self.indel_model_type}_indel_params.pkl','wb') as g:
+                    with open(f'{out_folder}/PARAMS-DICT_{prefix}_{self.indel_model_type}_indel_params.pkl','wb') as g:
                         pickle.dump(out_dict, g)
                     del out_dict
-
-    # don't think I need this anymore
-    # def return_bound_sigmoid_limits(self):
-    #     params_range = {}
-        
-    #     ### declare substitution model module, also optionally get exch
-    #     if self.subst_model_type in ['gtr', 'hky85']:
-    #         module_name = self.rate_matrix_module
-            
-    #         # exchangeabilities
-    #         exchange_min_val = module_name.exchange_min_val
-    #         exchange_max_val = module_name.exchange_max_val
-    #         params_range["exchange_min_val"] = exchange_min_val
-    #         params_range["exchange_max_val"] = exchange_max_val
-        
-    #     elif self.subst_model_type == 'f81':
-    #         module_name = self.cond_logprob_match_module
-        
-        
-    #     ### rate multiplier
-    #     if self.config['rate_mult_activation'] == 'bound_sigmoid':
-    #         rate_mult_min_val = module_name.rate_mult_min_val
-    #         rate_mult_max_val = module_name.rate_mult_max_val
-    #         params_range["rate_mult_min_val"] = rate_mult_min_val
-    #         params_range["rate_mult_max_val"] = rate_mult_max_val
-    
-        
-    #     ### transitions_module
-    #     if self.indel_model_type is not None:
-    #         # delete rate mu
-    #         mu_min_val = self.transitions_module.mu_min_val
-    #         mu_max_val = self.transitions_module.mu_max_val
-            
-    #         # offset (for deletion rate mu)
-    #         offs_min_val = self.transitions_module.offs_min_val
-    #         offs_max_val = self.transitions_module.offs_max_val
-            
-    #         to_add = {"mu_min_val": mu_min_val,
-    #                   "mu_max_val": mu_max_val,
-    #                   "offs_min_val": offs_min_val,
-    #                   "offs_max_val": offs_max_val}
-            
-    #         if self.indel_model_type == 'tkf92':
-    #             # r extension probability
-    #             r_extend_min_val = self.transitions_module.r_extend_min_val
-    #             r_extend_max_val = self.transitions_module.r_extend_max_val
-        
-    #             to_add['r_extend_min_val'] = r_extend_min_val
-    #             to_add['r_extend_max_val'] = r_extend_max_val
-            
-    #         params_range = {**params_range, **to_add} 
-        
-    #     return params_range
 
 
 class IndpSitesLoadAll(IndpSites):

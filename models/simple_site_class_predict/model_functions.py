@@ -62,6 +62,7 @@ from jax.scipy.linalg import expm
 from jax._src.typing import Array, ArrayLike
 
 from functools import partial
+import numpy as np
 
 # make this slightly more than true jnp.finfo(jnp.float32).eps, 
 #  for numerical safety at REALLY small parameter values

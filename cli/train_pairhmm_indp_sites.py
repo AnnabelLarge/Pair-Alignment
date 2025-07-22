@@ -93,26 +93,46 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     # setup tensorboard writer
     writer = SummaryWriter(args.tboard_dir)
     
-    # create a new logfile
+    # create a new logfile with header
     with open(args.logfile_name,'w') as g:
+        # disabled training
         if not args.update_grads:
             g.write('DEBUG MODE: DISABLING GRAD UPDATES\n\n')
         
+        # standard header
         g.write( f'PairHMM with independent site classes over emissions\n' )
         g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )
         g.write( f'Indel model: {args.pred_config.get("indel_model_type","None")}\n' )
         g.write( (f'  - Number of site classes for emissions: '+
-                  f'{args.pred_config["num_mixtures"]}\n' )
+                  f'{args.pred_config["num_mixtures"]}\n' +
+                  f'  - Possible substitution rate multipliers: ' +
+                  f'{args.pred_config["k_rate_mults"]}\n')
                 )
         
+        # note if rates are independent
+        if args.pred_config['indp_rate_mults']:
+            possible_rates =  args.pred_config['k_rate_mults']
+            g.write( (f'  - Rates are independent of site class label: '+
+                      f'( P(k | c) = P(k) ); {possible_rates} possible '+
+                      f'rate multipliers\n' )
+                    )
+                    
+        elif not args.pred_config['indp_rate_mults']:
+            possible_rates = args.pred_config['num_mixtures'] * args.pred_config['k_rate_mults']
+            g.write( ( f'  - Rates depend on class labels ( P(k | c) ); '+
+                       f'{possible_rates} possible rate multipliers\n' )
+                    )
+        
+        # how to normalize reported metrics (usually by descendant length)
         if args.pred_config["indel_model_type"] is not None:
-            g.write( f'  - When reporting, normalizing losses by: {args.norm_loss_by}\n' )
+            g.write( f'  - When reporting, normalizing losses by: {args.norm_reported_loss_by}\n' )
         
         elif args.pred_config["indel_model_type"] is None:
             g.write( f'  - When reporting, normalizing losses by: align length '+
                      f'(same as desc length, because we remove gap '+
                      f'positions) \n' )
         
+        # write source of times
         g.write( f'Times from: {args.pred_config["times_from"]}\n' )
     
     
@@ -135,11 +155,6 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     test_dset = dataloader_dict['test_dset']
     test_dl = dataloader_dict['test_dl']
     t_array_for_all_samples = dataloader_dict['t_array_for_all_samples']
-    
-    # if doing gradient descent, the length of the training dataloader will be 
-    #   one; you'll use sum as the reduction function, instead of mean
-    # kind of rare, but sometimes it comes up
-    whole_dset_grad_desc = (len(training_dl) == 1)
     
     # add equilibrium counts under two different labels
     args.pred_config['training_dset_emit_counts'] = training_dset.emit_counts
@@ -212,7 +227,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
                                indel_model_type = args.pred_config.get('indel_model_type', None),
                                t_array = t_array_for_all_samples, 
                                interms_for_tboard = args.interms_for_tboard,
-                               whole_dset_grad_desc = whole_dset_grad_desc,
+                               whole_dset_grad_desc = False,
                                update_grads = args.update_grads )
     train_fn_jitted = jax.jit(parted_train_fn)
     del parted_train_fn
@@ -376,16 +391,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
             this_batch_size = batch[0].shape[0]
             eval_metrics = eval_fn_jitted(batch=batch, 
                                           pairhmm_trainstate=pairhmm_trainstate)
-            
-            # if doing stochastic gradient descent, take the average over the batch
-            # if doing gradient descent with whole dataset, only use the sum
-            reduction = jnp.mean if not whole_dset_grad_desc else jnp.sum
-
-            if args.pred_config['norm_loss_by_length']:
-                batch_loss = reduction( eval_metrics['joint_neg_logP_length_normed'] )
-            
-            elif not args.pred_config['norm_loss_by_length']:
-                batch_loss = reduction( eval_metrics['joint_neg_logP'] )
+            batch_loss = jnp.mean( eval_metrics['joint_neg_logP'] )
                 
                 
             ### add to total loss for this epoch; weight by number of

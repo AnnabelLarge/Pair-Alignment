@@ -96,16 +96,39 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
     
     # create a new logfile
     with open(args.logfile_name,'w') as g:
+        # disabled training
         if not args.update_grads:
             g.write('DEBUG MODE: DISABLING GRAD UPDATES\n\n')
             
+        # standard header
         g.write(f'PairHMM TKF92 with latent site and fragment classes\n')
+        g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )
+        g.write( f'Indel model: {args.pred_config["indel_model_type"]}\n' )
                 
         g.write( (f'  - Number of latent site and fragment classes: '+
-                  f'{args.pred_config["num_mixtures"]}\n' )
+                  f'{args.pred_config["num_mixtures"]}\n' +
+                  f'  - Possible substitution rate multipliers: ' +
+                  f'{args.pred_config["k_rate_mults"]}\n')
                 )
-        g.write(f'  - When reporting, normalizing losses by: {args.norm_loss_by}\n')
         
+        # note if rates are independent
+        if args.pred_config['indp_rate_mults']:
+            possible_rates =  args.pred_config['k_rate_mults']
+            g.write( (f'  - Rates are independent of site class label: '+
+                      f'( P(k | c) = P(k) ); {possible_rates} possible '+
+                      f'rate multipliers\n' )
+                    )
+                    
+        elif not args.pred_config['indp_rate_mults']:
+            possible_rates = args.pred_config['num_mixtures'] * args.pred_config['k_rate_mults']
+            g.write( ( f'  - Rates depend on class labels ( P(k | c) ); '+
+                       f'{possible_rates} possible rate multipliers\n' )
+                    )
+        
+        # how to normalize reported metrics (usually by descendant length)
+        g.write(f'  - When reporting, normalizing losses by: {args.norm_reported_loss_by}\n')
+        
+        # write source of times
         g.write( f'Times from: {args.pred_config["times_from"]}\n' )
     
     # extra files to record if you use tkf approximations
@@ -370,12 +393,7 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
             eval_metrics = eval_fn_jitted(batch=batch, 
                                           pairhmm_trainstate=pairhmm_trainstate,
                                           max_align_len=batch_max_alignlen)
-            
-            if args.pred_config['norm_loss_by_length']:
-                batch_loss = jnp.mean( eval_metrics['joint_neg_logP_length_normed'] )
-            
-            elif not args.pred_config['norm_loss_by_length']:
-                batch_loss = jnp.mean( eval_metrics['joint_neg_logP'] )
+            batch_loss = jnp.mean( eval_metrics['joint_neg_logP'] )
                 
             
 #__4___8__12: batch level (three tabs)
