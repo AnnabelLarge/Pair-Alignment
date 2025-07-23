@@ -304,7 +304,7 @@ def _load_aligned_mats(data_dir,
         # move all tokens down (except <bos>, <pad>, and <gap>)
         shifted_desc = np.where( np.isin(zero_padded_mat[...,0], [0,1, gap_idx] ),
                                  zero_padded_mat[...,0],
-                                 zero_padded_mat[...,0] -1 )
+                                 zero_padded_mat[...,0] - 1 )
         zero_padded_mat[...,0] = shifted_desc
     
     # pairHMM: don't need alignment indices

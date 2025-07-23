@@ -23,14 +23,12 @@ from functools import partial
 # flax, jax, and optax
 import jax
 import jax.numpy as jnp
-from jax import Array
 from jax import config
 from flax import linen as nn
 import optax
 
 from utils.sequence_length_helpers import selective_squeeze
-
-
+from models.sequence_embedders.concatenation_fns import extract_embs
 
 ###############################################################################
 ### HELPERS    ################################################################
@@ -48,44 +46,43 @@ def _one_hot_pad_with_zeros( mat: jnp.array,
     return mat_oh
 
 def _preproc( unaligned_seqs: jnp.array, 
-              aligned_mats: jnp.array ):
+              aligned_mats: jnp.array,
+              use_prev_align_info: bool):
     ### unpack features
     # unaligned sequences used in __call__
     anc_seqs = unaligned_seqs[...,0] # (B, L_seq)
     desc_seqs = unaligned_seqs[...,1] # (B, L_seq)
     
     # split into prefixes and suffixes, to avoid confusion
-    # prefixes: <s> A  B  C    the "a" in P(b | a, X, Y_{...j})
+    # prefixes: <s> A  B  C     the "a" in P(b | a, X, Y_{...j})
     #            |  |  |  |
     #            v  v  v  v
     # suffixes:  A  B  C <e>    the "b" in P(b | a, X, Y_{...j})
-    aligned_mats_prefixes = aligned_mats[:,:-1,:]  # (B, L_align-1, 5)
-    aligned_mats_suffixes = aligned_mats[:,1:,:] # (B, L_align-1, 5)
+    aligned_mats_prefixes = aligned_mats[:,:-1,:]  # (B, L_align-1, 4)
+    aligned_mats_suffixes = aligned_mats[:,1:,:] # (B, L_align-1, 4)
     
     # precomputed alignment indices
     # don't include last token, since it's not used to predict any valid input
-    align_idxes = aligned_mats_prefixes[...,-2:] # (B, L_align-1, 2)
+    align_idxes = aligned_mats_prefixes[...,-2:] #(B, L_align-1, 2)
     
     
-    ### prepare true_out
-    # need three things: gapped ancestor, gapped descendant, and 
-    # state transitions (a -> b transitions)
-    gapped_anc_desc = aligned_mats_suffixes[...,:2] #(B, L_align-1, 2)
-    from_states = aligned_mats_prefixes[...,2] #(B, L_align-1)
-    to_states = aligned_mats_suffixes[...,2] #(B, L_align-1)
-    true_out = jnp.concatenate( [ gapped_anc_desc,
-                                  from_states[..., None],
-                                  to_states[..., None] ],
-                                axis = -1 ) #(B, L_align-1, 4)
+    ### true_out
+    # only need the alignment-augmented descendant; dim0=0
+    #   in FullLenDset pre-processing, I already removed <bos> moved all 
+    #   output tokens down by one,
+    true_out = aligned_mats_suffixes[...,0] #(B, L_align-1)
     
-    out = {'anc_seqs': anc_seqs,
-           'desc_seqs': desc_seqs,
-           'align_idxes': align_idxes,
-           'from_states': from_states,
-           'true_out': true_out}
+    out = {'anc_seqs': anc_seqs, # (B, L_seq)
+            'desc_seqs': desc_seqs, # (B, L_seq)
+            'align_idxes': align_idxes, #(B, L_align-1, 2)
+            'true_out': true_out}
+    
+    # possibly add previous alignment
+    if use_prev_align_info:
+        prev_state_path = aligned_mats_prefixes[...,1]
+        out['prev_state_path'] = prev_state_path
     
     return out
-             
 
 
 ###############################################################################
@@ -93,20 +90,17 @@ def _preproc( unaligned_seqs: jnp.array,
 ###############################################################################
 def train_one_batch(batch, 
                     training_rngkey,
-                    all_trainstates,
+                    all_trainstates,  
                     all_model_instances,
                     max_seq_len,
                     max_align_len,
-                    interms_for_tboard, 
-                    t_array_for_all_samples,  
-                    concat_fn, 
+                    interms_for_tboard,
+                    concat_fn,
                     norm_loss_by_for_reporting: str='desc_len',
                     update_grads: bool = True,
-                    gap_tok: int = 43,
-                    seq_padding_idx: int = 0,
-                    align_idx_padding: int = -9,
-                    *args,
-                    **kwargs):
+                    gap_tok = 43,
+                    seq_padding_idx = 0,
+                    align_idx_padding = -9):
     """
     Jit-able function to apply the model to one batch of samples, evaluate loss
     and collect gradients, then update model parameters
@@ -115,40 +109,13 @@ def train_one_batch(batch,
         > batch: batch from a pytorch dataloader
         > training_rngkey: the rng key
         > all_trainstates: the models + parameters
-
-    static inputs, trigger different jit-compilations
-        > max_seq_len: max length of unaligned seqs matrix (used to control 
-                       number of jit-compiled versions of this function)
-        > max_align_len: max length of alignment matrix (used to control 
-                         number of jit-compiled versions of this function) 
-
-    static inputs, provided by partial    
-        > all_model_instances: the object instances; contain some useful 
-          functions that, unfortunately, cannot be called with 
-          trainstate.apply_fn
-        > norm_loss_by_for_reporting: when reporting loss, normalize by some
-                    sequence length; default is desc_len
-        > interms_for_tboard: decide whether or not to output intermediate 
-                             histograms and scalars
-        > update_grads: only turn off when debugging
-        > concat_fn: what function to use to concatenate embedded seq inputs
-
-    static inputs, specific to neural hmm:
-        > t_array_for_all_samples: one time array for all samples, if 
-          applicable; either a jax array of size (T,) or None
+    
+    static inputs:
     
     outputs:
         > metrics_outputs: dictionary of metrics and outputs                                  
         
     """
-    # which times to use 
-    if t_array_for_all_samples is None:
-        times_for_matrices = batch[2] #(B,)
-    
-    elif t_array_for_all_samples is not None:
-        times_for_matrices = t_array_for_all_samples #(T,)
-        
-        
     #########################
     ### UNPACK FLAGS, FNS   #
     #########################
@@ -162,21 +129,27 @@ def train_one_batch(batch,
     del interms_for_tboard
     
     
-    ##############################
-    ### UNPACK, CLIP, MAKE RNGS  #
-    ##############################
+    ####################
+    ### UNPACK, CLIP   #
+    ####################
     # unpack
     encoder_trainstate, decoder_trainstate, finalpred_trainstate = all_trainstates
-    encoder_instance, decoder_instance, _ = all_model_instances
-    del all_trainstates, all_model_instances
+    encoder_instance, decoder_instance, finalpred_instance = all_model_instances
+    del all_model_instances, all_trainstates
+    
+    # flags for later
+    use_prev_align_info = finalpred_instance.config['pred_config']['use_prev_align_info']
+    use_t_per_sample = finalpred_instance.config['pred_config']['use_t_per_sample']
     
     # clip to max lengths, split into prefixes and suffixes
-    batch_unaligned_seqs = batch[0] #(B, L, 2)
-    batch_aligned_mats = batch[1] #(B, L, 5)
+    # batch_unaligned_seqs is (B, L, 2)
+    # batch_aligned_mats is (B, L, 4)
+    # t_array could be (B,) or None
+    batch_unaligned_seqs, batch_aligned_mats, t_array, _ = batch
     del batch
     
-    clipped_unaligned_seqs = batch_unaligned_seqs[:, :max_seq_len, :] #(B, L_seq, 2)
-    clipped_aligned_mats = batch_aligned_mats[:, :max_align_len, :] #(B, L_align, 5)
+    clipped_unaligned_seqs = batch_unaligned_seqs[:, :max_seq_len, :] # (B, L_seq, 2)
+    clipped_aligned_mats = batch_aligned_mats[:, :max_align_len, :] # (B, L_align, 4)
     
     # produce new keys for each network
     all_keys = jax.random.split(training_rngkey, num=4)
@@ -184,17 +157,17 @@ def train_one_batch(batch,
     del all_keys
     
     
-    ##########################
-    ### PREPARE THE INPUTS   #
-    ##########################
+    ##################
+    ### PREPROCESS   #
+    ##################
     # preprocess with helper
     out_dict = _preproc( unaligned_seqs = clipped_unaligned_seqs, 
                          aligned_mats = clipped_aligned_mats )
-    anc_seqs = out_dict['anc_seqs']  # (B, L_seq)
-    desc_seqs = out_dict['desc_seqs'] # (B, L_seq)
-    align_idxes = out_dict['align_idxes'] # (B, L_align-1, 2)
-    from_states = out_dict['from_states'] #(B, L_align-1)
-    true_out = out_dict['true_out'] #(B, L_align-1, 4)
+    anc_seqs = out_dict['anc_seqs']
+    desc_seqs = out_dict['desc_seqs']
+    align_idxes = out_dict['align_idxes']
+    true_out = out_dict['true_out']
+    prev_state_path = out_dict.get('prev_state_path', None)
     del out_dict
     
     # when reporting, normalize the loss by a length (but this is NOT the 
@@ -202,16 +175,14 @@ def train_one_batch(batch,
     length_for_normalization_for_reporting = (true_out[...,1] != seq_padding_idx).sum(axis=1) #(B, )
     
     if norm_loss_by_for_reporting == 'desc_len':
-        num_gaps = (true_out[...,1] == gap_tok).sum(axis=1) #(B, )
+        num_gaps = (true_out[...,1] == gap_tok).sum(axis=1)
         length_for_normalization_for_reporting = length_for_normalization_for_reporting - num_gaps #(B, )
-        
+     
         
     ############################################
     ### APPLY MODEL, EVALUATE LOSS AND GRADS   #
     ############################################
-    def apply_model(encoder_params, 
-                    decoder_params, 
-                    finalpred_params):
+    def apply_model(encoder_params, decoder_params, finalpred_params):
         ### embed with ancestor encoder
         # anc_embeddings is (B, L_seq-1, H)
         out = encoder_instance.apply_seq_embedder_in_training( seqs = anc_seqs,
@@ -257,34 +228,31 @@ def train_one_batch(batch,
         datamat_lst, padding_mask = out
         del out
         
-        # add previous alignment state, one-hot encoded
-        from_states_one_hot = _one_hot_pad_with_zeros( mat=from_states,
-                                                       num_classes=6,
-                                                       axis=-1 ) #(B, L_align-1, 5)
-        datamat_lst.append( from_states_one_hot ) 
-        del from_states_one_hot
+        # optionally, add previous alignment state, one-hot encoded
+        if use_prev_align_info:
+            from_states_one_hot = _one_hot_pad_with_zeros( mat=prev_state_path,
+                                                           num_classes=6,
+                                                           axis=-1 ) #(B, L_align-1, 5)
+            datamat_lst.append( from_states_one_hot ) 
+            del from_states_one_hot
+            
+        elif not use_prev_align_info:
+            datamat_lst.append( None )
         
         
-        ### forward pass through prediction head, to get scoring matrices
+        ### forward pass through prediction head
         mut = ['histograms','scalars'] if finalpred_sow_outputs else []
         out = finalpred_trainstate.apply_fn(variables = finalpred_params,
                                             datamat_lst = datamat_lst,
-                                            t_array = times_for_matrices,
-                                            padding_mask = padding_mask,
+                                            padding_mask = alignment_padding_mask,
+                                            t_array = t_array,
                                             training = True,
                                             sow_intermediates = finalpred_sow_outputs,
                                             mutable=mut,
                                             rngs={'dropout': finalpred_key})
-        
-        # forward_pass_scoring_matrices has the keys:
-        # logprob_emit_match: (T,B,L,A,A) or (B,L,A,A)
-        # logprob_emit_indel: (B,L,A)
-        # logprob_transits: (T,B,L,S,S) or (B,L,S,S)
-        # corr: a tuple of two arrays; each either (T,B) or (B,)
-        # approx_flags_dict: a dictionary of things (see model code)
-        # subs_model_params: a dictionary of things (see model code)
-        # indel_model_params: a dictionary of things (see model code)
-        forward_pass_scoring_matrices, pred_sow_dict = out
+
+        # final_logits is (B, L_align, A_aug-1)
+        final_logits, pred_sow_dict = out
         del out, mut
         
         pred_layer_metrics = {'histograms': pred_sow_dict.get( 'histograms', dict() ),
@@ -292,42 +260,44 @@ def train_one_batch(batch,
                               }
         
         
-        ### evaluate loglike of true alignments
-        # this calculates sum of logprob over length of alignment
-        logprob_perSamp_perTime = finalpred_trainstate.apply_fn( variables = finalpred_params,
-                                                         logprob_emit_match = forward_pass_scoring_matrices['logprob_emit_match'], 
-                                                         logprob_emit_indel = forward_pass_scoring_matrices['logprob_emit_indel'],
-                                                         logprob_transits = forward_pass_scoring_matrices['logprob_transits'],
-                                                         corr = forward_pass_scoring_matrices['corr'],
-                                                         true_out = true_out,
-                                                         padding_idx = seq_padding_idx,
-                                                         method = 'neg_loglike_in_scan_fn') #(T,B) or (B,)
+        ### evaluate loglike
+        # loss_intermeds has the following keys:
+        #
+        # loss_intermeds['logprob_perSamp'] (B,)
+        # loss_intermeds['correct_predictions_perSamp'] (B,)
+        # loss_intermeds['valid_positions_perSamp'] (B,)
+        # loss_intermeds['cm_perSamp'] (B, A_aug-1, A_aug-1)
+        loss_intermeds = finalpred_trainstate.apply_fn( variables = finalpred_params,
+                                                       final_logits = final_logits,
+                                                       true_out = true_out,
+                                                       return_result_before_sum = False,
+                                                       method = 'neg_loglike_in_scan_fn' ) 
         
-        # final loss calculation; possibly logsumexp across timepoints
-        out = finalpred_trainstate.apply_fn( variables = finalpred_params,
-                                             logprob_perSamp_perTime = logprob_perSamp_perTime,
-                                             length_for_normalization_for_reporting = length_for_normalization_for_reporting,
-                                             t_array = times_for_matrices,
-                                             padding_idx = seq_padding_idx,
-                                             method = 'evaluate_loss_after_scan' )
-        loss, aux_dict = out
-        del out, logprob_perSamp_perTime  
+        loss, loss_intermeds = finalpred_trainstate.apply_fn( variables = finalpred_params,
+                                                       scan_dict = loss_intermeds,
+                                                       length_for_normalization_for_reporting = length_for_normalization_for_reporting,
+                                                       method = 'evaluate_loss_after_scan')
         
+        # loss_intermeds NOW has the following keys:
+        #
+        # loss_intermeds['sum_neg_logP'] (B,)
+        # loss_intermeds['neg_logP_length_normed'] (B,)
+        # loss_intermeds['acc_perSamp'] (B,)
+        # loss_intermeds['cm_perSamp'] (B,)
         
-        ### return EVERYTHING
-        aux_dict['embeddings_aux_dict'] = embeddings_aux_dict
-        aux_dict['pred_layer_metrics'] = pred_layer_metrics
-        
-        # during training, only return the approximation dictionary
-        aux_dict['used_approx'] = forward_pass_scoring_matrices['approx_flags_dict']
-        
+        # create aux dictionary
+        aux_dict = {'sum_neg_logP': loss_intermeds['sum_neg_logP'],
+                    'neg_logP_length_normed': loss_intermeds['neg_logP_length_normed'],
+                    'acc_perSamp': loss_intermeds['acc_perSamp'],
+                    'cm_perSamp': loss_intermeds['cm_perSamp'],
+                    'final_logits': final_logits,
+                    'embeddings_aux_dict': embeddings_aux_dict,
+                    'pred_layer_metrics': pred_layer_metrics}
         return (loss, aux_dict)
     
     
     ### set up the grad functions, based on above loss function
-    grad_fn = jax.value_and_grad(apply_model, 
-                                 argnums=[0,1,2], 
-                                 has_aux=True)
+    grad_fn = jax.value_and_grad(apply_model, argnums=[0,1,2], has_aux=True)
     
     (batch_loss, aux_dict), all_grads = grad_fn(encoder_trainstate.params, 
                                                 decoder_trainstate.params, 
@@ -336,6 +306,14 @@ def train_one_batch(batch,
     enc_gradient, dec_gradient, finalpred_gradient = all_grads
     del all_grads
     
+    # aux_dict contains:
+    #
+    # aux_dict['sum_neg_logP'] (B,)
+    # aux_dict['neg_logP_length_normed'] (B,)
+    # aux_dict['acc_perSamp'] (B,)
+    # aux_dict['final_logits'] (B, L_align)
+    # aux_dict['embeddings_aux_dict'] (B,)
+    # aux_dict['pred_layer_metrics'] (B,)
     
     ### evaluate metrics BEFORE updating parameters
     batch_ave_perpl = finalpred_trainstate.apply_fn( variables = finalpred_trainstate.params,
@@ -363,18 +341,18 @@ def train_one_batch(batch,
         ### apply updates to parameter, trainstate object
         # wrapper for encoder, in case I ever use batch norm
         new_encoder_trainstate = encoder_instance.update_seq_embedder_tstate(tstate = encoder_trainstate,
-                                                                             new_opt_state = new_encoder_opt_state,
-                                                                             optim_updates = encoder_updates)
+                                                            new_opt_state = new_encoder_opt_state,
+                                                            optim_updates = encoder_updates)
         del new_encoder_opt_state
         
-        # standard update recipe for decoder
+        # standard update for decoder
         new_decoder_params = optax.apply_updates(decoder_trainstate.params, 
                                                  decoder_updates)
         new_decoder_trainstate = decoder_trainstate.replace(params = new_decoder_params,
                                                             opt_state = new_decoder_opt_state)
         del new_decoder_opt_state
         
-        # standard update recipe for prediction head
+        # standard update for prediction head
         new_finalpred_params = optax.apply_updates(finalpred_trainstate.params, 
                                                    finalpred_updates)
         new_finalpred_trainstate = finalpred_trainstate.replace(params = new_finalpred_params,
@@ -397,13 +375,12 @@ def train_one_batch(batch,
     
     
     ### always returned
-    out_dict = {'anc_aux': aux_dict['embeddings_aux_dict']['anc_aux'],
+    out_dict = {'batch_loss': batch_loss,
+                'batch_ave_acc': jnp.mean( aux_dict['acc_perSamp'] ),
+                'batch_ave_perpl': jnp.mean( batch_ave_perpl ),
                 'sum_neg_logP': aux_dict['sum_neg_logP'],
                 'neg_logP_length_normed': aux_dict['neg_logP_length_normed'],
-                'batch_loss': batch_loss,
-                'batch_ave_perpl': batch_ave_perpl,
-                'used_approx': aux_dict['used_approx']
-                }
+                'anc_aux': aux_dict['embeddings_aux_dict']['anc_aux'] }
     
     ### controlled by boolean flag
     def save_to_out_dict(value_to_save, flag, varname_to_write):
@@ -412,42 +389,41 @@ def train_one_batch(batch,
             
     # intermediate values captured during training
     save_to_out_dict(value_to_save = aux_dict['embeddings_aux_dict']['anc_layer_metrics'], 
-                     flag = encoder_sow_outputs, 
-                     varname_to_write = 'anc_layer_metrics')
+                           flag = encoder_sow_outputs, 
+                           varname_to_write = 'anc_layer_metrics')
     
     save_to_out_dict(value_to_save = aux_dict['embeddings_aux_dict']['desc_layer_metrics'], 
-                     flag = decoder_sow_outputs, 
-                     varname_to_write = 'desc_layer_metrics')
+                           flag = decoder_sow_outputs, 
+                           varname_to_write = 'desc_layer_metrics')
     
     save_to_out_dict(value_to_save = aux_dict['pred_layer_metrics'], 
-                     flag = finalpred_sow_outputs, 
-                     varname_to_write = 'pred_layer_metrics')
+                           flag = finalpred_sow_outputs, 
+                           varname_to_write = 'pred_layer_metrics')
     
     # gradients
     for (varname, grad) in [('enc_gradient', enc_gradient),
                             ('dec_gradient', dec_gradient),
                             ('finalpred_gradient', finalpred_gradient)]:
         save_to_out_dict(value_to_save = grad,
-                         flag = save_gradients,
-                         varname_to_write = varname)
+                               flag = save_gradients,
+                               varname_to_write = varname)
     
     # updates
-    if update_grads:
-        for (varname, grad) in [('encoder_updates', encoder_updates),
-                                ('decoder_updates', decoder_updates),
-                                ('finalpred_updates', finalpred_updates)]:
-            save_to_out_dict(value_to_save = grad,
-                             flag = save_updates,
-                             varname_to_write = varname)
+    for (varname, grad) in [('encoder_updates', encoder_updates),
+                            ('decoder_updates', decoder_updates),
+                            ('finalpred_updates', finalpred_updates)]:
+        save_to_out_dict(value_to_save = grad,
+                               flag = save_updates,
+                               varname_to_write = varname)
     
 
     # always returned from out_dict:
-    #     - anc_aux (structure varies depending on model)
     #     - batch_loss; float
     #     - batch_ave_perpl; float
-    #     - sum_neg_logP (B,); the loss per sample
-    #     - neg_logP_length_normed (B,); the loss per sample, normalized by seq length
-    #     - used_approx; dictionary of counts of how many times tkf approximations were made
+    #     - batch_ave_acc; float 
+    #     - sum_neg_logP (B,); the loss per sample BEFORE normalizing by length
+    #     - neg_logP_length_normed (B,); the loss per sample
+    #     - anc_aux 
     
     # returned if flag active:
     #     - anc_layer_metrics
@@ -464,62 +440,37 @@ def train_one_batch(batch,
 
 
 
+
 ###############################################################################
 ### EVAL ON ONE BATCH    ######################################################
 ###############################################################################
 def eval_one_batch(batch, 
-                    all_trainstates,
-                    all_model_instances,
-                    max_seq_len,
-                    max_align_len,
-                    interms_for_tboard, 
-                    t_array_for_all_samples,  
-                    concat_fn, 
-                    norm_loss_by_for_reporting: str='desc_len',
-                    gap_tok: int = 43,
-                    seq_padding_idx: int = 0,
-                    align_idx_padding: int = -9,
-                    extra_args_for_eval: dict = dict(),
-                    *args,
-                    **kwargs):
+                   all_trainstates, 
+                   max_seq_len,
+                   max_align_len,
+                   all_model_instances,  
+                   norm_loss_by,
+                   interms_for_tboard, 
+                   add_prev_alignment_info,
+                   gap_tok = 43,
+                   seq_padding_idx = 0,
+                   align_idx_padding = -9,
+                   extra_args_for_eval: dict = dict() ):
     """
-    Jit-able function to apply the model to one batch of samples, evaluate loss
+    JIT-able function to evaluate on a batch of samples
     
     regular inputs:
         > batch: batch from a pytorch dataloader
         > all_trainstates: the models + parameters
     
-    static inputs, trigger different jit-compilations:
-        > max_seq_len: max length of unaligned seqs matrix (used to control 
-                       number of jit-compiled versions of this function)
-        > max_align_len: max length of alignment matrix (used to control 
-                         number of jit-compiled versions of this function) 
-    
-    static inputs, provided by partial:
-        > all_model_instances: the object instances; contain some useful 
-          functions that, unfortunately, cannot be called with 
-          trainstate.apply_fn
-        > norm_loss_by_for_reporting: when reporting loss, normalize by some
-                    sequence length; default is desc_len
-        > interms_for_tboard: decide whether or not to output intermediate 
-                             histograms and scalars
-        > concat_fn: what function to use to concatenate embedded seq inputs
+    static inputs:
+        (most given above by train_one_batch)
         > extra_args_for_eval: extra inputs for custom eval functions
-
-    static inputs, specific to neural hmm:
-        > t_array_for_all_samples: one time array for all samples, if 
-          applicable; either a jax array of size (T,) or None
     
     outputs:
-        > metrics_outputs: dictionary of metrics and outputs 
+        > metrics_outputs: dictionary of metrics and outputs
+            
     """
-    # which times to use 
-    if t_array_for_all_samples is None:
-        times_for_matrices = batch[2] #(B,)
-    
-    elif t_array_for_all_samples is not None:
-        times_for_matrices = t_array_for_all_samples #(T,)
-    
     #########################
     ### UNPACK FLAGS, FNS   #
     #########################
@@ -533,65 +484,96 @@ def eval_one_batch(batch,
     return_anc_embs = interms_for_tboard['ancestor_embeddings']
     return_desc_embs = interms_for_tboard['descendant_embeddings']
     return_forward_pass_outputs = interms_for_tboard['forward_pass_outputs']
+    return_final_logprobs = interms_for_tboard['final_logprobs']
     del interms_for_tboard
     
     
     ####################
     ### UNPACK, CLIP   #
     ####################
-    # unpack
+    ### unpack
     encoder_trainstate, decoder_trainstate, finalpred_trainstate = all_trainstates
-    encoder_instance, decoder_instance, _ = all_model_instances
-    del all_trainstates, all_model_instances
+    encoder_instance, decoder_instance, finalpred_instance = all_model_instances
+    del all_model_instances, all_trainstates
     
-    # clip to max lengths, split into prefixes and suffixes
-    batch_unaligned_seqs = batch[0] #(B, L, 2)
-    batch_aligned_mats = batch[1] #(B, L, 5)
+    
+    ### clip to max lengths, split into prefixes and suffixes
+    batch_unaligned_seqs, batch_aligned_mats, t_array, _ = batch
     del batch
     
-    clipped_unaligned_seqs = batch_unaligned_seqs[:, :max_seq_len, :] #(B, L_seq, 2)
-    clipped_aligned_mats = batch_aligned_mats[:, :max_align_len, :] #(B, L_align, 5)
+    # first clip
+    clipped_unaligned_seqs = batch_unaligned_seqs[:, :max_seq_len, :]
+    clipped_aligned_mats = batch_aligned_mats[:, :max_align_len, :]
     
     
-    ##########################
-    ### PREPARE THE INPUTS   #
-    ##########################
-    # preprocess with helper
-    out_dict = _preproc( unaligned_seqs = clipped_unaligned_seqs, 
-                         aligned_mats = clipped_aligned_mats )
-    anc_seqs = out_dict['anc_seqs']
-    desc_seqs = out_dict['desc_seqs']
-    align_idxes = out_dict['align_idxes']
-    from_states = out_dict['from_states']
-    true_out = out_dict['true_out']
-    del out_dict
+    ##################
+    ### PREPROCESS   #
+    ##################
+    ### unpack features
+    # unaligned sequences used in __call__; final size is (B, max_seq_len)
+    anc_seqs = clipped_unaligned_seqs[...,0]
+    desc_seqs = clipped_unaligned_seqs[...,1]
     
-    # when reporting, normalize the loss by a length (but this is NOT the 
-    #   objective function)
-    length_for_normalization_for_reporting = (true_out[...,1] != seq_padding_idx).sum(axis=1)
+    # split into prefixes and suffixes, to avoid confusion
+    # prefixes: <s> A  B  C    the "a" in P(b | a, X, Y_{...j})
+    #            |  |  |  |
+    #            v  v  v  v
+    # suffixes:  A  B  C <e>    the "b" in P(b | a, X, Y_{...j})
+    aligned_mats_prefixes = clipped_aligned_mats[:,:-1,:]
+    unaligned_seqs_prefixes = clipped_unaligned_seqs[:,:-1,:]
+    aligned_mats_suffixes = clipped_aligned_mats[:,1:,:]
+    del clipped_unaligned_seqs, clipped_aligned_mats
     
-    if norm_loss_by_for_reporting == 'desc_len':
-        num_gaps = (true_out[...,1] == gap_tok).sum(axis=1)
-        length_for_normalization_for_reporting = length_for_normalization_for_reporting - num_gaps
-
+    # precomputed alignment indices; final size is (B, max_align_len-1, 2)
+    # don't include last token, since it's not used to predict any valid input
+    align_idxes = aligned_mats_prefixes[...,-2:]
+    
+    
+    ### true_out
+    # only need the alignment-augmented descendant; dim0=0
+    true_out = aligned_mats_suffixes[...,0]
+    
+    
+    ### optionally, one-hot encode the alignment state as an 
+    ### extra input feature (found at dim0=1)
+    if add_prev_alignment_info:
+        extra_features = activation.one_hot( x = aligned_mats_prefixes[...,1], 
+                                             num_classes = 6 )
+    else:
+        extra_features = None
+        
+        
+    ### length_for_normalization
+    # don't include pad or eos
+    length_for_normalization = jnp.where( ~jnp.isin(true_out, jnp.array([seq_padding_idx, 1]) ), 
+                                          True, 
+                                          False ).sum(axis=1)
+                                         
+    if norm_loss_by == 'desc_len':
+        num_gaps = jnp.where( true_out == (gap_tok-1), 
+                              True, 
+                              False ).sum(axis=1)
+        length_for_normalization = length_for_normalization - num_gaps
+        
     
     #######################
     ### Apply the model   #
     #######################
     ### embed with ancestor encoder
-    # anc_embeddings is (B, L_seq-1, H)
-    out = encoder_instance.apply_seq_embedder_in_eval( seqs = anc_seqs,
-                                                       tstate = encoder_trainstate,
-                                                       sow_intermediates = encoder_sow_outputs )
+    # anc_embeddings is (B, max_seq_len-1, H)
+    out = encoder_instance.apply_seq_embedder_in_eval(seqs = anc_seqs,
+                                                      final_trainstate = encoder_trainstate,
+                                                      sow_outputs = encoder_sow_outputs,
+                                                      extra_args_for_eval = extra_args_for_eval)
     anc_embeddings, embeddings_aux_dict = out
     del out
     
-    
     ### embed with descendant decoder
-    # desc_embeddings is (B, L_seq-1, H)
-    out = decoder_instance.apply_seq_embedder_in_eval( seqs = desc_seqs,
-                                                       tstate = decoder_trainstate,
-                                                       sow_intermediates = decoder_sow_outputs )
+    # desc_embeddings is (B, max_seq_len-1, H)
+    out = decoder_instance.apply_seq_embedder_in_eval(seqs = desc_seqs,
+                                                      final_trainstate = decoder_trainstate,
+                                                      sow_outputs = decoder_sow_outputs,
+                                                      extra_args_for_eval = extra_args_for_eval)
     desc_embeddings, to_add = out
     del out
     
@@ -608,43 +590,27 @@ def eval_one_batch(batch,
     embeddings_aux_dict = {**embeddings_aux_dict, **to_add}
     del to_add
     
-    
     ### extract embeddings
-    out = concat_fn(anc_encoded = anc_embeddings, 
+    out = extract_embs(anc_encoded = anc_embeddings, 
                     desc_encoded = desc_embeddings,
+                    extra_features = extra_features,
                     idx_lst = align_idxes,
                     seq_padding_idx = seq_padding_idx,
                     align_idx_padding = align_idx_padding)
-    datamat_lst, padding_mask = out
+    datamat_lst, alignment_padding_mask = out
     del out
     
-    # add previous alignment state, one-hot encoded
-    from_states_one_hot = _one_hot_pad_with_zeros( mat=from_states,
-                                                   num_classes=6,
-                                                   axis=-1 ) #(B, L_align-1, 5)
-    datamat_lst.append( from_states_one_hot ) 
-    del from_states_one_hot
-    
         
-    ### forward pass through prediction head, to get scoring matrices
+    ### forward pass through prediction head
     mut = ['histograms','scalars'] if finalpred_sow_outputs else []
     out = finalpred_trainstate.apply_fn( variables = finalpred_trainstate.params,
                                          datamat_lst = datamat_lst,
-                                         t_array = times_for_matrices,
-                                         padding_mask = padding_mask,
+                                         padding_mask = alignment_padding_mask,
                                          training = False,
                                          sow_intermediates = finalpred_sow_outputs,
                                          mutable=mut
                                          )
-    # forward_pass_scoring_matrices has the keys:
-    # logprob_emit_match: (T,B,L,A,A) or (B,L,A,A)
-    # logprob_emit_indel: (B,L,A)
-    # logprob_transits: (T,B,L,S,S) or (B,L,S,S)
-    # corr: a tuple of two arrays; each either (T,B) or (B,)
-    # approx_flags_dict: a dictionary of things (see model code)
-    # subs_model_params: a dictionary of things (see model code)
-    # indel_model_params: a dictionary of things (see model code)
-    forward_pass_scoring_matrices, pred_sow_dict = out
+    final_logits, pred_sow_dict = out
     del mut, out
         
     pred_layer_metrics = {'histograms': pred_sow_dict.get( 'histograms', dict() ),
@@ -652,43 +618,36 @@ def eval_one_batch(batch,
                           }
     
     
-    ### evaluate loglike of true alignments
-    # this calculates sum of logprob over length of alignment
-    logprob_perSamp_perTime = finalpred_trainstate.apply_fn( variables = finalpred_trainstate.params,
-                                                     logprob_emit_match = forward_pass_scoring_matrices['logprob_emit_match'], 
-                                                     logprob_emit_indel = forward_pass_scoring_matrices['logprob_emit_indel'],
-                                                     logprob_transits = forward_pass_scoring_matrices['logprob_transits'],
-                                                     corr = forward_pass_scoring_matrices['corr'],
-                                                     true_out = true_out,
-                                                     padding_idx = seq_padding_idx,
-                                                     method = 'neg_loglike_in_scan_fn') #(T,B) or (B,)
-     
-    # final loss calculation; possibly logsumexp across timepoints
-    out = finalpred_trainstate.apply_fn( variables = finalpred_trainstate.params,
-                                         logprob_perSamp_perTime = logprob_perSamp_perTime,
-                                         length_for_normalization_for_reporting = length_for_normalization_for_reporting,
-                                         t_array = times_for_matrices,
-                                         padding_idx = seq_padding_idx,
-                                         method = 'evaluate_loss_after_scan' )
-    loss, loss_fn_dict = out
-    del out, logprob_perSamp_perTime  
+    ### evaluate loglike
+    out = finalpred_instance.apply_ce_loss( final_logits = final_logits,
+                                            true_out = true_out,
+                                            length_for_normalization = length_for_normalization,
+                                            seq_padding_idx = seq_padding_idx )        
+    loss, loss_intermeds = out
+    del out
     
-    
-    ### evaluate metrics
-    perplexity_perSamp = finalpred_trainstate.apply_fn( variables = finalpred_trainstate.params,
-                                                        loss_fn_dict = loss_fn_dict,
-                                                        method = 'get_perplexity_per_sample' )
-    
+    # get other metrics
+    #   normally, because the gap token is the last element in the alphabet,
+    #   out_alph_size_with_pad = gap_tok + 1, but here, I've removed <bos>,
+    #   which was encoded as 1. Entire alphabet shifted down, so now 
+    #   out_alph_size_with_pad = gap_tok
+    metrics = finalpred_instance.compile_metrics( true_out = true_out,     
+                                                  final_logits = final_logits,
+                                                  loss = loss,
+                                                  neg_logP_length_normed = loss_intermeds['neg_logP_length_normed'],
+                                                  seq_padding_idx = 0,
+                                                  out_alph_size_with_pad = gap_tok )
     
     ##########################################
     ### COMPILE FINAL DICTIONARY TO RETURN   #
     ##########################################
     ### things that always get returned
     out_dict = {'batch_loss': loss,
-                'sum_neg_logP': loss_fn_dict['sum_neg_logP'],
-                'neg_logP_length_normed': loss_fn_dict['neg_logP_length_normed'],
-                'perplexity_perSamp': perplexity_perSamp,
-                'used_approx': forward_pass_scoring_matrices['approx_flags_dict']}
+                'sum_neg_logP': loss_intermeds['sum_neg_logP'],
+                'neg_logP_length_normed': loss_intermeds['neg_logP_length_normed']}
+    
+    # will have: perplexity_perSamp, ece, acc_perSamp, cm_perSamp
+    out_dict = {**out_dict, **metrics}
     
     
     ### optional things to add
@@ -729,19 +688,19 @@ def eval_one_batch(batch,
                            flag = return_desc_embs,
                            varname_to_write = 'final_descendant_embeddings')
     
-    # write whatever comes out of forward_pass_outputs
-    if return_forward_pass_outputs:
-        for key, val in forward_pass_scoring_matrices.items():
-            if key != 'approx_flags_dict':
-                out_dict[f'scormat_{key}'] = val
-    
+    write_optional_outputs(value_to_save = loss_intermeds['neg_logP_perSamp_perPos'],
+                           flag = return_final_logprobs,
+                           varname_to_write = 'final_logprobs')
+
     # always returned from out_dict:
     #     - loss; float
     #     - sum_neg_logP; (B,)
     #     - neg_logP_length_normed; (B,)
     #     - perplexity_perSamp; (B,)
-    #     - used_approx; dictionary of counts of how many times tkf approximations were made
-    
+    #     - acc_perSamp; (B,)
+    #     - cm_perSamp; (B, out_alph_size-1, out_alph_size-1)
+    #     - ece; float
+        
     # returned if flag active:
     #     - anc_layer_metrics
     #     - desc_layer_metrics
@@ -750,10 +709,6 @@ def eval_one_batch(batch,
     #     - desc_attn_weights 
     #     - final_ancestor_embeddings
     #     - final_descendant_embeddings
-    #     - all other outputs in forward_pass_scoring_matrices
-    #       > logprob_emit_match
-    #       > logprob_emit_indel
-    #       > logprob_transits
-    #       > subs_model_params
-    #       > indel_model_params
+    #     - final_logprobs (i.e. AFTER log_softmax)
+         
     return out_dict

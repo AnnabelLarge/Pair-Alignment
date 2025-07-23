@@ -88,6 +88,7 @@ class FeedforwardPredict(ModuleBase):
     def __call__(self, 
                  datamat_lst: list, 
                  padding_mask: jnp.array, # (B, L)
+                 t_array: jnp.array, #(B,) or None
                  training: bool, 
                  sow_intermediates: bool=False,
                  *args,
@@ -96,10 +97,14 @@ class FeedforwardPredict(ModuleBase):
         # anc_embeddings: (B, L, H)
         # desc_embeddings: (B, L, H)
         # prev_align_one_hot_vec: (B, L, 5)
-        datamat = self.postproc( datamat_lst = datamat_lst,
+        # if times are provided, append those too
+        datamat = self.postproc( anc_emb = datamat_lst[0],
+                                 desc_causal_emb = datamat_lst[1],
+                                 prev_align_one_hot_vec = datamat_lst[2],
                                  padding_mask = padding_mask,
                                  training = training,
-                                 sow_intermediates = sow_intermediates ) #(B, L, H_out)
+                                 sow_intermediates = sow_intermediates,
+                                 t_array = t_array )  #(B, L, H_out)
         
         # get final logits, mask, and return: (B, L, H_out) -> (B, L, A_aug - 1)
         final_logits = self.final_proj(datamat) #(B, L, A_aug - 1)

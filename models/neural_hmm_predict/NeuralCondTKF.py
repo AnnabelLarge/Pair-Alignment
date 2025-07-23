@@ -236,20 +236,28 @@ class NeuralCondTKF(ModuleBase):
         # prev_align_one_hot_vec: (B, L, 5)
 
         ### equilibrium distribution; used to score emissions from indel sites
-        equl_feats = self.postproc_equl(datamat_lst = datamat_lst,
-                                       padding_mask = padding_mask,
-                                       training = training,
-                                       sow_intermediates = sow_intermediates)  #(B, L, H_out)
+        # don't feed times here; they get incorporated during scoring only!
+        equl_feats = self.postproc_equl(anc_emb = datamat_lst[0],
+                                        desc_causal_emb = datamat_lst[1],
+                                        prev_align_one_hot_vec = datamat_lst[2],
+                                        padding_mask = padding_mask,
+                                        training = training,
+                                        sow_intermediates = sow_intermediates,
+                                        t_array = None)  #(B, L, H_out)
         
         logprob_emit_indel = self.equl_module(datamat = equl_feats,
                                               sow_intermediates = sow_intermediates) #(B, L, A)
         
         
         ### substitution model; used to score emissions from match sites
-        sub_feats = self.postproc_subs(datamat_lst = datamat_lst,
-                                      padding_mask = padding_mask,
-                                      training = training,
-                                      sow_intermediates = sow_intermediates)  #(B, L, H_out)
+        # don't feed times here; they get incorporated during scoring only!
+        sub_feats = self.postproc_subs(anc_emb = datamat_lst[0],
+                                        desc_causal_emb = datamat_lst[1],
+                                        prev_align_one_hot_vec = datamat_lst[2],
+                                        padding_mask = padding_mask,
+                                        training = training,
+                                        sow_intermediates = sow_intermediates,
+                                        t_array = None)  #(B, L, H_out)
         
         # logprob_emit_match is either (T, B, L, A, A) or (B, L, A, A)
         # subs_model_params is a dictionary of parameters; see module for more details
@@ -262,10 +270,14 @@ class NeuralCondTKF(ModuleBase):
         
         
         ### transition model; used to score markovian alignment path
-        trans_feats = self.postproc_trans(datamat_lst = datamat_lst,
-                                         padding_mask = padding_mask,
-                                         training = training,
-                                         sow_intermediates = sow_intermediates)  #(B, L, H_out)
+        # don't feed times here; they get incorporated during scoring only!
+        trans_feats = self.postproc_trans(anc_emb = datamat_lst[0],
+                                        desc_causal_emb = datamat_lst[1],
+                                        prev_align_one_hot_vec = datamat_lst[2],
+                                        padding_mask = padding_mask,
+                                        training = training,
+                                        sow_intermediates = sow_intermediates,
+                                        t_array = None)  #(B, L, H_out)
         
         out = self.trans_module(datamat = trans_feats,
                                 t_array = t_array,
