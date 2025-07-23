@@ -27,14 +27,16 @@ import flax
 from torch.utils.data import DataLoader
 
 # custom function/classes imports (in order of appearance)
+from utils.edit_argparse import enforce_valid_defaults
 from train_eval_fns.build_optimizer import build_optimizer
 from utils.sequence_length_helpers import determine_alignlen_bin
+
+# specific to this model
+from utils.edit_argparse import pairhmm_frag_and_site_classes_fill_with_default_values as fill_with_default_values
+from utils.edit_argparse import pairhmms_share_top_level_args as share_top_level_args
 from models.simple_site_class_predict.initializers import init_pairhmm_frag_and_site_classes as init_pairhmm
 from train_eval_fns.frag_and_site_classes_training_fns import ( eval_one_batch,
                                                                 final_eval_wrapper )
-from utils.edit_argparse import (enforce_valid_defaults,
-                                 fill_with_default_values,
-                                 share_top_level_args)
 
 
 def eval_pairhmm_frag_and_site_classes( args, 
@@ -70,19 +72,49 @@ def eval_pairhmm_frag_and_site_classes( args,
         os.mkdir(args.out_arrs_dir)
         os.mkdir(args.model_ckpts_dir)
     
+    # new place to save final pred outputs
+    finalpred_save_model_filename = args.model_ckpts_dir + '/'+ f'FINAL_PRED.pkl'
+    
     # create a new logfile
     with open(args.logfile_name,'w') as g:
         g.write( f'Loading from {args.training_wkdir} to eval new data\n' )
         
+        # standard header
         g.write(f'PairHMM TKF92 with latent site and fragment classes\n')
+        g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )
+        g.write( f'Indel model: {args.pred_config["indel_model_type"]}\n' )
                 
         g.write( (f'  - Number of latent site and fragment classes: '+
-                  f'{training_argparse.pred_config["num_mixtures"]}\n' )
+                  f'{args.pred_config["num_mixtures"]}\n' +
+                  f'  - Possible substitution rate multipliers: ' +
+                  f'{args.pred_config["k_rate_mults"]}\n')
                 )
-        g.write(f'  - When reporting, normalizing losses by: {training_argparse.norm_loss_by}\n')
         
-        g.write( f'Times from: {training_argparse.pred_config["times_from"]}\n' )
+        # note if rates are independent
+        if args.pred_config['indp_rate_mults']:
+            possible_rates =  args.pred_config['k_rate_mults']
+            g.write( (f'  - Rates are independent of site class label: '+
+                      f'( P(k | c) = P(k) ); {possible_rates} possible '+
+                      f'rate multipliers\n' )
+                    )
+                    
+        elif not args.pred_config['indp_rate_mults']:
+            possible_rates = args.pred_config['num_mixtures'] * args.pred_config['k_rate_mults']
+            g.write( ( f'  - Rates depend on class labels ( P(k | c) ); '+
+                       f'{possible_rates} possible rate multipliers\n' )
+                    )
+        
+        # how to normalize reported metrics (usually by descendant length)
+        g.write(f'  - When reporting, normalizing losses by: {args.norm_reported_loss_by}\n')
+        
+        # write source of times
+        g.write( f'Times from: {args.pred_config["times_from"]}\n' )
     
+    
+    # extra files to record if you use tkf approximations
+    with open(f'{args.out_arrs_dir}/FINAL-EVAL_tkf_approx.tsv','w') as g:
+        g.write('Used tkf approximations in the following locations:\n')
+        
     
     ### extract data from dataloader_dict
     test_dset = dataloader_dict['test_dset']
@@ -206,7 +238,7 @@ def eval_pairhmm_frag_and_site_classes( args,
                                             jitted_determine_alignlen_bin = jitted_determine_alignlen_bin,
                                             logfile_dir = args.logfile_dir,
                                             out_arrs_dir = args.out_arrs_dir,
-                                            outfile_prefix = f'dset')
+                                            outfile_prefix = f'test-dset')
     
     
     ###########################################

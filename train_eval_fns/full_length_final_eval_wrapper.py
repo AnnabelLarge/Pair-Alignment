@@ -97,7 +97,6 @@ def final_eval_wrapper(dataloader,
         #     - sum_neg_logP; (B,)
         #     - neg_logP_length_normed; (B,)
         #     - perplexity_perSamp; (B,)
-        #     - ece; float
         
         # returned, if using feedforward prediction head:
         #     - acc_perSamp; (B,)
@@ -244,7 +243,7 @@ def final_eval_wrapper(dataloader,
                      'cond_ece':final_ece}
     
     if have_acc_metrics:
-        summary_stats['cond_acc'] = final_acc
+        summary_stats['acc'] = final_acc
     
         # write whole-dataset confusion matrix, separately
         out_file = f'{out_arrs_dir}/{outfile_prefix}_CONFUSION-MAT.npz'

@@ -35,27 +35,28 @@ from torch.utils.data import DataLoader
 # custom function/classes imports (in order of appearance)
 from train_eval_fns.build_optimizer import build_optimizer
 from utils.write_config import write_config
-from utils.edit_argparse import (enforce_valid_defaults,
-                                 fill_with_default_values,
-                                 share_top_level_args)
+from utils.edit_argparse import enforce_valid_defaults
 from utils.setup_training_dir import setup_training_dir
 from utils.tensorboard_recording_utils import (write_times,
                                                write_optional_outputs_during_training_hmms)
 from utils.write_timing_file import write_timing_file
+from utils.write_approx_dict import write_approx_dict
 
 # specific to training this model
+from utils.edit_argparse import pairhmm_indp_sites_fill_with_default_values as fill_with_default_values
+from utils.edit_argparse import pairhmms_share_top_level_args as share_top_level_args
 from models.simple_site_class_predict.initializers import init_pairhmm_indp_sites as init_pairhmm
 from train_eval_fns.indp_site_classes_training_fns import ( train_one_batch,
                                                             eval_one_batch,
                                                             final_eval_wrapper )
 
-def save_to_pickle(out_file, obj):
+def _save_to_pickle(out_file, obj):
     with open(out_file, 'wb') as g:
         pickle.dump(obj, g)
 
-def save_trainstate(out_file, tstate_obj):
+def _save_trainstate(out_file, tstate_obj):
     model_state_dict = flax.serialization.to_state_dict(tstate_obj)
-    save_to_pickle(out_file, model_state_dict)
+    _save_to_pickle(out_file, model_state_dict)
     
     
 def cont_training_pairhmm_indp_sites(args, 
@@ -79,6 +80,7 @@ def cont_training_pairhmm_indp_sites(args,
         epoch_ended = pickle.load(f).epoch_idx
     del prev_argparse_obj, f
     
+    # edit the argparse object in-place
     fill_with_default_values(args)
     enforce_valid_defaults(args)
     share_top_level_args(args)
@@ -90,8 +92,7 @@ def cont_training_pairhmm_indp_sites(args,
     ### initial setup of misc things
     # setup the working directory to continue training in (if not done yet) 
     #   and this run's sub-directory
-    err = 'pick a new training directory'
-    assert args.training_wkdir != new_training_wkdir, err
+    assert args.training_wkdir != new_training_wkdir, 'pick a new training directory'
     args.training_wkdir = new_training_wkdir
     setup_training_dir(args)
     del err
@@ -106,22 +107,42 @@ def cont_training_pairhmm_indp_sites(args,
     with open(args.logfile_name,'w') as g:
         g.write( f'CONTINUING TRAINING AT EPOCH: {epoch_ended}\n\n' )
         
+        # standard header
         g.write( f'PairHMM with independent site classes over emissions\n' )
         g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )
         g.write( f'Indel model: {args.pred_config.get("indel_model_type","None")}\n' )
         g.write( (f'  - Number of site classes for emissions: '+
-                  f'{args.pred_config["num_mixtures"]}\n' )
+                  f'{args.pred_config["num_mixtures"]}\n' +
+                  f'  - Possible substitution rate multipliers: ' +
+                  f'{args.pred_config["k_rate_mults"]}\n')
                 )
         
+        # note if rates are independent
+        if args.pred_config['indp_rate_mults']:
+            possible_rates =  args.pred_config['k_rate_mults']
+            g.write( (f'  - Rates are independent of site class label: '+
+                      f'( P(k | c) = P(k) ); {possible_rates} possible '+
+                      f'rate multipliers\n' )
+                    )
+                    
+        elif not args.pred_config['indp_rate_mults']:
+            possible_rates = args.pred_config['num_mixtures'] * args.pred_config['k_rate_mults']
+            g.write( ( f'  - Rates depend on class labels ( P(k | c) ); '+
+                       f'{possible_rates} possible rate multipliers\n' )
+                    )
+        
+        # how to normalize reported metrics (usually by descendant length)
         if args.pred_config["indel_model_type"] is not None:
-            g.write( f'  - Normalizing losses by: {args.norm_loss_by}\n' )
+            g.write( f'  - When reporting, normalizing losses by: {args.norm_reported_loss_by}\n' )
         
         elif args.pred_config["indel_model_type"] is None:
-            g.write( f'  - Normalizing losses by: align length '+
+            g.write( f'  - When reporting, normalizing losses by: align length '+
                      f'(same as desc length, because we remove gap '+
                      f'positions) \n' )
         
+        # write source of times
         g.write( f'Times from: {args.pred_config["times_from"]}\n' )
+    
     
     # extra files to record if you use tkf approximations
     with open(f'{args.out_arrs_dir}/TRAIN_tkf_approx.tsv','w') as g:
@@ -223,6 +244,7 @@ def cont_training_pairhmm_indp_sites(args,
                                indel_model_type = args.pred_config.get('indel_model_type', None),
                                t_array = t_array_for_all_samples, 
                                interms_for_tboard = args.interms_for_tboard,
+                               whole_dset_grad_desc = False,
                                update_grads = args.update_grads )
     train_fn_jitted = jax.jit(parted_train_fn)
     del parted_train_fn
@@ -251,11 +273,11 @@ def cont_training_pairhmm_indp_sites(args,
     # when to save/what to save
     # does reset best epoch conditions...
     best_epoch = -1
-    best_test_loss = 999999
+    best_test_loss = jnp.finfo(jnp.float32).max
     best_pairhmm_trainstate = pairhmm_trainstate
     
     # quit training if test loss increases for X epochs in a row
-    prev_test_loss = 999999
+    prev_test_loss = jnp.finfo(jnp.float32).max
     early_stopping_counter = 0
     
     # rng key for train
@@ -281,61 +303,37 @@ def cont_training_pairhmm_indp_sites(args,
         train_cpu_start = process_time()
         
         for batch_idx, batch in enumerate(training_dl):   
-            ### at the start of the BATCH, always save the model parameters 
-            ###   and what samples are in the batch
-            new_tstate_outfile = finalpred_save_model_filename.replace('.pkl',
-                                                                       '_BEFORE-UPDATE.pkl')
-            save_trainstate(out_file=new_tstate_outfile,
-                            tstate_obj=pairhmm_trainstate)
-            del new_tstate_outfile
-            
-            new_batch_outfile = f'{args.model_ckpts_dir}/current_training_batch.pkl'
-            save_to_pickle(out_file=new_batch_outfile,
-                           obj=batch)
-            del new_batch_outfile
-            
-            
-            ### carry on with training
+            this_batch_size = batch[0].shape[0]
             batch_epoch_idx = epoch_idx * len(training_dl) + batch_idx  
             
             rngkey_for_training_batch = jax.random.fold_in(training_rngkey, epoch_idx+batch_idx)
-            # print('disabling jit in training function')
-            # with jax.disable_jit():
             out = train_fn_jitted(batch=batch, 
                                   training_rngkey=rngkey_for_training_batch, 
                                   pairhmm_trainstate=pairhmm_trainstate)
             train_metrics, pairhmm_trainstate = out
             del out
             
+            #   out_dict['log_one_minus_alpha']
+            #   out_dict['log_beta']
+            #   out_dict['log_one_minus_gamma']
+            #   out_dict['log_gamma']
             
-            ### save the model parameters again
-            new_tstate_outfile = finalpred_save_model_filename.replace('.pkl',
-                                                                       '_AFTER-UPDATE.pkl')
-            save_trainstate(out_file=new_tstate_outfile,
-                            tstate_obj=pairhmm_trainstate)
-            del new_tstate_outfile
-            
-            if train_metrics["used_tkf_beta_approx"][0].any():
-                with open(f'{args.out_arrs_dir}/TRAIN_tkf_approx.tsv','a') as g:
-                    g.write(f'epoch {epoch_idx}, batch {batch_idx}:\n')
-                    
-                    g.write(f'beta was zero:\n')
-                    g.write(f'{train_metrics["used_tkf_beta_approx"][1]}\n')
-                    
-                    g.write(f'gamma was undefined:\n')
-                    g.write(f'{train_metrics["used_tkf_beta_approx"][2]}\n\n')
-            
-            
-            ### record metrics to tensorboard
-            interm_rec = batch_epoch_idx % args.histogram_output_freq == 0
-            final_rec = (batch_idx == len(training_dl)) & (epoch_idx == args.num_epochs)
-            
+            ### check if any approximations were used; just return sums for 
+            ###   now, and in separate debugging scripts, extract these flags
+            if train_metrics['used_approx'] is not None:
+                subline = f'epoch {epoch_idx}, batch {batch_idx}:'
+                write_approx_dict( approx_dict = train_metrics['used_approx'], 
+                                   out_arrs_dir = args.out_arrs_dir,
+                                   out_file = 'TRAIN_tkf_approx.tsv',
+                                   subline = subline )
+                        
+            # record metrics to tensorboard
             write_optional_outputs_during_training_hmms( writer_obj = writer, 
                                                     pairhmm_trainstate = pairhmm_trainstate,
                                                     global_step = batch_epoch_idx, 
                                                     dict_of_values = train_metrics, 
                                                     interms_for_tboard = args.interms_for_tboard, 
-                                                    write_histograms_flag = interm_rec or final_rec )
+                                                    write_histograms_flag = False )
             
             
 #__4___8__12: batch level (three tabs)
@@ -353,11 +351,10 @@ def cont_training_pairhmm_indp_sites(args,
                 with open(f'{args.model_ckpts_dir}/TRAINING_ARGPARSE.pkl', 'wb') as g:
                     pickle.dump(args, g)
                 
-                # # save all trainstate objects
-                # new_outfile = finalpred_save_model_filename.replace('.pkl','_BROKEN.pkl')
-                # with open(new_outfile, 'wb') as g:
-                #     model_state_dict = flax.serialization.to_state_dict(pairhmm_trainstate)
-                #     pickle.dump(model_state_dict, g)
+                # save all trainstate objects
+                new_outfile = finalpred_save_model_filename.replace('.pkl','_BROKEN.pkl')
+                _save_trainstate(out_file=new_outfile,
+                                tstate_obj=pairhmm_trainstate)
                 
                 raise RuntimeError( ('NaN loss detected; saved intermediates '+
                                     'and quit training') )
@@ -365,7 +362,7 @@ def cont_training_pairhmm_indp_sites(args,
             
 #__4___8__12: batch level (three tabs)
             ### add to recorded metrics for this epoch
-            weight = args.batch_size / len(training_dset)
+            weight = this_batch_size / len(training_dset)
             ave_epoch_train_loss += train_metrics['batch_loss'] * weight
             ave_epoch_train_perpl += train_metrics['batch_ave_joint_perpl'] * weight
             del weight
@@ -398,8 +395,9 @@ def cont_training_pairhmm_indp_sites(args,
         ##############################################################
         ### 3.3: also check current performance on held-out test set #
         ##############################################################
-        # Note: it's possible to output intermediates for these points too;
-        # but right now, that's not collected
+        # Note: it's possible to output intermediates and check if 
+        #   approximations were used for these points too;
+        #   but right now, that's not collected
         ave_epoch_test_loss = 0
         ave_epoch_test_perpl = 0
         
@@ -408,18 +406,15 @@ def cont_training_pairhmm_indp_sites(args,
         eval_cpu_start = process_time()
         
         for batch_idx, batch in enumerate(test_dl):
+            this_batch_size = batch[0].shape[0]
             eval_metrics = eval_fn_jitted(batch=batch, 
                                           pairhmm_trainstate=pairhmm_trainstate)
-            
-            if args.pred_config['norm_loss_by_length']:
-                batch_loss = jnp.mean( eval_metrics['joint_neg_logP_length_normed'] )
-            
-            elif not args.pred_config['norm_loss_by_length']:
-                batch_loss = jnp.mean( eval_metrics['joint_neg_logP'] )
-            
+            batch_loss = jnp.mean( eval_metrics['joint_neg_logP'] )
+                
+                
             ### add to total loss for this epoch; weight by number of
             ###   samples/valid tokens in this batch
-            weight = args.batch_size / len(test_dset)
+            weight = this_batch_size / len(test_dset)
             ave_epoch_test_loss += batch_loss * weight
             ave_epoch_test_perpl += jnp.mean( eval_metrics['joint_perplexity_perSamp'] ) * weight
             del weight
@@ -488,7 +483,7 @@ def cont_training_pairhmm_indp_sites(args,
             # save models to regular python pickles too (in case training is 
             #   interrupted)
             new_outfile = finalpred_save_model_filename.replace('.pkl','_BEST.pkl')
-            save_trainstate(out_file=new_outfile, 
+            _save_trainstate(out_file=new_outfile, 
                             tstate_obj=pairhmm_trainstate)
             
             
@@ -558,7 +553,6 @@ def cont_training_pairhmm_indp_sites(args,
         del epoch_cpu_start, epoch_cpu_end, epoch_real_start, epoch_real_end
         
         
-
     ###########################################################################
     ### 4: POST-TRAINING ACTIONS   ############################################
     ###########################################################################
@@ -646,8 +640,7 @@ def cont_training_pairhmm_indp_sites(args,
                                             logfile_dir = args.logfile_dir,
                                             out_arrs_dir = args.out_arrs_dir,
                                             outfile_prefix = f'test-set')
-
-
+    
     ### un-transform parameters and write to numpy arrays
     # if using one branch length per sample, write arrays with the test set
     if t_array_for_all_samples is not None:
@@ -655,6 +648,7 @@ def cont_training_pairhmm_indp_sites(args,
                                           t_array = t_array_for_all_samples,
                                           prefix = '',
                                           out_folder = args.out_arrs_dir,
+                                          write_time_static_objs = True,
                                           method = pairhmm_instance.write_params )
         
     elif t_array_for_all_samples is None:
@@ -662,7 +656,7 @@ def cont_training_pairhmm_indp_sites(args,
         
         pt_id = 0
         for i in tqdm( range(0, t_arr.shape[0], args.batch_size) ):
-            batch_t = t_arr[i : (i + args.batch_size)]
+            batch_t = jnp.array( t_arr[i : (i + args.batch_size)] )
             batch_prefix = f'test-set_pt{pt_id}'
             best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
                                               t_array = batch_t,
@@ -672,6 +666,7 @@ def cont_training_pairhmm_indp_sites(args,
                                               method = pairhmm_instance.write_params )
             
             pt_id += 1
+        
     
     ###########################################
     ### update the logfile with final losses  #
@@ -710,14 +705,9 @@ def cont_training_pairhmm_indp_sites(args,
     # don't remove source on macOS (when I'm doing CPU testing)
     print('\n\nDONE; compressing tboard folder')
     if platform.system() == 'Darwin':
-        os.system(f"tar -czvf {args.training_wkdir}/tboard.tar.gz {args.training_wkdir}/tboard")
+        os.system(f"tar --use-compress-program=pigz -cf {args.training_wkdir}/tboard.tar.gz {args.training_wkdir}/tboard")
     
     # DO remove source on linux (when I'm doing real experiments)
     elif platform.system() == 'Linux':
-        os.system(f"tar -czvf {args.training_wkdir}/tboard.tar.gz  --remove-files {args.training_wkdir}/tboard")
-    
-    
-    
-    
-    
+        os.system(f"tar --use-compress-program=pigz -cf {args.training_wkdir}/tboard.tar.gz  --remove-files {args.training_wkdir}/tboard")
     

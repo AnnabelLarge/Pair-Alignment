@@ -269,12 +269,11 @@ def prediction_head_instance( pred_model_type: str,
             from models.neural_hmm_predict.NeuralCondTKF import NeuralCondTKF as Model
         elif model_config['load_all']:
             from models.neural_hmm_predict.NeuralCondTKF import NeuralCondTKFLoadAll as Model
-                
-        model_name = 'FEEDFORWARD PREDICT'
+        model_name = 'NEURAL-TKF PREDICT'
     
     elif pred_model_type == 'feedforward':
         from models.feedforward_predict.FeedforwardPredict import FeedforwardPredict as Model
-        model_name = 'NEURAL-TKF PREDICT'
+        model_name = 'FEEDFORWARD PREDICT'
     
     finalpred_instance = Model(config = model_config,
                                name = model_name)
@@ -297,33 +296,25 @@ def prediction_head_instance( pred_model_type: str,
                              )
     
         # Build argument dictionary
-        tabulate_kwargs = {
-            "datamat_lst": dummy_mat_lst,
-            "padding_mask": dummy_masking_mat,
-            "training": False,
-            "sow_intermediates": False
-        }
-    
-        if (pred_model_type == 'neural_hmm'):
-            tabulate_kwargs["t_array"] = t_array
-    
-        str_out = tab_fn(**tabulate_kwargs)
+        str_out = tab_fn( datamat_lst = dummy_mat_lst,
+                          padding_mask = dummy_masking_mat,
+                          t_array = t_array,
+                          training = False,
+                          sow_intermediates = False,
+                          mutable = ['params'] )
         with open(f'{tabulate_file_loc}/OUT-PROJ_tabulate.txt','w') as g:
             g.write(str_out)
         
     
     ### turn into a train state
-    init_kwargs = { "datamat_lst": dummy_mat_lst,
-                    "padding_mask": dummy_masking_mat,
-                    "training": False,
-                    "sow_intermediates": False,
-                    "mutable": ['params'] }
-    
-    if pred_model_type == 'neural_hmm':
-        init_kwargs["t_array"] = t_array
-    
     # Initialize with conditional arguments
-    init_params = finalpred_instance.init(rngs=model_init_rngkey, **init_kwargs)
+    init_params = finalpred_instance.init( rngs = model_init_rngkey,
+                                           datamat_lst = dummy_mat_lst,
+                                           padding_mask = dummy_masking_mat,
+                                           t_array = t_array,
+                                           training = False,
+                                           sow_intermediates = False,
+                                           mutable = ['params'] )
     finalpred_trainstate = TrainState.create(apply_fn=finalpred_instance.apply, 
                                               params=init_params,
                                               tx=tx)

@@ -98,9 +98,11 @@ def train_one_batch(batch,
                     concat_fn,
                     norm_loss_by_for_reporting: str='desc_len',
                     update_grads: bool = True,
-                    gap_idx = 42,
-                    seq_padding_idx = 0,
-                    align_idx_padding = -9):
+                    gap_idx: int = 43,
+                    seq_padding_idx: int = 0,
+                    align_idx_padding: int = -9,
+                    *args,
+                    **kwargs):
     """
     Jit-able function to apply the model to one batch of alignments, evaluate loss
     and collect gradients, then update model parameters
@@ -198,7 +200,7 @@ def train_one_batch(batch,
     length_for_normalization_for_reporting = (true_out != seq_padding_idx).sum(axis=1) #(B, )
     
     if norm_loss_by_for_reporting == 'desc_len':
-        num_gaps = ( true_out == gap_idx ).sum(axis=1) #(B, )
+        num_gaps = ( true_out == (gap_idx-1) ).sum(axis=1) #(B, )
         length_for_normalization_for_reporting = length_for_normalization_for_reporting - num_gaps #(B, )
      
         
@@ -475,9 +477,9 @@ def eval_one_batch(batch,
                    interms_for_tboard,
                    concat_fn,
                    norm_loss_by_for_reporting: str='desc_len',
-                   gap_idx = 42,
-                   seq_padding_idx = 0,
-                   align_idx_padding = -9,
+                   gap_idx: int = 43,
+                   seq_padding_idx: int = 0,
+                   align_idx_padding: int = -9,
                    extra_args_for_eval: dict = dict() ):
     """
     Jit-able function to evaluate a model on a batch of alignments
@@ -575,7 +577,7 @@ def eval_one_batch(batch,
     length_for_normalization_for_reporting = (true_out != seq_padding_idx).sum(axis=1) #(B, )
     
     if norm_loss_by_for_reporting == 'desc_len':
-        num_gaps = ( true_out == gap_idx ).sum(axis=1) #(B, )
+        num_gaps = ( true_out == (gap_idx-1) ).sum(axis=1) #(B, )
         length_for_normalization_for_reporting = length_for_normalization_for_reporting - num_gaps #(B, )
     
         

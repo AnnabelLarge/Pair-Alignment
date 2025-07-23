@@ -36,11 +36,11 @@ from utils.sequence_length_helpers import (determine_seqlen_bin,
                                            determine_alignlen_bin)
 from utils.write_timing_file import write_timing_file
 from utils.write_approx_dict import write_approx_dict
-from utils.edit_argparse import (enforce_valid_defaults,
-                                 fill_with_default_values,
-                                 share_top_level_args)
+from utils.edit_argparse import enforce_valid_defaults
 
 # specific to training this model
+from utils.edit_argparse import neural_hmm_fill_with_default_values as fill_with_default_values
+from utils.edit_argparse import neural_hmm_share_top_level_args as share_top_level_args
 from models.neural_utils.neural_initializer import create_all_tstates 
 from train_eval_fns.neural_tkf_train_eval import eval_one_batch
 from train_eval_fns.full_length_final_eval_wrapper import final_eval_wrapper
@@ -260,7 +260,7 @@ def eval_neural_hmm( args,
                                              interms_for_tboard = no_returns, 
                                              logfile_dir = args.logfile_dir,
                                              out_arrs_dir = args.out_arrs_dir,
-                                             outfile_prefix = f'dset',
+                                             outfile_prefix = f'test-dset',
                                              tboard_writer = None)
     
     ###########################################

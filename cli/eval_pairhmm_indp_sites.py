@@ -29,16 +29,16 @@ import flax
 from torch.utils.data import DataLoader
 
 # custom function/classes imports (in order of appearance)
+from utils.edit_argparse import enforce_valid_defaults
 from train_eval_fns.build_optimizer import build_optimizer
-
+                                 
 # specific to training this model
+from utils.edit_argparse import pairhmm_indp_sites_fill_with_default_values as fill_with_default_values
+from utils.edit_argparse import pairhmms_share_top_level_args as share_top_level_args
 from models.simple_site_class_predict.initializers import init_pairhmm_indp_sites as init_pairhmm
 from train_eval_fns.indp_site_classes_training_fns import ( eval_one_batch,
                                                             final_eval_wrapper )
 
-from utils.edit_argparse import (enforce_valid_defaults,
-                                 fill_with_default_values,
-                                 share_top_level_args)
 
 
 def eval_pairhmm_indp_sites(args, 
@@ -79,13 +79,46 @@ def eval_pairhmm_indp_sites(args,
     # create a new logfile
     with open(args.logfile_name,'w') as g:
         g.write( f'Loading from {args.training_wkdir} to eval new data\n\n' )
+        
+        # standard header
         g.write( f'PairHMM with independent site classes over emissions\n' )
-        g.write( f'Substitution model: {training_argparse.pred_config["subst_model_type"]}\n' )
-        g.write( f'Indel model: {training_argparse.pred_config.get("indel_model_type","None")}\n' )
+        g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )
+        g.write( f'Indel model: {args.pred_config.get("indel_model_type","None")}\n' )
         g.write( (f'  - Number of site classes for emissions: '+
-                  f'{training_argparse.pred_config["num_mixtures"]}\n' )
+                  f'{args.pred_config["num_mixtures"]}\n' +
+                  f'  - Possible substitution rate multipliers: ' +
+                  f'{args.pred_config["k_rate_mults"]}\n')
                 )
+        
+        # note if rates are independent
+        if args.pred_config['indp_rate_mults']:
+            possible_rates =  args.pred_config['k_rate_mults']
+            g.write( (f'  - Rates are independent of site class label: '+
+                      f'( P(k | c) = P(k) ); {possible_rates} possible '+
+                      f'rate multipliers\n' )
+                    )
+                    
+        elif not args.pred_config['indp_rate_mults']:
+            possible_rates = args.pred_config['num_mixtures'] * args.pred_config['k_rate_mults']
+            g.write( ( f'  - Rates depend on class labels ( P(k | c) ); '+
+                       f'{possible_rates} possible rate multipliers\n' )
+                    )
+        
+        # how to normalize reported metrics (usually by descendant length)
+        if args.pred_config["indel_model_type"] is not None:
+            g.write( f'  - When reporting, normalizing losses by: {args.norm_reported_loss_by}\n' )
+        
+        elif args.pred_config["indel_model_type"] is None:
+            g.write( f'  - When reporting, normalizing losses by: align length '+
+                     f'(same as desc length, because we remove gap '+
+                     f'positions) \n' )
+        
+        # write source of times
+        g.write( f'Times from: {args.pred_config["times_from"]}\n' )
     
+    with open(f'{args.out_arrs_dir}/FINAL-EVAL_tkf_approx.tsv','w') as g:
+        g.write('Used tkf approximations in the following locations:\n')
+        
     
     ### extract data from dataloader_dict
     test_dset = dataloader_dict['test_dset']
@@ -207,7 +240,7 @@ def eval_pairhmm_indp_sites(args,
                                             save_per_sample_losses = True,
                                             logfile_dir = args.logfile_dir,
                                             out_arrs_dir = args.out_arrs_dir,
-                                            outfile_prefix = f'dset')
+                                            outfile_prefix = f'test-set')
     
     
     ###########################################

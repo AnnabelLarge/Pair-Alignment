@@ -38,9 +38,7 @@ from torch.utils.data import DataLoader
 # custom function/classes imports (in order of appearance)
 from train_eval_fns.build_optimizer import build_optimizer
 from utils.write_config import write_config
-from utils.edit_argparse import (enforce_valid_defaults,
-                                 fill_with_default_values,
-                                 share_top_level_args)
+from utils.edit_argparse import enforce_valid_defaults
 from utils.setup_training_dir import setup_training_dir
 from utils.tensorboard_recording_utils import (write_times,
                                                write_optional_outputs_during_training_hmms)
@@ -48,6 +46,8 @@ from utils.write_timing_file import write_timing_file
 from utils.write_approx_dict import write_approx_dict
 
 # specific to training this model
+from utils.edit_argparse import pairhmm_indp_sites_fill_with_default_values as fill_with_default_values
+from utils.edit_argparse import pairhmms_share_top_level_args as share_top_level_args
 from models.simple_site_class_predict.initializers import init_pairhmm_indp_sites as init_pairhmm
 from train_eval_fns.indp_site_classes_training_fns import ( train_one_batch,
                                                             eval_one_batch,
@@ -71,7 +71,7 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     assert args.pred_model_type == 'pairhmm_indp_sites', err
     del err
     
-    ### edit the argparse object in-place
+    # edit the argparse object in-place
     fill_with_default_values(args)
     enforce_valid_defaults(args)
     share_top_level_args(args)
@@ -155,8 +155,6 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     test_dset = dataloader_dict['test_dset']
     test_dl = dataloader_dict['test_dl']
     t_array_for_all_samples = dataloader_dict['t_array_for_all_samples']
-    
-    # add equilibrium counts under two different labels
     args.pred_config['training_dset_emit_counts'] = training_dset.emit_counts
     
     
@@ -534,7 +532,6 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
         
         del epoch_cpu_start, epoch_cpu_end, epoch_real_start, epoch_real_end
         
-        
 
     ###########################################################################
     ### 4: POST-TRAINING ACTIONS   ############################################
@@ -688,11 +685,9 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     # don't remove source on macOS (when I'm doing CPU testing)
     print('\n\nDONE; compressing tboard folder')
     if platform.system() == 'Darwin':
-        os.system(f"tar -czvf {args.training_wkdir}/tboard.tar.gz {args.training_wkdir}/tboard")
+        os.system(f"tar --use-compress-program=pigz -cf {args.training_wkdir}/tboard.tar.gz {args.training_wkdir}/tboard")
     
     # DO remove source on linux (when I'm doing real experiments)
     elif platform.system() == 'Linux':
-        os.system(f"tar -czvf {args.training_wkdir}/tboard.tar.gz  --remove-files {args.training_wkdir}/tboard")
-    
-    
+        os.system(f"tar --use-compress-program=pigz -cf {args.training_wkdir}/tboard.tar.gz  --remove-files {args.training_wkdir}/tboard")
     

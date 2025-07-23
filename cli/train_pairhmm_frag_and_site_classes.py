@@ -37,9 +37,7 @@ from torch.utils.data import DataLoader
 # custom function/classes imports (in order of appearance)
 from train_eval_fns.build_optimizer import build_optimizer
 from utils.write_config import write_config
-from utils.edit_argparse import (enforce_valid_defaults,
-                                 fill_with_default_values,
-                                 share_top_level_args)
+from utils.edit_argparse import enforce_valid_defaults
 from utils.setup_training_dir import setup_training_dir
 from utils.sequence_length_helpers import determine_alignlen_bin
 from utils.tensorboard_recording_utils import (write_times,
@@ -48,6 +46,8 @@ from utils.write_timing_file import write_timing_file
 from utils.write_approx_dict import write_approx_dict
 
 # specific to training this model
+from utils.edit_argparse import pairhmm_frag_and_site_classes_fill_with_default_values as fill_with_default_values
+from utils.edit_argparse import pairhmms_share_top_level_args as share_top_level_args
 from models.simple_site_class_predict.initializers import init_pairhmm_frag_and_site_classes as init_pairhmm
 from train_eval_fns.frag_and_site_classes_training_fns import ( train_one_batch,
                                                                 eval_one_batch,
@@ -130,6 +130,7 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
         
         # write source of times
         g.write( f'Times from: {args.pred_config["times_from"]}\n' )
+    
     
     # extra files to record if you use tkf approximations
     with open(f'{args.out_arrs_dir}/TRAIN_tkf_approx.tsv','w') as g:

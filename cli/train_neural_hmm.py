@@ -33,9 +33,7 @@ from torch.utils.data import DataLoader
 
 # custom function/classes imports
 from train_eval_fns.build_optimizer import build_optimizer
-from utils.edit_argparse import (enforce_valid_defaults,
-                                 fill_with_default_values,
-                                 share_top_level_args)
+from utils.edit_argparse import enforce_valid_defaults
 from utils.setup_training_dir import setup_training_dir
 from utils.sequence_length_helpers import (determine_seqlen_bin, 
                                            determine_alignlen_bin)
@@ -45,6 +43,8 @@ from utils.write_timing_file import write_timing_file
 from utils.write_approx_dict import write_approx_dict
 
 # specific to training this model
+from utils.edit_argparse import neural_hmm_fill_with_default_values as fill_with_default_values
+from utils.edit_argparse import neural_hmm_share_top_level_args as share_top_level_args
 from models.neural_utils.neural_initializer import create_all_tstates 
 from train_eval_fns.neural_tkf_train_eval import ( train_one_batch,
                                                    eval_one_batch )

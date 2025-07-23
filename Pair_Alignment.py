@@ -12,18 +12,25 @@ import argparse
 import jax
 import pickle
 import shutil
+import sys
 import gc
 
 from dloaders.init_dataloader import init_dataloader
 
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update("jax_debug_infs", True)
-jax.config.update("jax_enable_x64", True)
+# jax.config.update("jax_enable_x64", True)
 
 
 def main():
+    # debug
     if 'RESULTS' in os.listdir():
         shutil.rmtree('RESULTS')
+    
+    # need pigz for compression
+    err = "pigz is not installed. Please install it to proceed."
+    assert shutil.which("pigz") is not None, err
+    del err
     
     
     ### for now, running models on single GPU
