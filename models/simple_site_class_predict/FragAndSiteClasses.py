@@ -132,7 +132,7 @@ class FragAndSiteClasses(ModuleBase):
         # optional
         self.norm_reported_loss_by = self.config.get('norm_reported_loss_by', 'desc_len')
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
-        self.gap_tok = self.config.get('gap_tok', 43)
+        self.gap_idx = self.config.get('gap_idx', 43)
         
         
         ###############################################################
@@ -257,7 +257,7 @@ class FragAndSiteClasses(ModuleBase):
         ### for REPORTING ONLY (not the objective function), normalize by length
         if self.norm_reported_loss_by == 'desc_len':
             # where descendant is not pad or gap
-            banned_toks = np.array( [0,1,2,self.gap_tok] )
+            banned_toks = np.array( [0,1,2,self.gap_idx] )
             
         elif self.norm_reported_loss_by == 'align_len':
             # where descendant is not pad (but could be gap)
@@ -318,8 +318,8 @@ class FragAndSiteClasses(ModuleBase):
             
         # get lengths, not including <bos> and <eos>
         align_len = ~jnp.isin( aligned_inputs[...,0], np.array( [0,1,2] ) )
-        anc_len = ~jnp.isin( aligned_inputs[...,0], np.array( [0,1,2,self.gap_tok] ) )
-        desc_len = ~jnp.isin( aligned_inputs[...,1], np.array( [0,1,2,self.gap_tok] ) )
+        anc_len = ~jnp.isin( aligned_inputs[...,0], np.array( [0,1,2,self.gap_idx] ) )
+        desc_len = ~jnp.isin( aligned_inputs[...,1], np.array( [0,1,2,self.gap_idx] ) )
         align_len = align_len.sum(axis=1)
         anc_len = anc_len.sum(axis=1)
         desc_len = desc_len.sum(axis=1)
@@ -744,7 +744,7 @@ class FragAndSiteClassesLoadAll(FragAndSiteClasses):
         # optional
         self.norm_reported_loss_by = self.config.get('norm_reported_loss_by', 'desc_len')
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
-        self.gap_tok = self.config.get('gap_tok', 43)
+        self.gap_idx = self.config.get('gap_idx', 43)
         
         
         ###############################################################

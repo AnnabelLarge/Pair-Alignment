@@ -219,7 +219,7 @@ def _pad_to_length_divisible_by_chunk_len(aligned_mat,
 def _load_aligned_mats(data_dir, 
                       split, 
                       pred_model_type,
-                      emission_alphabet_size ,
+                      emission_alphabet_size,
                       toss_alignments_longer_than = None, 
                       gap_idx = 43,
                       bos_idx = 1,
@@ -242,7 +242,7 @@ def _load_aligned_mats(data_dir,
     ### if alignments are longer than toss_alignments_longer_than, 
     ###   then toss the samples
     if toss_alignments_longer_than:
-        eos_locs = np.argwhere(mat[...,0] == 2)
+        eos_locs = np.argwhere(mat[...,0] == eos_idx)
         idxes_to_keep = eos_locs[ eos_locs[:, 1] <= toss_alignments_longer_than ][:, 0]
         mat = mat[idxes_to_keep, :, :]
         
@@ -278,42 +278,48 @@ def _load_aligned_mats(data_dir,
     bos = np.where(mat == bos_idx, 4, 0)[...,0]
     eos = np.where(mat == eos_idx, 5, 0)[...,0]
     
-    
-    ### concatenate
     # categorical encoding
     alignment = bos + eos + matches + ins + dels
     
-    # these use padding token of 0: (B, L, 3)
-    zero_padded_mat = np.concatenate([gapped_seqs, alignment[...,None]], axis=-1)
     
-    # these use -9 as padding token: (B, L, 2)
-    neg_nine_padded_mat = mat[...,[-2,-1]]
-    
-    
-    ### model-specific transformations
-    # feedforward: add 20 to insert sites in descendant, toss ancestor
+    ### model-specific transformations, concatenation
+    ### feedforward: add 20 to insert sites in descendant, toss ancestor
     # move all except <pad> and <bos> down by one
     if pred_model_type == 'feedforward':
-        # add 20 to insert sites
-        ins_pos = np.argwhere( zero_padded_mat[...,0] == gap_idx )
-        zero_padded_mat[ins_pos[:,0], ins_pos[:,1], 1] += emission_alphabet_size
+        ### zero-padded items
+        gapped_anc = gapped_seqs[...,0] #(B, L)
+        gapped_desc = gapped_seqs[...,1] #(B, L)
         
-        # toss ancestor
-        zero_padded_mat = zero_padded_mat[...,1:]
+        # insert sites are where ancestor = gap char; add 20 here (in place)
+        ins_pos = np.argwhere( gapped_anc == gap_idx ) #(B,)
+        gapped_desc[ ins_pos[:,0], ins_pos[:,1] ] += emission_alphabet_size #(B, L, 3)
         
-        # move all tokens down (except <bos>, <pad>, and <gap>)
-        shifted_desc = np.where( np.isin(zero_padded_mat[...,0], [0,1, gap_idx] ),
-                                 zero_padded_mat[...,0],
-                                 zero_padded_mat[...,0] - 1 )
-        zero_padded_mat[...,0] = shifted_desc
+        # move all descendant sequence tokens down (except <bos>, <pad>, and <gap>)
+        gapped_desc = np.where( np.isin(gapped_desc, [0, bos_idx, gap_idx] ),
+                                gapped_desc,
+                                gapped_desc - 1 ) #(B, L)
+        zero_padded_mat = np.concatenate([gapped_desc, alignment[...,None]], axis=-1) # (B, L, 2)
+        del gapped_anc, gapped_desc, ins_pos
+        
+        ### -9 padded items
+        neg_nine_padded_mat = mat[...,[-2,-1]] # (B, L, 2)
     
-    # pairHMM: don't need alignment indices
+    
+    ### pairHMM: concatenate zero-padding matrix; toss negative nine-padding matrix
     elif pred_model_type in ['pairhmm_indp_sites',
                              'pairhmm_frag_and_site_classes']:
+        zero_padded_mat = np.concatenate([gapped_seqs, alignment[...,None]], axis=-1) # (B, L, 3)
         neg_nine_padded_mat = None
     
-    # (neural pairHMM: keep everything as-is)
+    
+    ### neural pairHMM: concatenate both
+    elif pred_model_type == 'neural_hmm':
+        zero_padded_mat = np.concatenate([gapped_seqs, alignment[...,None]], axis=-1) # (B, L, 3)
+        neg_nine_padded_mat = mat[...,[-2,-1]] # (B, L, 2)
+        
+        
     return zero_padded_mat, neg_nine_padded_mat, idxes_to_keep
+
 
 
 def _load_unaligned(data_dir, 

@@ -10,7 +10,7 @@
     "batch_size": 9,
     "emission_alphabet_size": 20,
     "norm_loss_by": "desc_len",
-    "gap_tok": 43,
+    "gap_idx": 43,
 
     "num_epochs": 5000,
     "optimizer_config": {

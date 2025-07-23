@@ -129,7 +129,7 @@ class MarkovFrags(ModuleBase):
     def setup(self):
         self.num_site_classes = self.config['num_emit_site_classes']
         self.norm_loss_by = self.config['norm_loss_by']
-        self.gap_tok = self.config['gap_tok']
+        self.gap_idx = self.config['gap_idx']
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
         
         ### how to score emissions from indel sites
@@ -281,7 +281,7 @@ class MarkovFrags(ModuleBase):
         ### normalize
         if self.norm_loss_by == 'desc_len':
             # where descendant is not pad or gap
-            banned_toks = jnp.array([0,1,2,self.gap_tok])
+            banned_toks = jnp.array([0,1,2,self.gap_idx])
             
         elif self.norm_loss_by == 'align_len':
             # where descendant is not pad (but could be gap)
@@ -329,8 +329,8 @@ class MarkovFrags(ModuleBase):
         
         # get lengths, not including <bos> and <eos>
         align_len = ~jnp.isin( aligned_inputs[...,0], jnp.array([0,1,2]) )
-        anc_len = ~jnp.isin( aligned_inputs[...,0], jnp.array([0,1,2,self.gap_tok]) )
-        desc_len = ~jnp.isin( aligned_inputs[...,1], jnp.array([0,1,2,self.gap_tok]) )
+        anc_len = ~jnp.isin( aligned_inputs[...,0], jnp.array([0,1,2,self.gap_idx]) )
+        desc_len = ~jnp.isin( aligned_inputs[...,1], jnp.array([0,1,2,self.gap_idx]) )
         align_len = align_len.sum(axis=1)
         anc_len = anc_len.sum(axis=1)
         desc_len = desc_len.sum(axis=1)
@@ -1278,7 +1278,7 @@ class MarkovFragsLoadAll(MarkovFrags):
     def setup(self):
         self.num_site_classes = self.config['num_emit_site_classes']
         self.norm_loss_by = self.config['norm_loss_by']
-        self.gap_tok = self.config['gap_tok']
+        self.gap_idx = self.config['gap_idx']
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
         
         ### how to score emissions from indel sites

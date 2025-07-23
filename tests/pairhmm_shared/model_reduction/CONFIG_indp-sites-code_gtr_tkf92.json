@@ -9,7 +9,7 @@
     "bos_eos_as_match": false,
     "batch_size": 7,
     "emission_alphabet_size": 20,
-    "gap_tok": 43,
+    "gap_idx": 43,
 
     "num_epochs": 5000,
     "optimizer_config": {

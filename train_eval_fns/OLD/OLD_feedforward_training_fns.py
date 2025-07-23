@@ -43,7 +43,7 @@ def train_one_batch(batch,
                     norm_loss_by,
                     interms_for_tboard, 
                     add_prev_alignment_info,
-                    gap_tok = 43,
+                    gap_idx = 43,
                     seq_padding_idx = 0,
                     align_idx_padding = -9):
     """
@@ -152,7 +152,7 @@ def train_one_batch(batch,
                                           False ).sum(axis=1)
     
     if norm_loss_by == 'desc_len':
-        num_gaps = jnp.where( true_out == (gap_tok-1), 
+        num_gaps = jnp.where( true_out == (gap_idx-1), 
                               True, 
                               False ).sum(axis=1)
         length_for_normalization = length_for_normalization - num_gaps
@@ -259,15 +259,15 @@ def train_one_batch(batch,
     
     # get other metrics
     #   normally, because the gap token is the last element in the alphabet,
-    #   out_alph_size_with_pad = gap_tok + 1, but here, I've removed <bos>,
+    #   out_alph_size_with_pad = gap_idx + 1, but here, I've removed <bos>,
     #   which was encoded as 1. Entire alphabet shifted down, so now 
-    #   out_alph_size_with_pad = gap_tok
+    #   out_alph_size_with_pad = gap_idx
     metrics = finalpred_instance.compile_metrics( true_out = true_out,     
                                                   final_logits = aux_dict['final_logits'],
                                                   loss = batch_loss,
                                                   neg_logP_length_normed = aux_dict['neg_logP_length_normed'],
                                                   seq_padding_idx = 0,
-                                                  out_alph_size_with_pad = gap_tok )
+                                                  out_alph_size_with_pad = gap_idx )
     
     batch_ave_perpl = jnp.mean(metrics['perplexity_perSamp'])
     batch_ave_acc = jnp.mean(metrics['acc_perSamp'])
@@ -405,7 +405,7 @@ def eval_one_batch(batch,
                    norm_loss_by,
                    interms_for_tboard, 
                    add_prev_alignment_info,
-                   gap_tok = 43,
+                   gap_idx = 43,
                    seq_padding_idx = 0,
                    align_idx_padding = -9,
                    extra_args_for_eval: dict = dict() ):
@@ -503,7 +503,7 @@ def eval_one_batch(batch,
                                           False ).sum(axis=1)
                                          
     if norm_loss_by == 'desc_len':
-        num_gaps = jnp.where( true_out == (gap_tok-1), 
+        num_gaps = jnp.where( true_out == (gap_idx-1), 
                               True, 
                               False ).sum(axis=1)
         length_for_normalization = length_for_normalization - num_gaps
@@ -581,15 +581,15 @@ def eval_one_batch(batch,
     
     # get other metrics
     #   normally, because the gap token is the last element in the alphabet,
-    #   out_alph_size_with_pad = gap_tok + 1, but here, I've removed <bos>,
+    #   out_alph_size_with_pad = gap_idx + 1, but here, I've removed <bos>,
     #   which was encoded as 1. Entire alphabet shifted down, so now 
-    #   out_alph_size_with_pad = gap_tok
+    #   out_alph_size_with_pad = gap_idx
     metrics = finalpred_instance.compile_metrics( true_out = true_out,     
                                                   final_logits = final_logits,
                                                   loss = loss,
                                                   neg_logP_length_normed = loss_intermeds['neg_logP_length_normed'],
                                                   seq_padding_idx = 0,
-                                                  out_alph_size_with_pad = gap_tok )
+                                                  out_alph_size_with_pad = gap_idx )
     
     ##########################################
     ### COMPILE FINAL DICTIONARY TO RETURN   #

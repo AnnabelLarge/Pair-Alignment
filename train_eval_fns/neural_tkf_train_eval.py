@@ -102,7 +102,7 @@ def train_one_batch(batch,
                     concat_fn, 
                     norm_loss_by_for_reporting: str='desc_len',
                     update_grads: bool = True,
-                    gap_tok: int = 43,
+                    gap_idx: int = 43,
                     seq_padding_idx: int = 0,
                     align_idx_padding: int = -9,
                     *args,
@@ -111,6 +111,8 @@ def train_one_batch(batch,
     Jit-able function to apply the model to one batch of samples, evaluate loss
     and collect gradients, then update model parameters
     
+    Arguments
+    ----------
     regular inputs:
         > batch: batch from a pytorch dataloader
         > training_rngkey: the rng key
@@ -132,13 +134,19 @@ def train_one_batch(batch,
                              histograms and scalars
         > update_grads: only turn off when debugging
         > concat_fn: what function to use to concatenate embedded seq inputs
+        > gap_idx, seq_padding_idx, align_idx_padding: default tokens and indices
 
     static inputs, specific to neural hmm:
         > t_array_for_all_samples: one time array for all samples, if 
           applicable; either a jax array of size (T,) or None
     
-    outputs:
-        > metrics_outputs: dictionary of metrics and outputs                                  
+    Returns
+    --------
+    out_dict : dict
+        dictionary of metrics and outputs  
+    
+    updated_trainstates : flax trainstate objects
+        updated with new parameters
         
     """
     # which times to use 
@@ -202,7 +210,7 @@ def train_one_batch(batch,
     length_for_normalization_for_reporting = (true_out[...,1] != seq_padding_idx).sum(axis=1) #(B, )
     
     if norm_loss_by_for_reporting == 'desc_len':
-        num_gaps = (true_out[...,1] == gap_tok).sum(axis=1) #(B, )
+        num_gaps = (true_out[...,1] == gap_idx).sum(axis=1) #(B, )
         length_for_normalization_for_reporting = length_for_normalization_for_reporting - num_gaps #(B, )
         
         
@@ -277,9 +285,9 @@ def train_one_batch(batch,
                                             rngs={'dropout': finalpred_key})
         
         # forward_pass_scoring_matrices has the keys:
-        # logprob_emit_match: (T,B,L,A,A) or (B,L,A,A)
-        # logprob_emit_indel: (B,L,A)
-        # logprob_transits: (T,B,L,S,S) or (B,L,S,S)
+        # logprob_emit_match: (T,B,L_align-1,A,A) or (B,L_align-1,A,A)
+        # logprob_emit_indel: (B,L_align-1,A)
+        # logprob_transits: (T,B,L_align-1,S,S) or (B,L_align-1,S,S)
         # corr: a tuple of two arrays; each either (T,B) or (B,)
         # approx_flags_dict: a dictionary of things (see model code)
         # subs_model_params: a dictionary of things (see model code)
@@ -476,7 +484,7 @@ def eval_one_batch(batch,
                     t_array_for_all_samples,  
                     concat_fn, 
                     norm_loss_by_for_reporting: str='desc_len',
-                    gap_tok: int = 43,
+                    gap_idx: int = 43,
                     seq_padding_idx: int = 0,
                     align_idx_padding: int = -9,
                     extra_args_for_eval: dict = dict(),
@@ -571,7 +579,7 @@ def eval_one_batch(batch,
     length_for_normalization_for_reporting = (true_out[...,1] != seq_padding_idx).sum(axis=1)
     
     if norm_loss_by_for_reporting == 'desc_len':
-        num_gaps = (true_out[...,1] == gap_tok).sum(axis=1)
+        num_gaps = (true_out[...,1] == gap_idx).sum(axis=1)
         length_for_normalization_for_reporting = length_for_normalization_for_reporting - num_gaps
 
     
@@ -634,12 +642,11 @@ def eval_one_batch(batch,
                                          padding_mask = padding_mask,
                                          training = False,
                                          sow_intermediates = finalpred_sow_outputs,
-                                         mutable=mut
-                                         )
+                                         mutable=mut )
     # forward_pass_scoring_matrices has the keys:
-    # logprob_emit_match: (T,B,L,A,A) or (B,L,A,A)
-    # logprob_emit_indel: (B,L,A)
-    # logprob_transits: (T,B,L,S,S) or (B,L,S,S)
+    # logprob_emit_match: (T,B,L_align-1,A,A) or (B,L_align-1,A,A)
+    # logprob_emit_indel: (B,L_align-1,A)
+    # logprob_transits: (T,B,L_align-1,S,S) or (B,L_align-1,S,S)
     # corr: a tuple of two arrays; each either (T,B) or (B,)
     # approx_flags_dict: a dictionary of things (see model code)
     # subs_model_params: a dictionary of things (see model code)

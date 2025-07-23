@@ -9,7 +9,7 @@
     "batch_size": 7,
     "bos_eos_as_match": false,
     "emission_alphabet_size": 20,
-    "gap_tok": 43,
+    "gap_idx": 43,
     "min_time": 0.015,
 
     "norm_loss_by": "desc_len",

@@ -139,7 +139,7 @@ def train_one_batch(batch,
     length_for_normalization = finalpred_instance.get_length_for_normalization(true_out = true_out,
                                                             norm_loss_by = norm_loss_by,
                                                             seq_padding_idx = seq_padding_idx,
-                                                            gap_tok = 43)
+                                                            gap_idx = 43)
     
     
     ### encode all alignment position's state
@@ -562,7 +562,7 @@ def eval_one_batch(batch,
     length_for_normalization = finalpred_instance.get_length_for_normalization(true_out = true_out,
                                                             norm_loss_by = norm_loss_by,
                                                             seq_padding_idx = seq_padding_idx,
-                                                            gap_tok = 43)
+                                                            gap_idx = 43)
     
     
     ### encode all alignment position's state

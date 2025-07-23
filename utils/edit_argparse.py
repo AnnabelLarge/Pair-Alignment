@@ -25,8 +25,8 @@ def fill_with_default_values(args):
     if 'gap_idx' not in provided_args:
         args.gap_idx = 43
         
-    if 'gap_tok' not in provided_args:
-        args.gap_tok = args.gap_idx
+    if 'gap_idx' not in provided_args:
+        args.gap_idx = args.gap_idx
         
     
     ### extra defaults
@@ -107,7 +107,7 @@ def share_top_level_args(args):
 
     elif args.pred_model_type in ['pairhmm_indp_sites',
                                   'pairhmm_frag_and_site_classes']:
-        args.pred_config['gap_tok'] = args.gap_tok
+        args.pred_config['gap_idx'] = args.gap_idx
         args.pred_config['norm_reported_loss_by'] = args.norm_reported_loss_by
         args.pred_config['emission_alphabet_size'] = args.emission_alphabet_size
     

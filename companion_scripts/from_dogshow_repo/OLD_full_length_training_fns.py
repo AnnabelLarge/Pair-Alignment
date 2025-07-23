@@ -42,7 +42,7 @@ def train_one_batch(batch,
                     norm_loss_by,
                     interms_for_tboard, 
                     more_attributes: dict,
-                    gap_tok = 43,
+                    gap_idx = 43,
                     seq_padding_idx = 0,
                     align_idx_padding = -9):
     """
@@ -129,7 +129,7 @@ def train_one_batch(batch,
                                                    norm_loss_by = norm_loss_by,
                                                    more_attributes = more_attributes,
                                                    seq_padding_idx = seq_padding_idx,
-                                                   gap_tok = gap_tok )
+                                                   gap_idx = gap_idx )
     true_out, extra_features, length_for_normalization = out
     del out
     
@@ -414,7 +414,7 @@ def eval_one_batch(batch,
                    norm_loss_by,
                    interms_for_tboard, 
                    more_attributes: dict,
-                   gap_tok = 43,
+                   gap_idx = 43,
                    seq_padding_idx = 0,
                    align_idx_padding = -9,
                    extra_args_for_eval: dict = dict(),
@@ -496,7 +496,7 @@ def eval_one_batch(batch,
                                                    norm_loss_by = norm_loss_by,
                                                    more_attributes = more_attributes,
                                                    seq_padding_idx = seq_padding_idx,
-                                                   gap_tok = gap_tok )
+                                                   gap_idx = gap_idx )
     true_out, extra_features, length_for_normalization = out
     del out
 

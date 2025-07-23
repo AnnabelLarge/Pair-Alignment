@@ -17,7 +17,7 @@ import numpy as np
 def to_alignment_aug_alphabet(token: str, 
                               amino_acids_in_order: str = 'ACDEFGHIKLMNPQRSTWYV',
                               num_special_toks: int = 3,
-                              gap_tok = 43):
+                              gap_idx = 43):
     token = token.upper()
     
     return amino_acids_in_order.index(token) + num_special_toks
@@ -25,7 +25,7 @@ def to_alignment_aug_alphabet(token: str,
 
 def encode_one_alignment(alignment: list[str],
                          gap_alph: list[str] = ['-','.'],
-                         gap_tok = 43):
+                         gap_idx = 43):
     anc_len, desc_len = [len(s) for s in alignment]
     assert anc_len == desc_len, 'inconsistent alignment length'
     
@@ -45,14 +45,14 @@ def encode_one_alignment(alignment: list[str],
         
         # insert = 2
         if (anc_tok in gap_alph) and (desc_tok not in gap_alph):
-            pair_encoded[0,l,0] = gap_tok
+            pair_encoded[0,l,0] = gap_idx
             pair_encoded[0,l,1] = to_alignment_aug_alphabet(desc_tok)
             pair_encoded[0,l,2] = 2
         
         # delete = 3
         if (anc_tok not in gap_alph) and (desc_tok in gap_alph):
             pair_encoded[0,l,0] = to_alignment_aug_alphabet(anc_tok)
-            pair_encoded[0,l,1] = gap_tok
+            pair_encoded[0,l,1] = gap_idx
             pair_encoded[0,l,2] = 3
     return pair_encoded
             
@@ -202,10 +202,10 @@ def summarize_alignment(align,
 ### TENSORS OF ALIGNMENTS -> TENSOR OF UNALIGNED SEQUENCES   ##################
 ###############################################################################
 def aligned_to_seq(encoded_seq: np.array,
-                   gap_tok: int = 43,
+                   gap_idx: int = 43,
                    num_special_toks: int = 3,
                    alphabet_size: int = 20):
-    ungapped = encoded_seq[ (encoded_seq != gap_tok) ]
+    ungapped = encoded_seq[ (encoded_seq != gap_idx) ]
     
     unaligned = np.where( ungapped < num_special_toks + alphabet_size,
                           ungapped,
@@ -213,7 +213,7 @@ def aligned_to_seq(encoded_seq: np.array,
     return unaligned
     
 def align_tensor_to_seq_tensor(alignment_tensor: jnp.array,
-                               gap_tok: int=43):
+                               gap_idx: int=43):
     """
     returns a tensor of size (B, L, 2)
     

@@ -193,7 +193,7 @@ def test_neural_tkf_model_is_causal(config_file):
                        t_array_for_all_samples,  
                        true_out: Optional[Any] = None,
                        extra_args_for_eval: dict = dict(),
-                       gap_tok: int = 43,
+                       gap_idx: int = 43,
                        seq_padding_idx: int = 0,
                        align_idx_padding: int = -9,
                        *args,

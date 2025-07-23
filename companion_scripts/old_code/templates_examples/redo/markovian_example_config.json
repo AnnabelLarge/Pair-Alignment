@@ -9,7 +9,7 @@
     "batch_size": 2,
     "chunk_length": 512,
     "emission_alphabet_size": 20,
-    "gap_tok": 43,
+    "gap_idx": 43,
     "min_time": 0.015,
 
     "norm_loss_by": "desc_len",
