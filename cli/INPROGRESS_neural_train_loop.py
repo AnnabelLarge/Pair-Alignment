@@ -7,19 +7,18 @@ Created on Wed Jul 23 17:42:19 2025
 """
 import jax
 from jax import numpy as jnp
-
-def take_time():
-    real = wall_clock_time()
-    cpu = process_time()
-    return (real, cpu)
+import numpy 
+import pickle
+import sys
 
 def save_all_trainstates( all_save_model_filenames,
+                          all_trainstates,
                           suffix = None ):
     for i in range(3):
         new_outfile = all_save_model_filenames[i]
         
         if suffix is not None:
-            new_outfile = new_outfile.replace('.pkl','_{suffix}.pkl')
+            new_outfile = new_outfile.replace('.pkl',f'_{suffix}.pkl')
         
         with open(new_outfile, 'wb') as g:
             model_state_dict = flax.serialization.to_state_dict(all_trainstates[i])
@@ -45,12 +44,12 @@ def set_sequence_lengths_for_jit( args,
     
     return batch_max_seqlen, batch_max_alignlen
 
-def maybe_checkpoint( args,
-                      prev_checkpoint_counter,
-                      epoch_idx,
-                      batch_idx,
-                      batch_loss,
-                      all_save_model_filenames ):
+def maybe_checkpoint_during_training( args,
+                                      prev_checkpoint_counter,
+                                      epoch_idx,
+                                      batch_idx,
+                                      batch_loss,
+                                      all_save_model_filenames ):
     new_counter = prev_checkpoint_counter + 1
     
     cond1 = args.checkpoint_freq_during_training > 0
@@ -63,11 +62,13 @@ def maybe_checkpoint( args,
             g.write(f'Current loss for the training set batch is: {batch_loss}\n')
         
         # save the trainstates
-        save_all_trainstates( all_save_model_filenames, suffix = 'INPROGRESS' )
+        save_all_trainstates( all_save_model_filenames = all_save_model_filenames,
+                              all_trainstates = all_trainstates, 
+                              suffix = 'INPROGRESS' )
         
         # update the general logfile
         with open(args.logfile_name,'a') as g:
-            g.write(f'\tTrain loss at epoch {epoch_idx}, batch {batch_idx}: {train_metrics["batch_loss"]}\n')
+            g.write(f'\tTrain loss at epoch {epoch_idx}, batch {batch_idx}: {batch_loss}\n')
         
         new_counter = 0
     
@@ -111,8 +112,8 @@ class timers:
         cpu_end = process_time() 
         
         # record for later
-        self.all_times = real_end - real_start
-        self.all_times = cpu_end - cpu_start
+        self.all_times[epoch_idx, 0] = real_end - real_start
+        self.all_times[epoch_idx, 1] = cpu_end - cpu_start
 
         # write to tensorboard
         write_times(cpu_start = cpu_start, 
@@ -144,25 +145,25 @@ class metrics_for_epoch:
                            batch_loss,
                            batch_perpl,
                            batch_acc = None):
-        self.epoch_ave_loss += batch_loss * weight
-        self.epoch_ave_perpl += batch_perpl * weight
+        self.epoch_ave_loss += batch_loss * batch_weight
+        self.epoch_ave_perpl += batch_perpl * batch_weight
         if self.have_acc and (batch_acc is not None):
-            self.epoch_ave_acc += batch_acc * weight
+            self.epoch_ave_acc += batch_acc * batch_weight
     
     def write_epoch_metrics_to_tensorboard(self,
                                            writer,
                                            tag):
         writer.add_scalar(tag = f'Loss/{tag}', 
-                          scalar_value = self.ave_loss.item(), 
+                          scalar_value = self.epoch_ave_loss.item(), 
                           global_step = self.epoch_idx)
         
         writer.add_scalar(tag=f'Perplexity/{tag}',
-                          scalar_value=self.ave_perpl.item(), 
+                          scalar_value=self.epoch_ave_perpl.item(), 
                           global_step=self.epoch_idx)
         
         if self.have_acc:
             writer.add_scalar(tag=f'Accuracy/{tag}',
-                              scalar_value=self.ave_acc.item(), 
+                              scalar_value=self.epoch_ave_acc.item(), 
                               global_step=self.epoch_idx)
         
         
@@ -193,7 +194,8 @@ class best_models:
             
             # save models to regular python pickles too (in case training is 
             #   interrupted)
-            save_all_trainstates( all_save_model_filenames,
+            save_all_trainstates( all_save_model_filenames = all_save_model_filenames,
+                                  all_trainstates = all_trainstates, 
                                   suffix = 'BEST' )
     
     def check_early_stop(self,
@@ -219,40 +221,25 @@ class best_models:
         
         else:
             return False
-            
-            
-            # record in the raw ascii logfile
-            with open(args.logfile_name,'a') as g:
-                g.write(f'\n\nEARLY STOPPING AT {epoch_idx}:\n')
-            
-            # record time spent at this epoch
-            epoch_real_end = wall_clock_time()
-            epoch_cpu_end = process_time()
-            all_epoch_times[epoch_idx, 0] = epoch_real_end - epoch_real_start
-            all_epoch_times[epoch_idx, 1] = epoch_cpu_end - epoch_cpu_start
-            
-            # write to tensorboard
-            write_times(cpu_start = epoch_cpu_start, 
-                        cpu_end = epoch_cpu_end, 
-                        real_start = epoch_real_start, 
-                        real_end = epoch_real_end, 
-                        tag = 'Process one epoch', 
-                        step = epoch_idx, 
-                        writer_obj = writer)
-            
-            del epoch_cpu_start, epoch_cpu_end
-            del epoch_real_start, epoch_real_end
-            
-            # rage quit
-            break
     
     
-    
-
-def neural_train_loop(args):
+def neural_train_loop( args,
+                       epoch_arr,
+                       all_trainstates,
+                       rngkey,
+                       have_acc,
+                       training_dl,
+                       test_dl,
+                       training_dset,
+                       test_dset,
+                       jitted_determine_seqlen_bin,
+                       jitted_determine_alignlen_bin,
+                       train_fn_jitted,
+                       eval_fn_jitted,
+                       all_save_model_filenames,
+                       writer ): #range(args.num_epochs)
     # some classes with memory, to help me keep track of things
     best_models_class = best_models( initial_trainstates = all_trainstates )
-    
     train_loop_timer_class = timers( num_epochs = args.num_epochs )
     eval_loop_timer_class = timers( num_epochs = args.num_epochs )
     whole_epoch_timer_class = timers( num_epochs = args.num_epochs )
@@ -261,11 +248,13 @@ def neural_train_loop(args):
     # rng key for train
     rngkey, training_rngkey = jax.random.split(rngkey, num=2)
     
-    for epoch_idx in tqdm(range(args.num_epochs)):    
+    for epoch_idx in tqdm(epoch_arr):    
         # classes to remember metrics THIS EPOCH
         # get re-initialized at the start of every epoch
-        train_metrics_class = metrics_for_epoch( have_acc = FILL_IN_LATER )  
-        eval_metrics_class = metrics_for_epoch( have_acc = FILL_IN_LATER ) 
+        train_metrics_class = metrics_for_epoch( have_acc = have_acc,
+                                                 epoch_idx = epoch_idx )  
+        eval_metrics_class = metrics_for_epoch( have_acc = have_acc,
+                                                 epoch_idx = epoch_idx ) 
 
         whole_epoch_timer_class.start_timer()
 
@@ -309,7 +298,7 @@ def neural_train_loop(args):
                                          out_file = 'TRAIN_tkf_approx.tsv' )
             
             # potentially save the trainstates during training
-            checkpoint_counter = maybe_checkpoint( args = args,
+            checkpoint_counter = maybe_checkpoint_during_training( args = args,
                                                    prev_checkpoint_counter = checkpoint_counter,
                                                    epoch_idx = epoch_idx,
                                                    batch_idx = batch_idx,
@@ -328,7 +317,9 @@ def neural_train_loop(args):
                     pickle.dump(args, g)
                 
                 # save the trainstates
-                save_all_trainstates( all_save_model_filenames, suffix = 'BROKEN' )
+                save_all_trainstates( all_save_model_filenames = all_save_model_filenames,
+                                      all_trainstates = all_trainstates, 
+                                      suffix = 'BROKEN' )
                 
                 
                 # one last recording to tensorboard
@@ -354,7 +345,7 @@ def neural_train_loop(args):
             train_metrics_class.update_after_batch( batch_weight = this_batch_size / len(training_dset),
                                         batch_loss = train_metrics['batch_loss'],
                                         batch_perpl = train_metrics['batch_ave_perpl'],
-                                        batch_acc = train_metrics.get('batch_ave_perpl', None) )
+                                        batch_acc = train_metrics.get('batch_ave_acc', None) )
             
             write_optional_outputs_during_training(writer_obj = writer, 
                                                     all_trainstates = all_trainstates,
@@ -399,7 +390,7 @@ def neural_train_loop(args):
             eval_metrics_class.update_after_batch( batch_weight = this_batch_size / len(test_dset),
                                        batch_loss = eval_metrics['batch_loss'],
                                        batch_perpl = eval_metrics['batch_ave_perpl'],
-                                       batch_acc = eval_metrics.get('batch_ave_perpl', None) )
+                                       batch_acc = eval_metrics.get('batch_ave_acc', None) )
             
             
 #__4___8: epoch level (two tabs) 
@@ -413,12 +404,10 @@ def neural_train_loop(args):
         ### 3.4: record scalars to tensorboard   #
         ##########################################
         train_metrics_class.write_epoch_metrics_to_tensorboard( writer = writer,
-                                                  tag = 'training set',
-                                                  epoch_idx = epoch_idx)
+                                                  tag = 'training set')
         
         eval_metrics_class.write_epoch_metrics_to_tensorboard( writer = writer,
-                                                 tag = 'training set',
-                                                 epoch_idx = epoch_idx)
+                                                 tag = 'test set')
         
         
         
@@ -452,7 +441,7 @@ def neural_train_loop(args):
                                                                   tag = 'Process one epoch' )
             
             # rage quit
-            break
+            sys.exit(1)
         
 
 #__4___8: epoch level (two tabs) 
