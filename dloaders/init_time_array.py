@@ -9,13 +9,8 @@ import numpy as np
 
 
 def init_time_array(args):
-    ### use one time per sample, returned in the dataloader
-    if args.pred_config['times_from'] == 't_per_sample':
-        return None
-    
-    
     ### init from geometric grid, like in cherryML
-    elif args.pred_config['times_from'] == 'geometric':
+    if args.pred_config['times_from'] == 'geometric':
         t_grid_center = args.pred_config['t_grid_center']
         t_grid_step = args.pred_config['t_grid_step']
         t_grid_num_steps = args.pred_config['t_grid_num_steps']
@@ -32,7 +27,7 @@ def init_time_array(args):
         return np.array(t_array)
     
     
-    ### read times from flat text file
+    ### read grid of times from flat text file
     elif args.pred_config['times_from'] == 't_array_from_file':
         times_file = args.pred_config['filenames']['times']
         

@@ -24,73 +24,77 @@ from dloaders.init_time_array import init_time_array
 
 def init_full_len_dset( args: Namespace, 
                         task: str,
-                        training_argparse: bool = None,
+                        training_argparse = None,
                         include_dataloader: bool = True ):
     """
     initialize the pytorch datasets and dataloaders (optional)
     """
-    #################################
-    ### training-specific options   #
-    #################################
-    if task in ['train', 
-                'resume_train']:
-        only_test = False
-        t_per_sample = args.pred_config['times_from'] == 't_per_sample'
-        t_array_for_all_samples = init_time_array(args)
-        pred_model_type = args.pred_model_type
-        gap_idx = args.gap_idx
-        
-        # if using a feedforward prediction head, enforce this value
-        if pred_model_type == 'feedforward':
-            args.times_from = None
-        
-        # if using markovian pairhmm, enforce this value
-        elif pred_model_type in ['pairhmm_indp_sites',
-                                 'pairhmm_frag_and_site_classes']:
-            args.use_scan_fns = False
-            
-            if args.pred_config['subst_model_type'] == 'hky85':
-                emission_alphabet_size = 4
-            else:
-                emission_alphabet_size = 20
-        
-        elif pred_model_type == 'neural_hmm':
-            emission_alphabet_size = 20
-        
     
-    #############################
-    ### eval-specific options   #
-    #############################
-    elif task in ['eval']:
+    
+    ### behavior that depends on task
+    if task in ['train', 'resume_train']:
+        argparse_obj = args
+        only_test = False
+    
+    elif task == 'eval':
+        argparse_obj = training_argparse
         only_test = True
-        t_per_sample = training_argparse.pred_config['times_from'] == 't_per_sample'
-        t_array_for_all_samples = init_time_array(training_argparse)
-        pred_model_type = training_argparse.pred_model_type
-        gap_idx = training_argparse.gap_idx
+    
+    pred_model_type = argparse_obj.pred_model_type
+    gap_idx = argparse_obj.gap_idx
+    
+    
+    ### enforce defaults: feedforward to alignment-augmented alphabet
+    if pred_model_type == 'feedforward':
+        # only protein model implemented for now
+        emission_alphabet_size = 20
         
-        # if using a feedforward prediction head, enforce this value
-        if pred_model_type == 'feedforward':
-            args.times_from = None
+        # remap values
+        if argparse_obj.pred_config['t_per_sample']:
+            argparse_obj.pred_config['times_from'] = 't_per_sample'
         
-        # if using markovian pairhmm, enforce this value
-        elif pred_model_type in ['pairhmm_indp_sites',
-                                 'pairhmm_frag_and_site_classes']:
-            args.use_scan_fns = False
+        elif not argparse_obj.pred_config['t_per_sample']:
+            argparse_obj.pred_config['times_from'] = None
             
-            if training_argparse.pred_config['subst_model_type'] == 'hky85':
-                emission_alphabet_size = 4
-            else:
-                emission_alphabet_size = 20
+            
+    ### enforce defaults: markovian alignment algorithms
+    elif pred_model_type in ['pairhmm_frag_and_site_classes',
+                             'neural_hmm']:
         
-        elif pred_model_type == 'neural_hmm':
+        # enforce defaults about emission alphabet size
+        if argparse_obj.pred_config['subst_model_type'] == 'hky85':
+            emission_alphabet_size = 4
+        else:
             emission_alphabet_size = 20
-            
+        
+        # regular pairhmm doesn't use scan functions
+        if pred_model_type == 'pairhmm_frag_and_site_classes':
+            argparse_obj.use_scan_fns = False
+    
+    
+    ### handle times: either a grid of times for all samples (T,) or a unique
+    ###   branch length for every sample (B,)
+    cond1 = argparse_obj.pred_config['times_from'] is None
+    cond2 = ( argparse_obj.pred_config['times_from'] == 't_per_sample' )
+    t_per_sample = cond1 or cond2
+    del cond1, cond2
+    
+    # init a grid if t_per_sample is False
+    if t_per_sample:
+        t_array_for_all_samples = None
+        
+    elif not t_per_sample:
+        t_array_for_all_samples = init_time_array( argparse_obj )
+    
+    # no longer need this
+    del argparse_obj
+    
     
     #################
     ### LOAD DATA   #
     #################
     # test data
-    assert type(args.test_dset_splits) == list
+    assert isinstance(args.test_dset_splits, list)
 
     print('Test dset:')
     for s in args.test_dset_splits:
@@ -115,11 +119,11 @@ def init_full_len_dset( args: Namespace,
     # training data
     if not only_test:
         print('Training dset:')
-        for s in args.train_dset_splits:
+        for s in argparse_obj.train_dset_splits:
             print(s)
         print()
         
-        assert type(args.train_dset_splits) == list
+        assert isinstance(args.train_dset_splits, list)
         training_dset = FullLenDset( data_dir = args.data_dir, 
                                      split_prefixes = args.train_dset_splits,
                                      pred_model_type = pred_model_type,

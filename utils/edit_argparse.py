@@ -75,6 +75,13 @@ def feedforward_fill_with_default_values(args):
     # note: different from neural_hmm! don't include <bos>
     if 'full_alphabet_size' not in provided_args:
         args.full_alphabet_size = 43
+    
+    # remap option
+    if args.pred_config['t_per_sample']:
+        args.pred_config['times_from'] = 't_per_sample'
+    
+    elif not args.pred_config['t_per_sample']:
+        args.pred_config['times_from'] = None
 
 
 def neural_hmm_fill_with_default_values(args):

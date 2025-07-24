@@ -70,7 +70,7 @@ class FeedforwardPredict(ModuleBase):
                                     'feedforward': FeedforwardPostproc,
                                     None: lambda *args, **kwargs: lambda *args, **kwargs: None}
         
-        postproc_module = postproc_module_registry[transitions_postproc_model_type]
+        postproc_module = postproc_module_registry[self.postproc_model_type]
         self.postproc = postproc_module( config = self.config,
                                          name = f'{self.name}/{self.postproc_model_type}_postproc' )
         

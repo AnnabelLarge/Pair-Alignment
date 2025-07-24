@@ -31,23 +31,22 @@ import optax
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
 
-# custom function/classes imports (in order of appearance)
+# custom function/classes imports
 from train_eval_fns.build_optimizer import build_optimizer
-from utils.write_config import write_config
-from utils.edit_argparse import (enforce_valid_defaults,
-                                 fill_with_default_values,
-                                 share_top_level_args)
+from utils.edit_argparse import enforce_valid_defaults
 from utils.setup_training_dir import setup_training_dir
 from utils.sequence_length_helpers import (determine_seqlen_bin, 
                                            determine_alignlen_bin)
 from utils.tensorboard_recording_utils import (write_times,
                                                write_optional_outputs_during_training)
 from utils.write_timing_file import write_timing_file
+from utils.write_approx_dict import write_approx_dict
 
 # specific to training this model
-from dloaders.init_full_len_dset import init_full_len_dset
-from models.neural_hmm_predict.initializers import create_all_tstates 
-from train_eval_fns.feedforward_training_fns import ( train_one_batch,
+from utils.edit_argparse import feedforward_fill_with_default_values as fill_with_default_values
+from utils.edit_argparse import feedforward_share_top_level_args as share_top_level_args
+from models.neural_utils.neural_initializer import create_all_tstates 
+from train_eval_fns.feedforward_train_eval import ( train_one_batch,
                                                       eval_one_batch )
 from train_eval_fns.full_length_final_eval_wrapper import final_eval_wrapper
 
@@ -88,12 +87,13 @@ def train_feedforward(args, dataloader_dict: dict):
     with open(args.logfile_name,'w') as g:
         if not args.update_grads:
             g.write('DEBUG MODE: DISABLING GRAD UPDATES\n\n')
-            
-        g.write(f'Feedforward from sequence embedders\n')
-        g.write(f'Ancestor Embedder: {args.anc_model_type}\n')
-        g.write(f'Descendant Embedder: {args.desc_model_type}\n')
-        g.write(f'Normalizing losses by: {args.norm_loss_by}\n')
-    
+        
+        g.write( f'Feedforward network to predict alignment-augmented descendant\n' )
+        g.write( f'Ancestor sequence embedder (FULL-CONTEXT): {args.anc_model_type}\n' )
+        g.write( f'Descendant sequence embedder (CAUSAL): {args.desc_model_type}\n' )
+        g.write( f'Combine embeddings with: {args.pred_config["postproc_model_type"]}\n' )
+        g.write( f'when reporting, normalizing losses by: {args.norm_reported_loss_by}\n\n' )
+       
     
     ### save updated config, provide filename for saving model parameters
     encoder_save_model_filename = args.model_ckpts_dir + '/'+ f'ANC_ENC.pkl'
@@ -121,34 +121,43 @@ def train_feedforward(args, dataloader_dict: dict):
     
     # init the optimizer
     tx = build_optimizer(args)
-    
-    # split a new rng key
     rngkey, model_init_rngkey = jax.random.split(rngkey, num=2)
     
     
-    ### init sizes
+    ### determine shapes for init
+    # unaligned sequences sizes
     global_seq_max_length = max([training_dset.global_seq_max_length,
                                  test_dset.global_seq_max_length])
     largest_seqs = (args.batch_size, global_seq_max_length)
-    max_dim1 = args.chunk_length
     
+    # aligned datasets sizes
+    if args.use_scan_fns:
+        max_dim1 = args.chunk_length
+    
+    elif not args.use_scan_fns:
+        max_dim1 = max([training_dset.global_align_max_length,
+                        test_dset.global_align_max_length]) - 1
+      
     largest_aligns = (args.batch_size, max_dim1)
     del max_dim1
     
     seq_shapes = [largest_seqs, largest_aligns]
     
-    ### fn to handle jit-compiling according to alignment length
-    parted_determine_alignlen_bin = partial(determine_alignlen_bin,  
-                                            chunk_length = args.chunk_length,
-                                            seq_padding_idx = args.seq_padding_idx)
-    jitted_determine_alignlen_bin = jax.jit(parted_determine_alignlen_bin)
-    del parted_determine_alignlen_bin
+    # time
+    t_per_sample = args.pred_config['t_per_sample']
     
-    parted_determine_seqlen_bin = partial(determine_seqlen_bin,
-                                          chunk_length = args.chunk_length, 
-                                          seq_padding_idx = args.seq_padding_idx)
-    jitted_determine_seqlen_bin = jax.jit(parted_determine_seqlen_bin)
-    del parted_determine_seqlen_bin
+    if t_per_sample:
+        dummy_t_for_each_sample = jnp.empty( (args.batch_size,) )
+    
+    elif not t_per_sample:
+        dummy_t_for_each_sample = None
+    
+    # batch provided to train/eval functions consist of:
+    # 1.) unaligned sequences (B, L_seq, 2)
+    # 2.) aligned data matrices (B, L_align, 4)
+    # 3.) time per sample; (B,) if present, None otherwise
+    # 4, not used.) sample index (B,)
+    seq_shapes = [largest_seqs, largest_aligns, dummy_t_for_each_sample]
     
     
     ### initialize functions, determine concat_fn
@@ -161,24 +170,38 @@ def train_feedforward(args, dataloader_dict: dict):
                               pred_model_type = args.pred_model_type, 
                               anc_enc_config = args.anc_enc_config, 
                               desc_dec_config = args.desc_dec_config, 
-                              pred_config = args.pred_config
+                              pred_config = args.pred_config,
+                              t_array_for_all_samples = None,
                               )  
-    all_trainstates, all_model_instances = out
+    all_trainstates, all_model_instances, concat_fn = out
     del out
     
     
-    ### parted and jit-compiled training_fn
+    ### jit-compilations
+    # helpers to determine when to jit-compile (according to seq/align length 
+    #   combination)
+    parted_determine_alignlen_bin = partial(determine_alignlen_bin,  
+                                            chunk_length = args.chunk_length,
+                                            seq_padding_idx = args.seq_padding_idx)
+    jitted_determine_alignlen_bin = jax.jit(parted_determine_alignlen_bin)
+    del parted_determine_alignlen_bin
+    
+    parted_determine_seqlen_bin = partial(determine_seqlen_bin,
+                                          chunk_length = args.chunk_length, 
+                                          seq_padding_idx = args.seq_padding_idx)
+    jitted_determine_seqlen_bin = jax.jit(parted_determine_seqlen_bin)
+    del parted_determine_seqlen_bin
+    
+    # training function
     parted_train_fn = partial( train_one_batch,
                                 all_model_instances = all_model_instances,
-                                norm_loss_by = args.norm_loss_by,
                                 interms_for_tboard = args.interms_for_tboard,
-                                add_prev_alignment_info = args.pred_config['add_prev_alignment_info'],
-                                update_grads = args.update_grads
-                              )
+                                concat_fn = concat_fn,
+                                norm_loss_by_for_reporting = args.norm_reported_loss_by,
+                                update_grads = args.update_grads )
     
     train_fn_jitted = jax.jit(parted_train_fn, 
-                              static_argnames = ['max_seq_len',
-                                                  'max_align_len'])
+                              static_argnames = ['max_seq_len', 'max_align_len'])
     del parted_train_fn
     
     
@@ -190,6 +213,7 @@ def train_feedforward(args, dataloader_dict: dict):
                   'finalpred_sow_outputs': False,
                   'gradients': False,
                   'weights': False,
+                  'optimizer': False,
                   'ancestor_embeddings': False,
                   'descendant_embeddings': False,
                   'forward_pass_outputs': False,
@@ -202,16 +226,14 @@ def train_feedforward(args, dataloader_dict: dict):
     
     parted_eval_fn = partial( eval_one_batch,
                               all_model_instances = all_model_instances,
-                              norm_loss_by = args.norm_loss_by,
                               interms_for_tboard = no_returns,
-                              add_prev_alignment_info = args.pred_config['add_prev_alignment_info'],
-                              extra_args_for_eval = extra_args_for_eval
-                              )
+                              concat_fn = concat_fn,
+                              norm_loss_by_for_reporting = args.norm_reported_loss_by,
+                              extra_args_for_eval = extra_args_for_eval )
     
     # jit compile this eval function
     eval_fn_jitted = jax.jit(parted_eval_fn, 
-                              static_argnames = ['max_seq_len',
-                                                 'max_align_len'])
+                              static_argnames = ['max_seq_len', 'max_align_len'])
     del parted_eval_fn
     
     
@@ -225,12 +247,12 @@ def train_feedforward(args, dataloader_dict: dict):
     
     # when to save/what to save
     best_epoch = -1
-    best_test_loss = 999999
-    best_test_acc = -1
+    best_test_loss = jnp.finfo(jnp.float32).max
     best_trainstates = all_trainstates
+    best_test_acc = -1
     
     # quit training if test loss increases for X epochs in a row
-    prev_test_loss = 999999
+    prev_test_loss = jnp.finfo(jnp.float32).max
     early_stopping_counter = 0
     
     # rng key for train
@@ -253,32 +275,35 @@ def train_feedforward(args, dataloader_dict: dict):
         ##############################################
         ### 3.1: train and update model parameters   #
         ##############################################
+        # start timer
+        train_real_start = wall_clock_time()
+        train_cpu_start = process_time()
+        
+        checkpoint_counter = -1
         for batch_idx, batch in enumerate(training_dl):
+            this_batch_size = batch[0].shape[0]
             batch_epoch_idx = epoch_idx * len(training_dl) + batch_idx
 
 #__4___8__12: batch level (three tabs)          
             # unpack briefly to get max len and number of samples in the 
             #   batch; place in some bin (this controls how many jit 
             #   compilations you do)
-            batch_max_seqlen = jitted_determine_seqlen_bin(batch = batch)
-            batch_max_seqlen = batch_max_seqlen.item()
-            batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch)
-            batch_max_alignlen = batch_max_alignlen.item()
+            batch_max_seqlen = jitted_determine_seqlen_bin(batch = batch).item()
+            batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch).item()
             
-            # # !!!!!!!!!!!!!!! BELOW IS FOR DEBUG-ONLY !!!!!!!!!!!!!!! 
-            # # record values before gradient update
-            # if batch_epoch_idx > 0:
-            #     for key, val in train_metrics.items():
-            #         if key.startswith('FPO_'):
-            #             out_filename = (f'{args.out_arrs_dir}/'+
-            #                             f'{key.replace("FPO_","BEFORE-UPDATE_")}.npy')
-            #             with open(out_filename,'wb') as g:
-            #                 np.save(g, val)
-            # # !!!!!!!!!!!!!!! ABOVE IS FOR DEBUG-ONLY !!!!!!!!!!!!!!! 
+            # I've had so much trouble with this ugh
+            if args.use_scan_fns:
+                err = (f'batch_max_alignlen (not including bos) is: '+
+                       f'{batch_max_alignlen - 1}'+
+                       f', which is not divisible by length for scan '+
+                       f'({args.chunk_length})')
+                assert (batch_max_alignlen - 1) % args.chunk_length == 0, err
             
             
             ### run function to train on one batch of samples
-            rngkey_for_training_batch = jax.random.fold_in(training_rngkey, epoch_idx+batch_idx)
+            rngkey_for_training_batch = jax.random.fold_in(training_rngkey, 
+                                                           epoch_idx+batch_idx)
+            
             out = train_fn_jitted(batch=batch, 
                                   training_rngkey=rngkey_for_training_batch, 
                                   all_trainstates=all_trainstates, 
@@ -287,29 +312,26 @@ def train_feedforward(args, dataloader_dict: dict):
             train_metrics, all_trainstates = out
             del out
             
-            
-            # # !!!!!!!!!!!!!!! BELOW IS FOR DEBUG-ONLY !!!!!!!!!!!!!!! 
-            # ### DEBUG: log loss per batch in a text file
-            # batch_samples = training_dset.retrieve_sample_names(batch[-1])
-            # with open(f'{args.logfile_dir}/LOSSES.tsv','a') as g:
-            #     g.write( (f'{epoch_idx}' + '\t' +
-            #               f'train_set' + '\t' +
-            #               f'{batch_idx}' + '\t' +
-            #               f"{train_metrics['batch_loss']}" + '\t' +
-            #               f"{train_metrics['batch_ave_perpl']}" + '\t' +
-            #               f"{np.exp(train_metrics['batch_loss'])}" + '\t' +
-            #               f'none' + '\n' )
-            #             )
-            
-            # ### DEBUG: record output after gradient update
-            # # save any forward-pass outputs
-            # for key, val in train_metrics.items():
-            #     if key.startswith('FPO_'):
-            #         out_filename = (f'{args.out_arrs_dir}/'+
-            #                         f'{key.replace("FPO_","AFTER-UPDATE_")}.npy')
-            #         with open(out_filename,'wb') as g:
-            #             np.save(g, val)
-            # # !!!!!!!!!!!!!!! ABOVE IS FOR DEBUG-ONLY !!!!!!!!!!!!!!! 
+            # potentially save the trainstates during training
+            checkpoint_counter += 1
+            if (args.checkpoint_freq_during_training > 0) and (checkpoint_counter % args.checkpoint_freq_during_training == 0):
+                # save some metadata about the trainstate files
+                with open(f'{args.out_arrs_dir}/INPROGRESS_trainstates_info.txt','w') as g:
+                    g.write(f'Checkpoint created at: epoch {epoch_idx}, batch {batch_idx}\n')
+                    g.write(f'Current loss for the training set batch is: {train_metrics["batch_loss"]}\n')
+                
+                # save the trainstates
+                for i in range(3):
+                    new_outfile = all_save_model_filenames[i].replace('.pkl','_INPROGRESS.pkl')
+                    with open(new_outfile, 'wb') as g:
+                        model_state_dict = flax.serialization.to_state_dict(all_trainstates[i])
+                        pickle.dump(model_state_dict, g)
+                
+                # update the general logfile
+                with open(args.logfile_name,'a') as g:
+                    g.write(f'\tTrain loss at epoch {epoch_idx}, batch {batch_idx}: {train_metrics["batch_loss"]}\n')
+                
+                checkpoint_counter = 0
             
             
 #__4___8__12: batch level (three tabs)
@@ -338,42 +360,31 @@ def train_feedforward(args, dataloader_dict: dict):
                                                        interms_for_tboard = args.interms_for_tboard, 
                                                        write_histograms_flag = False)
                 
-                # save the batch elements itself
-                for i, mat in enumerate( batch[:-1] ):
-                    with open( f'{args.out_arrs_dir}/NAN-BATCH_matrix{i}.npy','wb' ) as g:
-                        np.save(g, mat)
-                
                 # record timing so far (if any)
                 write_timing_file( outdir = args.logfile_dir,
                                    train_times = all_train_set_times,
                                    eval_times = all_eval_set_times,
                                    total_times = all_epoch_times )
                 
-                
-                ### rage quit
                 raise RuntimeError( ('NaN loss detected; saved intermediates '+
                                     'and quit training') )
             
             
 #__4___8__12: batch level (three tabs)
             ### add to recorded metrics for this epoch
-            weight = args.batch_size / len(training_dset)
+            weight = this_batch_size / len(training_dset)
             ave_epoch_train_loss += train_metrics['batch_loss'] * weight
             ave_epoch_train_perpl += train_metrics['batch_ave_perpl'] * weight
             ave_epoch_train_acc += train_metrics['batch_ave_acc'] * weight
             del weight
             
             # record metrics
-            interm_rec = batch_epoch_idx % args.histogram_output_freq == 0
-            final_rec = (batch_idx == len(training_dl)) & (epoch_idx == args.num_epochs)
-            
             write_optional_outputs_during_training(writer_obj = writer, 
                                                     all_trainstates = all_trainstates,
                                                     global_step = batch_epoch_idx, 
                                                     dict_of_values = train_metrics, 
                                                     interms_for_tboard = args.interms_for_tboard, 
-                                                    write_histograms_flag = interm_rec or final_rec)
-            
+                                                    write_histograms_flag = False)
         
 #__4___8: epoch level (two tabs)
         ### manage timing
@@ -412,13 +423,20 @@ def train_feedforward(args, dataloader_dict: dict):
         eval_cpu_start = process_time()
         
         for batch_idx, batch in enumerate(test_dl):
+            this_batch_size = batch[0].shape[0]
             # unpack briefly to get max len and number of samples in the 
             #   batch; place in some bin (this controls how many jit 
             #   compilations you do)
-            batch_max_seqlen = jitted_determine_seqlen_bin(batch = batch)
-            batch_max_seqlen = batch_max_seqlen.item()
-            batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch)
-            batch_max_alignlen = batch_max_alignlen.item()
+            batch_max_seqlen = jitted_determine_seqlen_bin(batch = batch).item()
+            batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch).item()
+            
+            # I've had so much trouble with this ugh
+            if args.use_scan_fns:
+                err = (f'batch_max_alignlen (not including bos) is: '+
+                       f'{batch_max_alignlen - 1}'+
+                       f', which is not divisible by length for scan '+
+                       f'({args.chunk_length})')
+                assert (batch_max_alignlen - 1) % args.chunk_length == 0, err
             
             eval_metrics = eval_fn_jitted(batch=batch, 
                                           all_trainstates=all_trainstates,
@@ -428,7 +446,7 @@ def train_feedforward(args, dataloader_dict: dict):
 #__4___8__12: batch level (three tabs)
             ### add to total loss for this epoch; weight by number of
             ###   samples/valid tokens in this batch
-            weight = args.batch_size / len(test_dset)
+            weight = this_batch_size / len(test_dset)
             ave_epoch_test_loss += eval_metrics['loss'] * weight
             ave_epoch_test_perpl += jnp.mean( eval_metrics['perplexity_perSamp'] ) * weight
             ave_epoch_test_acc += jnp.mean( eval_metrics['acc_perSamp'] ) * weight
@@ -494,14 +512,6 @@ def train_feedforward(args, dataloader_dict: dict):
         ###      save the model params and args for later eval   #
         ##########################################################
         if ave_epoch_test_loss < best_test_loss:
-            # ### !!!!!!!!!!!!!!! BELOW IS FOR DEBUG-ONLY !!!!!!!!!!!!!!! 
-            # note = 'best_epoch'
-            # ### !!!!!!!!!!!!!!! ABOVE IS FOR DEBUG-ONLY !!!!!!!!!!!!!!! 
-            
-            with open(args.logfile_name,'a') as g:
-                g.write((f'New best test loss at epoch {epoch_idx}: ') +
-                        (f'{ave_epoch_test_loss}\n'))
-            
             # update "best" recordings
             best_test_loss = ave_epoch_test_loss
             best_trainstates = all_trainstates
@@ -511,41 +521,12 @@ def train_feedforward(args, dataloader_dict: dict):
             # save models to regular python pickles too (in case training is 
             #   interrupted)
             for i in range(3):
-                with open(f'{all_save_model_filenames[i]}', 'wb') as g:
+                out_file = all_save_model_filenames[i].replace('.pkl','_BEST.pkl')
+                with open(out_file, 'wb') as g:
                     model_state_dict = flax.serialization.to_state_dict(all_trainstates[i])
                     pickle.dump(model_state_dict, g)
                     
-            
-        # ### !!!!!!!!!!!!!!! BELOW IS FOR DEBUG-ONLY !!!!!!!!!!!!!!! 
-        # else:
-        #     note = 'none'
-        # ### !!!!!!!!!!!!!!! ABOVE IS FOR DEBUG-ONLY !!!!!!!!!!!!!!! 
-        
-
-#__4___8: epoch level (two tabs) 
-        # ### !!!!!!!!!!!!!!! BELOW IS FOR DEBUG-ONLY !!!!!!!!!!!!!!!
-        # ### also write losses to text file
-        # with open(f'{args.logfile_dir}/LOSSES.tsv','a') as g:
-        #     g.write( (f'{epoch_idx}' + '\t' +
-        #               f'train_dset' + '\t' +
-        #               f'DSET_AVE' + '\t' +
-        #               f"{ave_epoch_train_loss.item()}" + '\t' +
-        #               f"{ave_epoch_train_perpl.item()}" + '\t' +
-        #               f"{np.exp( ave_epoch_train_loss.item() )}" + '\t' +
-        #               f"{note}" +'\n') 
-        #             )
-            
-        #     g.write( (f'{epoch_idx}' + '\t' +
-        #               f'test_dset' + '\t' +
-        #               f'DSET_AVE' + '\t' +
-        #               f"{ave_epoch_test_loss.item()}" + '\t' +
-        #               f"{ave_epoch_test_perpl.item()}" + '\t' +
-        #               f"{np.exp( ave_epoch_test_loss.item() )}" + '\t' +
-        #               f"{note}" +'\n') 
-        #             )
-        # ### !!!!!!!!!!!!!!! ABOVE IS FOR DEBUG-ONLY !!!!!!!!!!!!!!! 
-            
-        
+                    
 #__4___8: epoch level (two tabs) 
         ###########################
         ### 3.6: EARLY STOPPING   #
@@ -554,7 +535,8 @@ def train_feedforward(args, dataloader_dict: dict):
         ###              to previous epoch's test loss
         cond1 = jnp.allclose (prev_test_loss, 
                               jnp.minimum (prev_test_loss, ave_epoch_test_loss), 
-                              atol=args.early_stop_cond1_atol)
+                              atol=args.early_stop_cond1_atol,
+                              rtol=0)
 
         ### condition 2: if test loss is substatially worse than best test loss
         cond2 = (ave_epoch_test_loss - best_test_loss) > args.early_stop_cond2_gap
@@ -572,6 +554,8 @@ def train_feedforward(args, dataloader_dict: dict):
             # record time spent at this epoch
             epoch_real_end = wall_clock_time()
             epoch_cpu_end = process_time()
+            all_epoch_times[epoch_idx, 0] = epoch_real_end - epoch_real_start
+            all_epoch_times[epoch_idx, 1] = epoch_cpu_end - epoch_cpu_start
             
             # write to tensorboard
             write_times(cpu_start = epoch_cpu_start, 
@@ -652,6 +636,12 @@ def train_feedforward(args, dataloader_dict: dict):
     del epoch_idx
     
     
+    ### save the argparse object by itself
+    args.epoch_idx = best_epoch
+    with open(f'{args.model_ckpts_dir}/TRAINING_ARGPARSE.pkl', 'wb') as g:
+        pickle.dump(args, g)
+    
+    
     ### jit compile new eval function
     # if this is a transformer model, will have extra arguments for eval funciton
     extra_args_for_eval = dict()
@@ -662,17 +652,15 @@ def train_feedforward(args, dataloader_dict: dict):
     
     parted_eval_fn = partial( eval_one_batch,
                               all_model_instances = all_model_instances,
-                              norm_loss_by = args.norm_loss_by,
                               interms_for_tboard = args.interms_for_tboard,
-                              add_prev_alignment_info = args.pred_config['add_prev_alignment_info'],
-                              extra_args_for_eval = extra_args_for_eval
-                              )
+                              concat_fn = concat_fn,
+                              norm_loss_by_for_reporting = args.norm_reported_loss_by,
+                              extra_args_for_eval = extra_args_for_eval )
     del extra_args_for_eval
     
     # jit compile this eval function
     eval_fn_jitted = jax.jit(parted_eval_fn, 
-                              static_argnames = ['max_seq_len',
-                                                 'max_align_len'])
+                              static_argnames = ['max_seq_len', 'max_align_len'])
     del parted_eval_fn
     
     ###########################################
@@ -680,7 +668,7 @@ def train_feedforward(args, dataloader_dict: dict):
     ### score with best params                #
     ###########################################
     with open(args.logfile_name,'a') as g:
-        g.write(f'SCORING ALL TRAIN SEQS\n\n')
+        g.write(f'SCORING ALL TRAIN SEQS\n')
         
     train_summary_stats = final_eval_wrapper(dataloader = training_dl, 
                                              dataset = training_dset, 
@@ -688,7 +676,7 @@ def train_feedforward(args, dataloader_dict: dict):
                                              jitted_determine_seqlen_bin = jitted_determine_seqlen_bin,
                                              jitted_determine_alignlen_bin = jitted_determine_alignlen_bin,
                                              eval_fn_jitted = eval_fn_jitted,
-                                             out_alph_size = args.full_alphabet_size - 1,
+                                             out_alph_size = args.full_alphabet_size,
                                              save_arrs = args.save_arrs,
                                              save_per_sample_losses = args.save_per_sample_losses,
                                              interms_for_tboard = args.interms_for_tboard, 
@@ -703,7 +691,7 @@ def train_feedforward(args, dataloader_dict: dict):
     ### score with best params                #
     ###########################################
     with open(args.logfile_name,'a') as g:
-        g.write(f'SCORING ALL TEST SEQS\n\n')
+        g.write(f'SCORING ALL TEST SEQS\n')
         
     # output_attn_weights also controlled by cond1 and cond2
     test_summary_stats = final_eval_wrapper(dataloader = test_dl, 
@@ -725,19 +713,16 @@ def train_feedforward(args, dataloader_dict: dict):
     ###########################################
     ### update the logfile with final losses  #
     ###########################################
-    to_write = {'RUN': args.training_wkdir,
-                f'train_ave_{args.loss_type}_loss_seqlen_normed': train_summary_stats['final_ave_loss_seqlen_normed'],
-                'train_perplexity': train_summary_stats['final_perplexity'],
-                'train_ece': train_summary_stats['final_ece'],
-                'train_acc': train_summary_stats['final_acc'],
-                f'test_ave_{args.loss_type}_loss_seqlen_normed': test_summary_stats['final_ave_loss_seqlen_normed'],
-                'test_perplexity': test_summary_stats['final_perplexity'],
-                'test_ece': test_summary_stats['final_ece'],
-                'test_acc': test_summary_stats['final_acc']
-                }
+    to_write_prefix = {'RUN': args.training_wkdir}
+    to_write_train = {**to_write_prefix, **train_summary_stats}
+    to_write_test = {**to_write_prefix, **test_summary_stats}
     
-    with open(f'{args.logfile_dir}/AVE-LOSSES.tsv','w') as g:
-        for k, v in to_write.items():
+    with open(f'{args.logfile_dir}/TRAIN-AVE-LOSSES.tsv','w') as g:
+        for k, v in to_write_train.items():
+            g.write(f'{k}\t{v}\n')
+    
+    with open(f'{args.logfile_dir}/TEST-AVE-LOSSES.tsv','w') as g:
+        for k, v in to_write_test.items():
             g.write(f'{k}\t{v}\n')
         
     post_training_real_end = wall_clock_time()
@@ -748,8 +733,8 @@ def train_feedforward(args, dataloader_dict: dict):
     cpu_sys_time = post_training_cpu_end - post_training_cpu_start
     real_time = post_training_real_end - post_training_real_start
     
-    df = pd.DataFrame({'label': ['CPU+sys time', 'Real time'],
-                       'value': [cpu_sys_time, real_time]})
+    df = pd.DataFrame({'label': ['Real time', 'CPU+sys time'],
+                       'value': [real_time, cpu_sys_time]})
     markdown_table = df.to_markdown()
     writer.add_text(tag = 'Code Timing | Post-training actions',
                     text_string = markdown_table,

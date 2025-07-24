@@ -341,10 +341,9 @@ def create_all_tstates(seq_shapes,
     largest_seqs, largest_aligns, t_per_sample = seq_shapes
     
     if t_array_for_all_samples is None:
-        t_array_for_init = jnp.zeros( t_per_sample.shape )
+        t_array_for_init = jnp.zeros( t_per_sample.shape ) #(B,)
     elif t_array_for_all_samples is not None:
-        t_array_for_init = t_array_for_all_samples
-        
+        t_array_for_init = t_array_for_all_samples #(T,)
     
     # keep track of dim3 size
     expected_dim3_size = 0

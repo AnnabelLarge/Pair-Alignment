@@ -88,10 +88,10 @@ def train_neural_hmm(args, dataloader_dict: dict):
         if not args.update_grads:
             g.write('DEBUG MODE: DISABLING GRAD UPDATES\n\n')
             
-        g.write(f'Neural sequence embedders with Markovian alignment assumption\n')
+        g.write( f'Neural sequence embedders with Markovian alignment assumption\n' )
         g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )
         g.write( f'Indel model: {args.pred_config["indel_model_type"]}\n' )
-        g.write( f'when reporting, normalizing losses by: {args.norm_loss_by}\n\n' )
+        g.write( f'when reporting, normalizing losses by: {args.norm_reported_loss_by}\n\n' )
         
         g.write( f'Evolutionary model parameters (global vs local):\n' )
         
@@ -209,12 +209,11 @@ def train_neural_hmm(args, dataloader_dict: dict):
                                interms_for_tboard = args.interms_for_tboard,
                                t_array_for_all_samples = t_array_for_all_samples,
                                concat_fn = concat_fn,
-                               norm_loss_by_for_reporting = args.norm_loss_by,
+                               norm_loss_by_for_reporting = args.norm_reported_loss_by,
                                update_grads = args.update_grads )
     
     train_fn_jitted = jax.jit(parted_train_fn, 
-                              static_argnames = ['max_seq_len',
-                                                 'max_align_len'])
+                              static_argnames = ['max_seq_len', 'max_align_len'])
     del parted_train_fn
     
     
@@ -226,6 +225,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
                   'finalpred_sow_outputs': False,
                   'gradients': False,
                   'weights': False,
+                  'optimizer': False,
                   'ancestor_embeddings': False,
                   'descendant_embeddings': False,
                   'forward_pass_outputs': False}
@@ -240,14 +240,13 @@ def train_neural_hmm(args, dataloader_dict: dict):
                               interms_for_tboard = no_returns,
                               t_array_for_all_samples = t_array_for_all_samples,  
                               concat_fn = concat_fn,
-                              norm_loss_by_for_reporting = args.norm_loss_by,                  
+                              norm_loss_by_for_reporting = args.norm_reported_loss_by,                  
                               extra_args_for_eval = extra_args_for_eval )
     del no_returns, extra_args_for_eval
     
     # jit compile this eval function
     eval_fn_jitted = jax.jit( parted_eval_fn, 
-                              static_argnames = ['max_seq_len',
-                                                 'max_align_len'])
+                              static_argnames = ['max_seq_len','max_align_len'])
     del parted_eval_fn
     
     
@@ -261,7 +260,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
     
     # when to save/what to save
     best_epoch = -1
-    best_test_loss = 999999
+    best_test_loss = jnp.finfo(jnp.float32).max
     best_trainstates = all_trainstates
     
     # quit training if test loss increases for X epochs in a row
@@ -667,14 +666,13 @@ def train_neural_hmm(args, dataloader_dict: dict):
                               interms_for_tboard = args.interms_for_tboard,
                               t_array_for_all_samples = t_array_for_all_samples,  
                               concat_fn = concat_fn,
-                              norm_loss_by_for_reporting = args.norm_loss_by,  
+                              norm_loss_by_for_reporting = args.norm_reported_loss_by,  
                               extra_args_for_eval = extra_args_for_eval )
     del extra_args_for_eval
     
     # jit compile this eval function
     eval_fn_jitted = jax.jit( parted_eval_fn, 
-                              static_argnames = ['max_seq_len',
-                                                 'max_align_len'])
+                              static_argnames = ['max_seq_len', 'max_align_len'])
     del parted_eval_fn
     
     ###########################################
