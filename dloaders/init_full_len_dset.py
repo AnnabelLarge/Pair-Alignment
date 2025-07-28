@@ -119,7 +119,7 @@ def init_full_len_dset( args: Namespace,
     # training data
     if not only_test:
         print('Training dset:')
-        for s in argparse_obj.train_dset_splits:
+        for s in args.train_dset_splits:
             print(s)
         print()
         

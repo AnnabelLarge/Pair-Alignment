@@ -12,9 +12,23 @@ All functions tested:
 - joint_only_forward
 - all_loglikes_forward
 
+All flax modules tested:
+-------------------------
+- FragAndSiteClasses._get_scoring_matrices (particularly the marginalization over k classes)
+
 
 All tests:
 ===========
+test_marg_over_k_rate_mults
+---------------------------
+CALCULATION TESTED: \sum_k P(k|c) P(x,y|k,c,t)
+
+ABOUT: have to marginalize over k rate multipliers when generating emission probability matrices; make sure this is happening correclty
+
+functions tested:
+- FragAndSiteClasses._get_scoring_matrices (particularly the marginalization over k classes)
+
+
 test_joint_only_forward, test_joint_only_forward_uniq_branch_len
 -------------------------------------------------------------------
 CALCULATION TESTED: \prod_{l=1}^{|align|} P( c_l | c_{l-1} ) P( x_l, y_l | c_l, tau_l, t ) P(tau_l, c_l | tau_{l-1}, c_{l-1} )

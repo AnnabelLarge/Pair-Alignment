@@ -115,7 +115,7 @@ def pairhmm_frag_and_site_classes_fill_with_default_values(args):
     num_tkf_fragment_classes should match the number of mixtures
     """
     general_fill_with_default_values(args)
-    rgs.pred_config['num_tkf_fragment_classes'] = args.pred_config['num_mixtures']
+    args.pred_config['num_tkf_fragment_classes'] = args.pred_config['num_mixtures']
 
 
 #########################################################

@@ -89,7 +89,7 @@ def main():
     
     # ## UNCOMMENT TO RUN IN SPYDER IDE
     # top_level_args.task = 'train'
-    # top_level_args.configs = 'CONFIG_indp-sites-code_gtr_tkf92.json'
+    # top_level_args.configs = 'example_config_fragment_site_class_model.json'
     # top_level_args.load_dset_pkl = None
     
     

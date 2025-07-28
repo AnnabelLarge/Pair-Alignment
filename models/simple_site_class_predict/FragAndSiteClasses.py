@@ -620,7 +620,7 @@ class FragAndSiteClasses(ModuleBase):
                                          t_array = t_array,
                                          sow_intermediates = sow_intermediates,
                                          return_cond = True,
-                                         return_intermeds = True )        
+                                         return_intermeds = True ) 
         cond_subst_logprobs_per_mixture, subst_module_intermeds = out
         del out
         
@@ -657,7 +657,10 @@ class FragAndSiteClasses(ModuleBase):
                     'used_approx': used_approx} #dict
         
         if return_intermeds:
-            to_add = {'rate_matrix': subst_module_intermeds.get('rate_matrix',None), #(C,A,A) or None
+            to_add = {'rate_multipliers': rate_multipliers,
+                      'log_class_probs': log_class_probs,
+                      'log_rate_mult_probs': log_rate_mult_probs,
+                      'rate_matrix': subst_module_intermeds.get('rate_matrix',None), #(C,A,A) or None
                       'exchangeabilities': subst_module_intermeds.get('exchangeabilities',None), #(A,A) or None
                       'cond_subst_logprobs_per_mixture': cond_subst_logprobs_per_mixture, #(T, C, K, A, A) or (B, C, K, A, A)
                       'joint_subst_logprobs_per_mixture': joint_subst_logprobs_per_mixture} #(T, C, K, A, A) or (B, C, K, A, A)

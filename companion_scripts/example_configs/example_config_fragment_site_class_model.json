@@ -3,11 +3,11 @@
     "rng_seednum": 0,
 
     "data_dir": "example_data",
-    "train_dset_splits": ["sevenSamp"],
-    "test_dset_splits": ["sevenSamp"],
+    "train_dset_splits": ["twoSamp"],
+    "test_dset_splits": ["twoSamp"],
     "toss_alignments_longer_than": null,
     "chunk_length": 512,
-    "batch_size": 7,
+    "batch_size": 2,
     "emission_alphabet_size": 20,
     "gap_idx": 43,
 
@@ -41,7 +41,7 @@
         "random_init_exchanges": true,
 
         "subst_model_type": "f81",
-        "k_rate_mults": 4,
+        "k_rate_mults": 3,
         "indp_rate_mults": false,
         "norm_rate_matrix": true,
         "norm_rate_mults": true,
