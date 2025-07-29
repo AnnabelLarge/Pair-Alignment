@@ -34,13 +34,13 @@ from torch.utils.data import DataLoader
 # custom function/classes imports
 from train_eval_fns.build_optimizer import build_optimizer
 from utils.edit_argparse import enforce_valid_defaults
-from utils.setup_training_dir import setup_training_dir
-from utils.sequence_length_helpers import (determine_seqlen_bin, 
+from utils.train_eval_utils import setup_training_dir
+from utils.train_eval_utils import (determine_seqlen_bin, 
                                            determine_alignlen_bin)
 from utils.tensorboard_recording_utils import (write_times,
                                                write_optional_outputs_during_training)
-from utils.write_timing_file import write_timing_file
-from utils.write_approx_dict import write_approx_dict
+from utils.train_eval_utils import write_timing_file
+from utils.train_eval_utils import write_approx_dict
 
 # specific to training this model
 from utils.edit_argparse import neural_hmm_fill_with_default_values as fill_with_default_values

@@ -21,7 +21,7 @@ from jax import config
 from flax import linen as nn
 import optax
 
-from utils.write_approx_dict import write_approx_dict
+from utils.train_eval_utils import write_approx_dict
 
 def train_one_batch(batch, 
                     training_rngkey, 

@@ -6,6 +6,19 @@ Created on Wed Jul 23 17:44:15 2025
 @author: annabel
 """
 
+### might be able to use this across ALL models
+def write_final_eval_results(args,
+                             summary_stats: dict,
+                             filename: str):
+    to_write_prefix = {'RUN': args.training_wkdir}
+    to_write = {**to_write_prefix, **summary_stats}
+    
+    with open(f'{args.logfile_dir}/{filename}','w') as g:
+        for k, v in to_write.items():
+            g.write(f'{k}\t{v}\n')
+        
+
+
 ### handle time
 # write final timing
 write_timing_file( outdir = args.logfile_dir,
@@ -16,14 +29,13 @@ write_timing_file( outdir = args.logfile_dir,
 del all_train_set_times, all_eval_set_times, all_epoch_times
 
 # new timer
-post_training_real_start = wall_clock_time()
-post_training_cpu_start = process_time()
+postproc_timer_class = timers( num_epochs = args.num_epochs )
 
 
 ### write to output logfile
 with open(args.logfile_name,'a') as g:
     # if early stopping was never triggered, record results at last epoch
-    if early_stopping_counter != args.patience:
+    if not early_stop:
         g.write(f'Regular stopping after {epoch_idx} full epochs:\n\n')
     
     # finish up logfile, regardless of early stopping or not
@@ -111,26 +123,17 @@ test_summary_stats = final_eval_wrapper(dataloader = test_dl,
 ###########################################
 ### update the logfile with final losses  #
 ###########################################
-to_write_prefix = {'RUN': args.training_wkdir}
-to_write_train = {**to_write_prefix, **train_summary_stats}
-to_write_test = {**to_write_prefix, **test_summary_stats}
+write_final_eval_results(args = args, 
+                         summary_stats = train_summary_stats,
+                         filename = 'TRAIN-AVE-LOSSES.tsv')
 
-with open(f'{args.logfile_dir}/TRAIN-AVE-LOSSES.tsv','w') as g:
-    for k, v in to_write_train.items():
-        g.write(f'{k}\t{v}\n')
-
-with open(f'{args.logfile_dir}/TEST-AVE-LOSSES.tsv','w') as g:
-    for k, v in to_write_test.items():
-        g.write(f'{k}\t{v}\n')
-    
-post_training_real_end = wall_clock_time()
-post_training_cpu_end = process_time()
+write_final_eval_results(args = args, 
+                         summary_stats = test_summary_stats,
+                         filename = 'TEST-AVE-LOSSES.tsv')
 
 # record total time spent on post-training actions; write this to a table
-#   instead of a scalar
-cpu_sys_time = post_training_cpu_end - post_training_cpu_start
-real_time = post_training_real_end - post_training_real_start
-
+#   instead of a scalar collection
+real_time, cpu_sys_time = postproc_timer_class.end_timer()
 df = pd.DataFrame({'label': ['Real time', 'CPU+sys time'],
                    'value': [real_time, cpu_sys_time]})
 markdown_table = df.to_markdown()

@@ -27,7 +27,7 @@ from jax import config
 from flax import linen as nn
 import optax
 
-from utils.sequence_length_helpers import selective_squeeze
+from utils.train_eval_utils import selective_squeeze
 from models.sequence_embedders.concatenation_fns import extract_embs
 
 

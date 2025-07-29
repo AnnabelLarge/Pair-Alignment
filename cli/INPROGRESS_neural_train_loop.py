@@ -103,17 +103,29 @@ class timers:
         cpu = process_time()
         self.cache = (real, cpu)
     
-    def end_timer_and_write_to_tboard(self, 
-                                      epoch_idx,
-                                      writer,
-                                      tag ):
+    def end_timer(self):
         real_start, cpu_start = self.cache
         real_end = wall_clock_time()
         cpu_end = process_time() 
         
+        # get deltas
+        real_delta = real_end - real_start
+        cpu_delta = cpu_end - cpu_start
+        
+        # clear cache
+        self.cache = None
+        
+        return (real_delta, cpu_delta)
+        
+    def end_timer_and_write_to_tboard(self, 
+                                      epoch_idx,
+                                      writer,
+                                      tag ):
+        real_delta, cpu_delta = end_timer()
+        
         # record for later
-        self.all_times[epoch_idx, 0] = real_end - real_start
-        self.all_times[epoch_idx, 1] = cpu_end - cpu_start
+        self.all_times[epoch_idx, 0] = real_delta
+        self.all_times[epoch_idx, 1] = cpu_delta
 
         # write to tensorboard
         write_times(cpu_start = cpu_start, 
@@ -124,8 +136,6 @@ class timers:
                     step = epoch_idx, 
                     writer_obj = writer)        
         
-        # clear cache
-        self.cache = None
         
 class metrics_for_epoch:
     def  __init__(self,
@@ -454,3 +464,4 @@ def neural_train_loop( args,
                                                               writer = writer,
                                                               tag = 'Process one epoch' )
     
+    return early_stop

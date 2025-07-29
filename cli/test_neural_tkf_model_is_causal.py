@@ -20,7 +20,7 @@ import optax
 from dloaders.init_full_len_dset import init_full_len_dset
 from models.neural_utils.neural_initializer import create_all_tstates
 from train_eval_fns.build_optimizer import build_optimizer
-from utils.sequence_length_helpers import (determine_seqlen_bin, 
+from utils.train_eval_utils import (determine_seqlen_bin, 
                                            determine_alignlen_bin)
 from models.sequence_embedders.concatenation_fns import extract_embs
 from train_eval_fns.neural_tkf_train_eval import ( _preproc,

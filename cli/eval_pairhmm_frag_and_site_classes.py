@@ -29,7 +29,7 @@ from torch.utils.data import DataLoader
 # custom function/classes imports (in order of appearance)
 from utils.edit_argparse import enforce_valid_defaults
 from train_eval_fns.build_optimizer import build_optimizer
-from utils.sequence_length_helpers import determine_alignlen_bin
+from utils.train_eval_utils import determine_alignlen_bin
 
 # specific to this model
 from utils.edit_argparse import pairhmm_frag_and_site_classes_fill_with_default_values as fill_with_default_values

@@ -19,7 +19,7 @@ from typing import Optional
 from jax import numpy as jnp
 
 # custom imports
-from utils.write_approx_dict import write_approx_dict
+from utils.train_eval_utils import write_approx_dict
 from utils.tensorboard_recording_utils import (calc_stats_during_final_eval,
                                                update_stats_dict,
                                                write_stats_to_tabular)
