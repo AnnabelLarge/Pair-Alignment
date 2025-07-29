@@ -32,16 +32,20 @@ from torch.utils.data import DataLoader
 
 # custom function/classes imports
 from train_eval_fns.build_optimizer import build_optimizer
-from utils.train_eval_utils import (determine_seqlen_bin, 
-                                           determine_alignlen_bin)
-from utils.train_eval_utils import write_timing_file
-from utils.train_eval_utils import write_approx_dict
 from utils.edit_argparse import enforce_valid_defaults
+from utils.train_eval_utils import (setup_training_dir,
+                                    jit_compile_determine_seqlen_bin,
+                                    jit_compile_determine_alignlen_bin,
+                                    timers,
+                                    write_timing_file,
+                                    write_final_eval_results,
+                                    pigz_compress_tensorboard_file)
 
 # specific to training this model
+from models.neural_shared.neural_initializer import create_all_tstates 
+from models.neural_shared import save_all_neural_trainstates
 from utils.edit_argparse import neural_hmm_fill_with_default_values as fill_with_default_values
 from utils.edit_argparse import neural_hmm_share_top_level_args as share_top_level_args
-from models.neural_shared.neural_initializer import create_all_tstates 
 from train_eval_fns.neural_hmm_predict_train_eval_one_batch import eval_one_batch
 from train_eval_fns.neural_final_eval_wrapper import final_eval_wrapper
 
@@ -192,21 +196,10 @@ def eval_neural_hmm( args,
     
     
     ### jit-compilations
-    # helpers to determine when to jit-compile (according to seq/align length 
-    #   combination)
-    parted_determine_alignlen_bin = partial(determine_alignlen_bin,  
-                                            chunk_length = args.chunk_length,
-                                            seq_padding_idx = training_argparse.seq_padding_idx)
-    jitted_determine_alignlen_bin = jax.jit(parted_determine_alignlen_bin)
-    del parted_determine_alignlen_bin
+    # sequence length helpers
+    jitted_determine_seqlen_bin = jit_compile_determine_seqlen_bin(args)
+    jitted_determine_alignlen_bin = jit_compile_determine_alignlen_bin(args)
     
-    parted_determine_seqlen_bin = partial(determine_seqlen_bin,
-                                          chunk_length = args.chunk_length, 
-                                          seq_padding_idx = training_argparse.seq_padding_idx)
-    jitted_determine_seqlen_bin = jax.jit(parted_determine_seqlen_bin)
-    del parted_determine_seqlen_bin
-    
-    ### eval_fn used in training loop (to monitor progress)
     # pass arguments into eval_one_batch; make a parted_eval_fn that doesn't
     #   return any intermediates
     no_returns = {'encoder_sow_outputs': False,
@@ -263,19 +256,14 @@ def eval_neural_hmm( args,
                                              outfile_prefix = f'test-dset',
                                              tboard_writer = None)
     
-    ###########################################
-    ### update the logfile with final losses  #
-    ###########################################
     # save the trainstate again
-    for i in range(3):
-        param_fname = all_save_model_filenames[i]
-        with open(f'{args.model_ckpts_dir}/{param_fname}', 'wb') as g:
-            model_state_dict = flax.serialization.to_state_dict(best_trainstates[i])
-            pickle.dump(model_state_dict, g)
-        
-    to_write = {'RUN': args.eval_wkdir}
-    to_write = {**to_write, **test_summary_stats}
+    outfile_lst = [f'{args.model_ckpts_dir}/{fname}' for fname in all_save_model_filenames]
+    save_all_neural_trainstates( all_save_model_filenames = outfile_lst,
+                                 all_trainstates = best_trainstates,
+                                 suffix = None)
     
-    with open(f'{args.logfile_dir}/AVE-LOSSES.tsv','w') as g:
-        for k, v in to_write.items():
-            g.write(f'{k}\t{v}\n')
+    # output average losses
+    write_final_eval_results(args = args, 
+                             summary_stats = test_summary_stats,
+                             filename = 'AVE-LOSSES.tsv')
+    

@@ -173,7 +173,7 @@ def neural_train_loop( args,
                 subline = f'epoch {epoch_idx}, batch {batch_idx}:'
                 write_approx_dict( approx_dict = train_metrics['used_approx'], 
                                    out_arrs_dir = args.out_arrs_dir,
-                                   out_file = 'TRAIN_tkf_approx.tsv', #'TRAIN_tkf_approx.tsv',
+                                   out_file = 'TRAIN_tkf_approx.tsv', 
                                    subline = subline,
                                    calc_sum = True )
             

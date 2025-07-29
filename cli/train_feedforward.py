@@ -35,8 +35,8 @@ from torch.utils.data import DataLoader
 from train_eval_fns.build_optimizer import build_optimizer
 from utils.edit_argparse import enforce_valid_defaults
 from utils.train_eval_utils import (setup_training_dir,
-                                    jitted_determine_seqlen_bin,
-                                    jitted_determine_alignlen_bin,
+                                    jit_compile_determine_seqlen_bin,
+                                    jit_compile_determine_alignlen_bin,
                                     timers,
                                     write_timing_file,
                                     write_final_eval_results,
@@ -47,9 +47,9 @@ from utils.edit_argparse import feedforward_fill_with_default_values as fill_wit
 from utils.edit_argparse import feedforward_share_top_level_args as share_top_level_args
 from models.neural_shared.neural_initializer import create_all_tstates 
 from train_eval_fns.feedforward_predict_train_eval_one_batch import ( train_one_batch,
-                                                                     eval_one_batch )
+                                                                      eval_one_batch )
 from train_eval_fns.neural_final_eval_wrapper import final_eval_wrapper
-from train_eval_fns import neural_train_loop
+from train_eval_fns.neural_train_loop import neural_train_loop
 
 
 def train_feedforward(args, dataloader_dict: dict):
