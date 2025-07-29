@@ -34,22 +34,22 @@ from torch.utils.data import DataLoader
 # custom function/classes imports
 from train_eval_fns.build_optimizer import build_optimizer
 from utils.edit_argparse import enforce_valid_defaults
-from utils.train_eval_utils import setup_training_dir
-from utils.train_eval_utils import (determine_seqlen_bin, 
-                                    determine_alignlen_bin)
-from utils.tensorboard_recording_utils import (write_times,
-                                               write_optional_outputs_during_training)
-from utils.train_eval_utils import write_timing_file
-from utils.train_eval_utils import write_approx_dict
+from utils.train_eval_utils import (setup_training_dir,
+                                    jitted_determine_seqlen_bin,
+                                    jitted_determine_alignlen_bin,
+                                    timers,
+                                    write_timing_file,
+                                    write_final_eval_results,
+                                    pigz_compress_tensorboard_file)
 
 # specific to training this model
 from utils.edit_argparse import feedforward_fill_with_default_values as fill_with_default_values
 from utils.edit_argparse import feedforward_share_top_level_args as share_top_level_args
-from models.neural_utils.neural_initializer import create_all_tstates 
-from train_eval_fns.feedforward_train_eval import ( train_one_batch,
-                                                      eval_one_batch )
-from train_eval_fns.full_length_final_eval_wrapper import final_eval_wrapper
-
+from models.neural_shared.neural_initializer import create_all_tstates 
+from train_eval_fns.feedforward_predict_train_eval_one_batch import ( train_one_batch,
+                                                                     eval_one_batch )
+from train_eval_fns.neural_final_eval_wrapper import final_eval_wrapper
+from train_eval_fns import neural_train_loop
 
 
 def train_feedforward(args, dataloader_dict: dict):
@@ -171,26 +171,15 @@ def train_feedforward(args, dataloader_dict: dict):
                               anc_enc_config = args.anc_enc_config, 
                               desc_dec_config = args.desc_dec_config, 
                               pred_config = args.pred_config,
-                              t_array_for_all_samples = None,
-                              )  
+                              t_array_for_all_samples = None )  
     all_trainstates, all_model_instances, concat_fn = out
     del out
     
     
     ### jit-compilations
-    # helpers to determine when to jit-compile (according to seq/align length 
-    #   combination)
-    parted_determine_alignlen_bin = partial(determine_alignlen_bin,  
-                                            chunk_length = args.chunk_length,
-                                            seq_padding_idx = args.seq_padding_idx)
-    jitted_determine_alignlen_bin = jax.jit(parted_determine_alignlen_bin)
-    del parted_determine_alignlen_bin
-    
-    parted_determine_seqlen_bin = partial(determine_seqlen_bin,
-                                          chunk_length = args.chunk_length, 
-                                          seq_padding_idx = args.seq_padding_idx)
-    jitted_determine_seqlen_bin = jax.jit(parted_determine_seqlen_bin)
-    del parted_determine_seqlen_bin
+    # sequence length helpers
+    jitted_determine_seqlen_bin = jit_compile_determine_seqlen_bin(args)
+    jitted_determine_alignlen_bin = jit_compile_determine_alignlen_bin(args)
     
     # training function
     parted_train_fn = partial( train_one_batch,
@@ -238,363 +227,26 @@ def train_feedforward(args, dataloader_dict: dict):
     
     
     ###########################################################################
-    ### 3: START TRAINING LOOP   ##############################################
+    ### 3: MAIN TRAINING LOOP   ###############################################
     ###########################################################################
     print(f'3: main training loop')
     with open(args.logfile_name,'a') as g:
         g.write('\n')
         g.write(f'3: main training loop\n')
     
-    # when to save/what to save
-    best_epoch = -1
-    best_test_loss = jnp.finfo(jnp.float32).max
-    best_trainstates = all_trainstates
-    best_test_acc = -1
-    
-    # quit training if test loss increases for X epochs in a row
-    prev_test_loss = jnp.finfo(jnp.float32).max
-    early_stopping_counter = 0
-    
-    # rng key for train
-    rngkey, training_rngkey = jax.random.split(rngkey, num=2)
-    
-    # record time spent at each phase (use numpy array to store)
-    all_train_set_times = np.zeros( (args.num_epochs,2) )
-    all_eval_set_times = np.zeros( (args.num_epochs,2) )
-    all_epoch_times = np.zeros( (args.num_epochs,2) )
-    
-    for epoch_idx in tqdm(range(args.num_epochs)):
-        epoch_real_start = wall_clock_time()
-        epoch_cpu_start = process_time()
-        
-        ave_epoch_train_loss = 0
-        ave_epoch_train_perpl = 0
-        ave_epoch_train_acc = 0
-
-#__4___8: epoch level (two tabs)          
-        ##############################################
-        ### 3.1: train and update model parameters   #
-        ##############################################
-        # start timer
-        train_real_start = wall_clock_time()
-        train_cpu_start = process_time()
-        
-        checkpoint_counter = -1
-        for batch_idx, batch in enumerate(training_dl):
-            this_batch_size = batch[0].shape[0]
-            batch_epoch_idx = epoch_idx * len(training_dl) + batch_idx
-
-#__4___8__12: batch level (three tabs)          
-            # unpack briefly to get max len and number of samples in the 
-            #   batch; place in some bin (this controls how many jit 
-            #   compilations you do)
-            batch_max_seqlen = jitted_determine_seqlen_bin(batch = batch).item()
-            batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch).item()
-            
-            # I've had so much trouble with this ugh
-            if args.use_scan_fns:
-                err = (f'batch_max_alignlen (not including bos) is: '+
-                       f'{batch_max_alignlen - 1}'+
-                       f', which is not divisible by length for scan '+
-                       f'({args.chunk_length})')
-                assert (batch_max_alignlen - 1) % args.chunk_length == 0, err
-            
-            
-            ### run function to train on one batch of samples
-            rngkey_for_training_batch = jax.random.fold_in(training_rngkey, 
-                                                           epoch_idx+batch_idx)
-            
-            out = train_fn_jitted(batch=batch, 
-                                  training_rngkey=rngkey_for_training_batch, 
-                                  all_trainstates=all_trainstates, 
-                                  max_seq_len = batch_max_seqlen,
-                                  max_align_len = batch_max_alignlen )
-            train_metrics, all_trainstates = out
-            del out
-            
-            # potentially save the trainstates during training
-            checkpoint_counter += 1
-            if (args.checkpoint_freq_during_training > 0) and (checkpoint_counter % args.checkpoint_freq_during_training == 0):
-                # save some metadata about the trainstate files
-                with open(f'{args.out_arrs_dir}/INPROGRESS_trainstates_info.txt','w') as g:
-                    g.write(f'Checkpoint created at: epoch {epoch_idx}, batch {batch_idx}\n')
-                    g.write(f'Current loss for the training set batch is: {train_metrics["batch_loss"]}\n')
-                
-                # save the trainstates
-                for i in range(3):
-                    new_outfile = all_save_model_filenames[i].replace('.pkl','_INPROGRESS.pkl')
-                    with open(new_outfile, 'wb') as g:
-                        model_state_dict = flax.serialization.to_state_dict(all_trainstates[i])
-                        pickle.dump(model_state_dict, g)
-                
-                # update the general logfile
-                with open(args.logfile_name,'a') as g:
-                    g.write(f'\tTrain loss at epoch {epoch_idx}, batch {batch_idx}: {train_metrics["batch_loss"]}\n')
-                
-                checkpoint_counter = 0
-            
-            
-#__4___8__12: batch level (three tabs)
-            ################################################################
-            ### 3.2: if NaN is found, save current progress for inspection #
-            ###      and quit training                                     #
-            ################################################################
-            if jnp.isnan( train_metrics['batch_loss'] ):
-                # save the argparse object by itself
-                args.epoch_idx = epoch_idx
-                with open(f'{args.model_ckpts_dir}/TRAINING_ARGPARSE_BROKEN.pkl', 'wb') as g:
-                    pickle.dump(args, g)
-                
-                # save all trainstate objects
-                for i in range(3):
-                    new_outfile = all_save_model_filenames[i].replace('.pkl','_BROKEN.pkl')
-                    with open(new_outfile, 'wb') as g:
-                        model_state_dict = flax.serialization.to_state_dict(all_trainstates[i])
-                        pickle.dump(model_state_dict, g)
-                
-                # one last recording to tensorboard
-                write_optional_outputs_during_training(writer_obj = writer, 
-                                                       all_trainstates = all_trainstates,
-                                                       global_step = batch_epoch_idx, 
-                                                       dict_of_values = train_metrics, 
-                                                       interms_for_tboard = args.interms_for_tboard, 
-                                                       write_histograms_flag = False)
-                
-                # record timing so far (if any)
-                write_timing_file( outdir = args.logfile_dir,
-                                   train_times = all_train_set_times,
-                                   eval_times = all_eval_set_times,
-                                   total_times = all_epoch_times )
-                
-                raise RuntimeError( ('NaN loss detected; saved intermediates '+
-                                    'and quit training') )
-            
-            
-#__4___8__12: batch level (three tabs)
-            ### add to recorded metrics for this epoch
-            weight = this_batch_size / len(training_dset)
-            ave_epoch_train_loss += train_metrics['batch_loss'] * weight
-            ave_epoch_train_perpl += train_metrics['batch_ave_perpl'] * weight
-            ave_epoch_train_acc += train_metrics['batch_ave_acc'] * weight
-            del weight
-            
-            # record metrics
-            write_optional_outputs_during_training(writer_obj = writer, 
-                                                    all_trainstates = all_trainstates,
-                                                    global_step = batch_epoch_idx, 
-                                                    dict_of_values = train_metrics, 
-                                                    interms_for_tboard = args.interms_for_tboard, 
-                                                    write_histograms_flag = False)
-        
-#__4___8: epoch level (two tabs)
-        ### manage timing
-        # stop timer
-        train_real_end = wall_clock_time()
-        train_cpu_end = process_time()
-
-        # record the CPU+system and wall-clock (real) time
-        write_times(cpu_start = train_cpu_start, 
-                    cpu_end = train_cpu_end, 
-                    real_start = train_real_start, 
-                    real_end = train_real_end, 
-                    tag = 'Process training data', 
-                    step = epoch_idx, 
-                    writer_obj = writer)
-        
-        # also record for later
-        all_train_set_times[epoch_idx, 0] = train_real_end - train_real_start
-        all_train_set_times[epoch_idx, 1] = train_cpu_end - train_cpu_start
-        
-        del train_cpu_start, train_cpu_end
-        del train_real_start, train_real_end
-        
-        
-        ##############################################################
-        ### 3.3: also check current performance on held-out test set #
-        ##############################################################
-        # Note: it's possible to output intermediates for these points too;
-        # but right now, that's not collected
-        ave_epoch_test_loss = 0
-        ave_epoch_test_perpl = 0
-        ave_epoch_test_acc = 0
-        
-        # start timer
-        eval_real_start = wall_clock_time()
-        eval_cpu_start = process_time()
-        
-        for batch_idx, batch in enumerate(test_dl):
-            this_batch_size = batch[0].shape[0]
-            # unpack briefly to get max len and number of samples in the 
-            #   batch; place in some bin (this controls how many jit 
-            #   compilations you do)
-            batch_max_seqlen = jitted_determine_seqlen_bin(batch = batch).item()
-            batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch).item()
-            
-            # I've had so much trouble with this ugh
-            if args.use_scan_fns:
-                err = (f'batch_max_alignlen (not including bos) is: '+
-                       f'{batch_max_alignlen - 1}'+
-                       f', which is not divisible by length for scan '+
-                       f'({args.chunk_length})')
-                assert (batch_max_alignlen - 1) % args.chunk_length == 0, err
-            
-            eval_metrics = eval_fn_jitted(batch=batch, 
-                                          all_trainstates=all_trainstates,
-                                          max_seq_len=batch_max_seqlen,
-                                          max_align_len=batch_max_alignlen)
-            
-#__4___8__12: batch level (three tabs)
-            ### add to total loss for this epoch; weight by number of
-            ###   samples/valid tokens in this batch
-            weight = this_batch_size / len(test_dset)
-            ave_epoch_test_loss += eval_metrics['loss'] * weight
-            ave_epoch_test_perpl += jnp.mean( eval_metrics['perplexity_perSamp'] ) * weight
-            ave_epoch_test_acc += jnp.mean( eval_metrics['acc_perSamp'] ) * weight
-            del weight
-        
-            
-#__4___8: epoch level (two tabs) 
-        ### manage timing
-        # stop timer
-        eval_real_end = wall_clock_time()
-        eval_cpu_end = process_time()
-
-        # record the CPU+system and wall-clock (real) time to tensorboard
-        write_times(cpu_start = eval_cpu_start, 
-                    cpu_end = eval_cpu_end, 
-                    real_start = eval_real_start, 
-                    real_end = eval_real_end, 
-                    tag = 'Process test set data', 
-                    step = epoch_idx, 
-                    writer_obj = writer)
-        
-        # also record for later
-        all_eval_set_times[epoch_idx, 0] = eval_real_end - eval_real_start
-        all_eval_set_times[epoch_idx, 1] = eval_cpu_end - eval_cpu_start
-        
-        del eval_cpu_start, eval_cpu_end
-        del eval_real_start, eval_real_end
-        
-        
-        ##########################################
-        ### 3.4: record scalars to tensorboard   #
-        ##########################################
-        # training set
-        writer.add_scalar(tag ='Loss/training set', 
-                          scalar_value = ave_epoch_train_loss.item(), 
-                          global_step = epoch_idx)
-        
-        writer.add_scalar(tag='Perplexity/training set',
-                          scalar_value=ave_epoch_train_perpl.item(), 
-                          global_step=epoch_idx)
-        
-        writer.add_scalar(tag='Accuracy/training set',
-                          scalar_value=ave_epoch_train_acc.item(), 
-                          global_step=epoch_idx)
-        
-        # test set
-        writer.add_scalar(tag='Loss/test set', 
-                          scalar_value=ave_epoch_test_loss.item(), 
-                          global_step=epoch_idx)
-        
-        writer.add_scalar(tag='Perplexity/test set',
-                          scalar_value=ave_epoch_test_perpl.item(), 
-                          global_step=epoch_idx)
-        
-        writer.add_scalar(tag='Accuracy/test set', 
-                          scalar_value=ave_epoch_test_acc.item(), 
-                          global_step=epoch_idx)
-        
-        
-#__4___8: epoch level (two tabs) 
-        ##########################################################
-        ### 3.5: if this is the best epoch TEST loss,            #
-        ###      save the model params and args for later eval   #
-        ##########################################################
-        if ave_epoch_test_loss < best_test_loss:
-            # update "best" recordings
-            best_test_loss = ave_epoch_test_loss
-            best_trainstates = all_trainstates
-            best_epoch = epoch_idx
-            best_test_acc = ave_epoch_test_acc
-            
-            # save models to regular python pickles too (in case training is 
-            #   interrupted)
-            for i in range(3):
-                out_file = all_save_model_filenames[i].replace('.pkl','_BEST.pkl')
-                with open(out_file, 'wb') as g:
-                    model_state_dict = flax.serialization.to_state_dict(all_trainstates[i])
-                    pickle.dump(model_state_dict, g)
-                    
-                    
-#__4___8: epoch level (two tabs) 
-        ###########################
-        ### 3.6: EARLY STOPPING   #
-        ###########################
-        ### condition 1: if test loss stagnates or starts to go up, compared
-        ###              to previous epoch's test loss
-        cond1 = jnp.allclose (prev_test_loss, 
-                              jnp.minimum (prev_test_loss, ave_epoch_test_loss), 
-                              atol=args.early_stop_cond1_atol,
-                              rtol=0)
-
-        ### condition 2: if test loss is substatially worse than best test loss
-        cond2 = (ave_epoch_test_loss - best_test_loss) > args.early_stop_cond2_gap
-
-        if cond1 or cond2:
-            early_stopping_counter += 1
-        else:
-            early_stopping_counter = 0
-        
-        if early_stopping_counter == args.patience:
-            # record in the raw ascii logfile
-            with open(args.logfile_name,'a') as g:
-                g.write(f'\n\nEARLY STOPPING AT {epoch_idx}:\n')
-            
-            # record time spent at this epoch
-            epoch_real_end = wall_clock_time()
-            epoch_cpu_end = process_time()
-            all_epoch_times[epoch_idx, 0] = epoch_real_end - epoch_real_start
-            all_epoch_times[epoch_idx, 1] = epoch_cpu_end - epoch_cpu_start
-            
-            # write to tensorboard
-            write_times(cpu_start = epoch_cpu_start, 
-                        cpu_end = epoch_cpu_end, 
-                        real_start = epoch_real_start, 
-                        real_end = epoch_real_end, 
-                        tag = 'Process one epoch', 
-                        step = epoch_idx, 
-                        writer_obj = writer)
-            
-            del epoch_cpu_start, epoch_cpu_end
-            del epoch_real_start, epoch_real_end
-            
-            # rage quit
-            break
-        
-
-#__4___8: epoch level (two tabs) 
-        ### before next epoch, do this stuff
-        # remember this epoch's loss for next iteration
-        prev_test_loss = ave_epoch_test_loss
-        
-        # record time spent at this epoch
-        epoch_real_end = wall_clock_time()
-        epoch_cpu_end = process_time()
-        all_epoch_times[epoch_idx, 0] = epoch_real_end - epoch_real_start
-        all_epoch_times[epoch_idx, 1] = epoch_cpu_end - epoch_cpu_start
-        
-        # write to tensorboard
-        write_times(cpu_start = epoch_cpu_start, 
-                    cpu_end = epoch_cpu_end, 
-                    real_start = epoch_real_start, 
-                    real_end = epoch_real_end, 
-                    tag = 'Process one epoch', 
-                    step = epoch_idx, 
-                    writer_obj = writer)
-        
-        del epoch_cpu_start, epoch_cpu_end, epoch_real_start, epoch_real_end
-    
+    # returns bool to tell you if early stopping was activated or not
+    early_stop = neural_train_loop( args = args,
+                                    epoch_arr = range(args.num_epochs),
+                                    all_trainstates = all_trainstates,
+                                    training_rngkey = rngkey,
+                                    have_acc = True,
+                                    dataloader_dict = dataloader_dict,
+                                    jitted_determine_seqlen_bin = jitted_determine_seqlen_bin,
+                                    jitted_determine_alignlen_bin = jitted_determine_alignlen_bin,
+                                    train_fn_jitted = train_fn_jitted,
+                                    eval_fn_jitted = eval_fn_jitted,
+                                    all_save_model_filenames = all_save_model_filenames,
+                                    writer = writer )
     
     ###########################################################################
     ### 4: POST-TRAINING ACTIONS   ############################################
@@ -615,54 +267,54 @@ def train_feedforward(args, dataloader_dict: dict):
                        train_times = all_train_set_times,
                        eval_times = all_eval_set_times,
                        total_times = all_epoch_times )
-    
+
     del all_train_set_times, all_eval_set_times, all_epoch_times
 
     # new timer
-    post_training_real_start = wall_clock_time()
-    post_training_cpu_start = process_time()
-    
-    
+    postproc_timer_class = timers( num_epochs = args.num_epochs )
+
+
     ### write to output logfile
     with open(args.logfile_name,'a') as g:
         # if early stopping was never triggered, record results at last epoch
-        if early_stopping_counter != args.patience:
+        if not early_stop:
             g.write(f'Regular stopping after {epoch_idx} full epochs:\n\n')
         
         # finish up logfile, regardless of early stopping or not
-        g.write(f'Epoch with lowest average test loss ("best epoch"): {best_epoch}\n\n')
-        g.write(f'RE-EVALUATING ALL DATA WITH BEST PARAMS:\n\n')
-    
+        g.write(f'Epoch with lowest average test loss ("best epoch"): {best_epoch}\n')
+        g.write(f'RE-EVALUATING ALL DATA WITH BEST PARAMS\n\n')
+
     del epoch_idx
-    
-    
+
+
     ### save the argparse object by itself
     args.epoch_idx = best_epoch
     with open(f'{args.model_ckpts_dir}/TRAINING_ARGPARSE.pkl', 'wb') as g:
         pickle.dump(args, g)
-    
-    
+
+
     ### jit compile new eval function
     # if this is a transformer model, will have extra arguments for eval funciton
     extra_args_for_eval = dict()
-    if (args.anc_model_type == 'Transformer' and args.desc_model_type == 'Transformer'):
+    if (args.anc_model_type == 'transformer' and args.desc_model_type == 'transformer'):
         flag = (args.anc_enc_config.get('output_attn_weights',False) or 
                 args.desc_dec_config.get('output_attn_weights',False))
         extra_args_for_eval['output_attn_weights'] = flag
-    
+
     parted_eval_fn = partial( eval_one_batch,
                               all_model_instances = all_model_instances,
                               interms_for_tboard = args.interms_for_tboard,
+                              t_array_for_all_samples = t_array_for_all_samples,  
                               concat_fn = concat_fn,
-                              norm_loss_by_for_reporting = args.norm_reported_loss_by,
+                              norm_loss_by_for_reporting = args.norm_reported_loss_by,  
                               extra_args_for_eval = extra_args_for_eval )
     del extra_args_for_eval
-    
+
     # jit compile this eval function
-    eval_fn_jitted = jax.jit(parted_eval_fn, 
+    eval_fn_jitted = jax.jit( parted_eval_fn, 
                               static_argnames = ['max_seq_len', 'max_align_len'])
     del parted_eval_fn
-    
+
     ###########################################
     ### loop through training dataloader and  #
     ### score with best params                #
@@ -684,8 +336,8 @@ def train_feedforward(args, dataloader_dict: dict):
                                              out_arrs_dir = args.out_arrs_dir,
                                              outfile_prefix = f'train-set',
                                              tboard_writer = writer)
-    
-    
+
+
     ###########################################
     ### loop through test dataloader and      #
     ### score with best params                #
@@ -708,48 +360,555 @@ def train_feedforward(args, dataloader_dict: dict):
                                              out_arrs_dir = args.out_arrs_dir,
                                              outfile_prefix = f'test-set',
                                              tboard_writer = writer)
-    
-    
+
+
     ###########################################
     ### update the logfile with final losses  #
     ###########################################
-    to_write_prefix = {'RUN': args.training_wkdir}
-    to_write_train = {**to_write_prefix, **train_summary_stats}
-    to_write_test = {**to_write_prefix, **test_summary_stats}
-    
-    with open(f'{args.logfile_dir}/TRAIN-AVE-LOSSES.tsv','w') as g:
-        for k, v in to_write_train.items():
-            g.write(f'{k}\t{v}\n')
-    
-    with open(f'{args.logfile_dir}/TEST-AVE-LOSSES.tsv','w') as g:
-        for k, v in to_write_test.items():
-            g.write(f'{k}\t{v}\n')
-        
-    post_training_real_end = wall_clock_time()
-    post_training_cpu_end = process_time()
-    
+    write_final_eval_results(args = args, 
+                             summary_stats = train_summary_stats,
+                             filename = 'TRAIN-AVE-LOSSES.tsv')
+
+    write_final_eval_results(args = args, 
+                             summary_stats = test_summary_stats,
+                             filename = 'TEST-AVE-LOSSES.tsv')
+
     # record total time spent on post-training actions; write this to a table
-    #   instead of a scalar
-    cpu_sys_time = post_training_cpu_end - post_training_cpu_start
-    real_time = post_training_real_end - post_training_real_start
-    
+    #   instead of a scalar collection
+    real_time, cpu_sys_time = postproc_timer_class.end_timer()
     df = pd.DataFrame({'label': ['Real time', 'CPU+sys time'],
                        'value': [real_time, cpu_sys_time]})
     markdown_table = df.to_markdown()
     writer.add_text(tag = 'Code Timing | Post-training actions',
                     text_string = markdown_table,
                     global_step = 0)
-    
+
     # when you're done with the function, close the tensorboard writer and
     #   compress the output file
     writer.close()
+    pigz_compress_tensorboard_file( args )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### old training loop code; save in comments for now
+#     # when to save/what to save
+#     best_epoch = -1
+#     best_test_loss = jnp.finfo(jnp.float32).max
+#     best_trainstates = all_trainstates
+#     best_test_acc = -1
     
-    # don't remove source on macOS (when I'm doing CPU testing)
-    print('\n\nDONE; compressing tboard folder')
-    if platform.system() == 'Darwin':
-        os.system(f"tar -czvf {args.training_wkdir}/tboard.tar.gz {args.training_wkdir}/tboard")
+#     # quit training if test loss increases for X epochs in a row
+#     prev_test_loss = jnp.finfo(jnp.float32).max
+#     early_stopping_counter = 0
     
-    # DO remove source on linux (when I'm doing real experiments)
-    elif platform.system() == 'Linux':
-        os.system(f"tar -czvf {args.training_wkdir}/tboard.tar.gz  --remove-files {args.training_wkdir}/tboard")    
+#     # rng key for train
+#     rngkey, training_rngkey = jax.random.split(rngkey, num=2)
+    
+#     # record time spent at each phase (use numpy array to store)
+#     all_train_set_times = np.zeros( (args.num_epochs,2) )
+#     all_eval_set_times = np.zeros( (args.num_epochs,2) )
+#     all_epoch_times = np.zeros( (args.num_epochs,2) )
+    
+#     for epoch_idx in tqdm(range(args.num_epochs)):
+#         epoch_real_start = wall_clock_time()
+#         epoch_cpu_start = process_time()
+        
+#         ave_epoch_train_loss = 0
+#         ave_epoch_train_perpl = 0
+#         ave_epoch_train_acc = 0
+
+# #__4___8: epoch level (two tabs)          
+#         ##############################################
+#         ### 3.1: train and update model parameters   #
+#         ##############################################
+#         # start timer
+#         train_real_start = wall_clock_time()
+#         train_cpu_start = process_time()
+        
+#         checkpoint_counter = -1
+#         for batch_idx, batch in enumerate(training_dl):
+#             this_batch_size = batch[0].shape[0]
+#             batch_epoch_idx = epoch_idx * len(training_dl) + batch_idx
+
+# #__4___8__12: batch level (three tabs)          
+#             # unpack briefly to get max len and number of samples in the 
+#             #   batch; place in some bin (this controls how many jit 
+#             #   compilations you do)
+#             batch_max_seqlen = jitted_determine_seqlen_bin(batch = batch).item()
+#             batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch).item()
+            
+#             # I've had so much trouble with this ugh
+#             if args.use_scan_fns:
+#                 err = (f'batch_max_alignlen (not including bos) is: '+
+#                        f'{batch_max_alignlen - 1}'+
+#                        f', which is not divisible by length for scan '+
+#                        f'({args.chunk_length})')
+#                 assert (batch_max_alignlen - 1) % args.chunk_length == 0, err
+            
+            
+#             ### run function to train on one batch of samples
+#             rngkey_for_training_batch = jax.random.fold_in(training_rngkey, 
+#                                                            epoch_idx+batch_idx)
+            
+#             out = train_fn_jitted(batch=batch, 
+#                                   training_rngkey=rngkey_for_training_batch, 
+#                                   all_trainstates=all_trainstates, 
+#                                   max_seq_len = batch_max_seqlen,
+#                                   max_align_len = batch_max_alignlen )
+#             train_metrics, all_trainstates = out
+#             del out
+            
+#             # potentially save the trainstates during training
+#             checkpoint_counter += 1
+#             if (args.checkpoint_freq_during_training > 0) and (checkpoint_counter % args.checkpoint_freq_during_training == 0):
+#                 # save some metadata about the trainstate files
+#                 with open(f'{args.out_arrs_dir}/INPROGRESS_trainstates_info.txt','w') as g:
+#                     g.write(f'Checkpoint created at: epoch {epoch_idx}, batch {batch_idx}\n')
+#                     g.write(f'Current loss for the training set batch is: {train_metrics["batch_loss"]}\n')
+                
+#                 # save the trainstates
+#                 for i in range(3):
+#                     new_outfile = all_save_model_filenames[i].replace('.pkl','_INPROGRESS.pkl')
+#                     with open(new_outfile, 'wb') as g:
+#                         model_state_dict = flax.serialization.to_state_dict(all_trainstates[i])
+#                         pickle.dump(model_state_dict, g)
+                
+#                 # update the general logfile
+#                 with open(args.logfile_name,'a') as g:
+#                     g.write(f'\tTrain loss at epoch {epoch_idx}, batch {batch_idx}: {train_metrics["batch_loss"]}\n')
+                
+#                 checkpoint_counter = 0
+            
+            
+# #__4___8__12: batch level (three tabs)
+#             ################################################################
+#             ### 3.2: if NaN is found, save current progress for inspection #
+#             ###      and quit training                                     #
+#             ################################################################
+#             if jnp.isnan( train_metrics['batch_loss'] ):
+#                 # save the argparse object by itself
+#                 args.epoch_idx = epoch_idx
+#                 with open(f'{args.model_ckpts_dir}/TRAINING_ARGPARSE_BROKEN.pkl', 'wb') as g:
+#                     pickle.dump(args, g)
+                
+#                 # save all trainstate objects
+#                 for i in range(3):
+#                     new_outfile = all_save_model_filenames[i].replace('.pkl','_BROKEN.pkl')
+#                     with open(new_outfile, 'wb') as g:
+#                         model_state_dict = flax.serialization.to_state_dict(all_trainstates[i])
+#                         pickle.dump(model_state_dict, g)
+                
+#                 # one last recording to tensorboard
+#                 write_optional_outputs_during_training(writer_obj = writer, 
+#                                                        all_trainstates = all_trainstates,
+#                                                        global_step = batch_epoch_idx, 
+#                                                        dict_of_values = train_metrics, 
+#                                                        interms_for_tboard = args.interms_for_tboard, 
+#                                                        write_histograms_flag = False)
+                
+#                 # record timing so far (if any)
+#                 write_timing_file( outdir = args.logfile_dir,
+#                                    train_times = all_train_set_times,
+#                                    eval_times = all_eval_set_times,
+#                                    total_times = all_epoch_times )
+                
+#                 raise RuntimeError( ('NaN loss detected; saved intermediates '+
+#                                     'and quit training') )
+            
+            
+# #__4___8__12: batch level (three tabs)
+#             ### add to recorded metrics for this epoch
+#             weight = this_batch_size / len(training_dset)
+#             ave_epoch_train_loss += train_metrics['batch_loss'] * weight
+#             ave_epoch_train_perpl += train_metrics['batch_ave_perpl'] * weight
+#             ave_epoch_train_acc += train_metrics['batch_ave_acc'] * weight
+#             del weight
+            
+#             # record metrics
+#             write_optional_outputs_during_training(writer_obj = writer, 
+#                                                     all_trainstates = all_trainstates,
+#                                                     global_step = batch_epoch_idx, 
+#                                                     dict_of_values = train_metrics, 
+#                                                     interms_for_tboard = args.interms_for_tboard, 
+#                                                     write_histograms_flag = False)
+        
+# #__4___8: epoch level (two tabs)
+#         ### manage timing
+#         # stop timer
+#         train_real_end = wall_clock_time()
+#         train_cpu_end = process_time()
+
+#         # record the CPU+system and wall-clock (real) time
+#         write_times(cpu_start = train_cpu_start, 
+#                     cpu_end = train_cpu_end, 
+#                     real_start = train_real_start, 
+#                     real_end = train_real_end, 
+#                     tag = 'Process training data', 
+#                     step = epoch_idx, 
+#                     writer_obj = writer)
+        
+#         # also record for later
+#         all_train_set_times[epoch_idx, 0] = train_real_end - train_real_start
+#         all_train_set_times[epoch_idx, 1] = train_cpu_end - train_cpu_start
+        
+#         del train_cpu_start, train_cpu_end
+#         del train_real_start, train_real_end
+        
+        
+#         ##############################################################
+#         ### 3.3: also check current performance on held-out test set #
+#         ##############################################################
+#         # Note: it's possible to output intermediates for these points too;
+#         # but right now, that's not collected
+#         ave_epoch_test_loss = 0
+#         ave_epoch_test_perpl = 0
+#         ave_epoch_test_acc = 0
+        
+#         # start timer
+#         eval_real_start = wall_clock_time()
+#         eval_cpu_start = process_time()
+        
+#         for batch_idx, batch in enumerate(test_dl):
+#             this_batch_size = batch[0].shape[0]
+#             # unpack briefly to get max len and number of samples in the 
+#             #   batch; place in some bin (this controls how many jit 
+#             #   compilations you do)
+#             batch_max_seqlen = jitted_determine_seqlen_bin(batch = batch).item()
+#             batch_max_alignlen = jitted_determine_alignlen_bin(batch = batch).item()
+            
+#             # I've had so much trouble with this ugh
+#             if args.use_scan_fns:
+#                 err = (f'batch_max_alignlen (not including bos) is: '+
+#                        f'{batch_max_alignlen - 1}'+
+#                        f', which is not divisible by length for scan '+
+#                        f'({args.chunk_length})')
+#                 assert (batch_max_alignlen - 1) % args.chunk_length == 0, err
+            
+#             eval_metrics = eval_fn_jitted(batch=batch, 
+#                                           all_trainstates=all_trainstates,
+#                                           max_seq_len=batch_max_seqlen,
+#                                           max_align_len=batch_max_alignlen)
+            
+# #__4___8__12: batch level (three tabs)
+#             ### add to total loss for this epoch; weight by number of
+#             ###   samples/valid tokens in this batch
+#             weight = this_batch_size / len(test_dset)
+#             ave_epoch_test_loss += eval_metrics['loss'] * weight
+#             ave_epoch_test_perpl += jnp.mean( eval_metrics['perplexity_perSamp'] ) * weight
+#             ave_epoch_test_acc += jnp.mean( eval_metrics['acc_perSamp'] ) * weight
+#             del weight
+        
+            
+# #__4___8: epoch level (two tabs) 
+#         ### manage timing
+#         # stop timer
+#         eval_real_end = wall_clock_time()
+#         eval_cpu_end = process_time()
+
+#         # record the CPU+system and wall-clock (real) time to tensorboard
+#         write_times(cpu_start = eval_cpu_start, 
+#                     cpu_end = eval_cpu_end, 
+#                     real_start = eval_real_start, 
+#                     real_end = eval_real_end, 
+#                     tag = 'Process test set data', 
+#                     step = epoch_idx, 
+#                     writer_obj = writer)
+        
+#         # also record for later
+#         all_eval_set_times[epoch_idx, 0] = eval_real_end - eval_real_start
+#         all_eval_set_times[epoch_idx, 1] = eval_cpu_end - eval_cpu_start
+        
+#         del eval_cpu_start, eval_cpu_end
+#         del eval_real_start, eval_real_end
+        
+        
+#         ##########################################
+#         ### 3.4: record scalars to tensorboard   #
+#         ##########################################
+#         # training set
+#         writer.add_scalar(tag ='Loss/training set', 
+#                           scalar_value = ave_epoch_train_loss.item(), 
+#                           global_step = epoch_idx)
+        
+#         writer.add_scalar(tag='Perplexity/training set',
+#                           scalar_value=ave_epoch_train_perpl.item(), 
+#                           global_step=epoch_idx)
+        
+#         writer.add_scalar(tag='Accuracy/training set',
+#                           scalar_value=ave_epoch_train_acc.item(), 
+#                           global_step=epoch_idx)
+        
+#         # test set
+#         writer.add_scalar(tag='Loss/test set', 
+#                           scalar_value=ave_epoch_test_loss.item(), 
+#                           global_step=epoch_idx)
+        
+#         writer.add_scalar(tag='Perplexity/test set',
+#                           scalar_value=ave_epoch_test_perpl.item(), 
+#                           global_step=epoch_idx)
+        
+#         writer.add_scalar(tag='Accuracy/test set', 
+#                           scalar_value=ave_epoch_test_acc.item(), 
+#                           global_step=epoch_idx)
+        
+        
+# #__4___8: epoch level (two tabs) 
+#         ##########################################################
+#         ### 3.5: if this is the best epoch TEST loss,            #
+#         ###      save the model params and args for later eval   #
+#         ##########################################################
+#         if ave_epoch_test_loss < best_test_loss:
+#             # update "best" recordings
+#             best_test_loss = ave_epoch_test_loss
+#             best_trainstates = all_trainstates
+#             best_epoch = epoch_idx
+#             best_test_acc = ave_epoch_test_acc
+            
+#             # save models to regular python pickles too (in case training is 
+#             #   interrupted)
+#             for i in range(3):
+#                 out_file = all_save_model_filenames[i].replace('.pkl','_BEST.pkl')
+#                 with open(out_file, 'wb') as g:
+#                     model_state_dict = flax.serialization.to_state_dict(all_trainstates[i])
+#                     pickle.dump(model_state_dict, g)
+                    
+                    
+# #__4___8: epoch level (two tabs) 
+#         ###########################
+#         ### 3.6: EARLY STOPPING   #
+#         ###########################
+#         ### condition 1: if test loss stagnates or starts to go up, compared
+#         ###              to previous epoch's test loss
+#         cond1 = jnp.allclose (prev_test_loss, 
+#                               jnp.minimum (prev_test_loss, ave_epoch_test_loss), 
+#                               atol=args.early_stop_cond1_atol,
+#                               rtol=0)
+
+#         ### condition 2: if test loss is substatially worse than best test loss
+#         cond2 = (ave_epoch_test_loss - best_test_loss) > args.early_stop_cond2_gap
+
+#         if cond1 or cond2:
+#             early_stopping_counter += 1
+#         else:
+#             early_stopping_counter = 0
+        
+#         if early_stopping_counter == args.patience:
+#             # record in the raw ascii logfile
+#             with open(args.logfile_name,'a') as g:
+#                 g.write(f'\n\nEARLY STOPPING AT {epoch_idx}:\n')
+            
+#             # record time spent at this epoch
+#             epoch_real_end = wall_clock_time()
+#             epoch_cpu_end = process_time()
+#             all_epoch_times[epoch_idx, 0] = epoch_real_end - epoch_real_start
+#             all_epoch_times[epoch_idx, 1] = epoch_cpu_end - epoch_cpu_start
+            
+#             # write to tensorboard
+#             write_times(cpu_start = epoch_cpu_start, 
+#                         cpu_end = epoch_cpu_end, 
+#                         real_start = epoch_real_start, 
+#                         real_end = epoch_real_end, 
+#                         tag = 'Process one epoch', 
+#                         step = epoch_idx, 
+#                         writer_obj = writer)
+            
+#             del epoch_cpu_start, epoch_cpu_end
+#             del epoch_real_start, epoch_real_end
+            
+#             # rage quit
+#             break
+        
+
+# #__4___8: epoch level (two tabs) 
+#         ### before next epoch, do this stuff
+#         # remember this epoch's loss for next iteration
+#         prev_test_loss = ave_epoch_test_loss
+        
+#         # record time spent at this epoch
+#         epoch_real_end = wall_clock_time()
+#         epoch_cpu_end = process_time()
+#         all_epoch_times[epoch_idx, 0] = epoch_real_end - epoch_real_start
+#         all_epoch_times[epoch_idx, 1] = epoch_cpu_end - epoch_cpu_start
+        
+#         # write to tensorboard
+#         write_times(cpu_start = epoch_cpu_start, 
+#                     cpu_end = epoch_cpu_end, 
+#                     real_start = epoch_real_start, 
+#                     real_end = epoch_real_end, 
+#                     tag = 'Process one epoch', 
+#                     step = epoch_idx, 
+#                     writer_obj = writer)
+        
+#         del epoch_cpu_start, epoch_cpu_end, epoch_real_start, epoch_real_end
+    
+    
+    # ###########################################################################
+    # ### 4: POST-TRAINING ACTIONS   ############################################
+    # ###########################################################################
+    # print(f'4: post-training actions')
+    # # write to logfile
+    # with open(args.logfile_name,'a') as g:
+    #     g.write('\n')
+    #     g.write(f'4: post-training actions\n')
+    
+    # # don't accidentally use old trainstates or eval fn
+    # del all_trainstates, eval_fn_jitted
+    
+    
+    # ### handle time
+    # # write final timing
+    # write_timing_file( outdir = args.logfile_dir,
+    #                    train_times = all_train_set_times,
+    #                    eval_times = all_eval_set_times,
+    #                    total_times = all_epoch_times )
+    
+    # del all_train_set_times, all_eval_set_times, all_epoch_times
+
+    # # new timer
+    # post_training_real_start = wall_clock_time()
+    # post_training_cpu_start = process_time()
+    
+    
+    # ### write to output logfile
+    # with open(args.logfile_name,'a') as g:
+    #     # if early stopping was never triggered, record results at last epoch
+    #     if early_stopping_counter != args.patience:
+    #         g.write(f'Regular stopping after {epoch_idx} full epochs:\n\n')
+        
+    #     # finish up logfile, regardless of early stopping or not
+    #     g.write(f'Epoch with lowest average test loss ("best epoch"): {best_epoch}\n\n')
+    #     g.write(f'RE-EVALUATING ALL DATA WITH BEST PARAMS:\n\n')
+    
+    # del epoch_idx
+    
+    
+    # ### save the argparse object by itself
+    # args.epoch_idx = best_epoch
+    # with open(f'{args.model_ckpts_dir}/TRAINING_ARGPARSE.pkl', 'wb') as g:
+    #     pickle.dump(args, g)
+    
+    
+    # ### jit compile new eval function
+    # # if this is a transformer model, will have extra arguments for eval funciton
+    # extra_args_for_eval = dict()
+    # if (args.anc_model_type == 'Transformer' and args.desc_model_type == 'Transformer'):
+    #     flag = (args.anc_enc_config.get('output_attn_weights',False) or 
+    #             args.desc_dec_config.get('output_attn_weights',False))
+    #     extra_args_for_eval['output_attn_weights'] = flag
+    
+    # parted_eval_fn = partial( eval_one_batch,
+    #                           all_model_instances = all_model_instances,
+    #                           interms_for_tboard = args.interms_for_tboard,
+    #                           concat_fn = concat_fn,
+    #                           norm_loss_by_for_reporting = args.norm_reported_loss_by,
+    #                           extra_args_for_eval = extra_args_for_eval )
+    # del extra_args_for_eval
+    
+    # # jit compile this eval function
+    # eval_fn_jitted = jax.jit(parted_eval_fn, 
+    #                           static_argnames = ['max_seq_len', 'max_align_len'])
+    # del parted_eval_fn
+    
+    # ###########################################
+    # ### loop through training dataloader and  #
+    # ### score with best params                #
+    # ###########################################
+    # with open(args.logfile_name,'a') as g:
+    #     g.write(f'SCORING ALL TRAIN SEQS\n')
+        
+    # train_summary_stats = final_eval_wrapper(dataloader = training_dl, 
+    #                                          dataset = training_dset, 
+    #                                          best_trainstates = best_trainstates, 
+    #                                          jitted_determine_seqlen_bin = jitted_determine_seqlen_bin,
+    #                                          jitted_determine_alignlen_bin = jitted_determine_alignlen_bin,
+    #                                          eval_fn_jitted = eval_fn_jitted,
+    #                                          out_alph_size = args.full_alphabet_size,
+    #                                          save_arrs = args.save_arrs,
+    #                                          save_per_sample_losses = args.save_per_sample_losses,
+    #                                          interms_for_tboard = args.interms_for_tboard, 
+    #                                          logfile_dir = args.logfile_dir,
+    #                                          out_arrs_dir = args.out_arrs_dir,
+    #                                          outfile_prefix = f'train-set',
+    #                                          tboard_writer = writer)
+    
+    
+    # ###########################################
+    # ### loop through test dataloader and      #
+    # ### score with best params                #
+    # ###########################################
+    # with open(args.logfile_name,'a') as g:
+    #     g.write(f'SCORING ALL TEST SEQS\n')
+        
+    # # output_attn_weights also controlled by cond1 and cond2
+    # test_summary_stats = final_eval_wrapper(dataloader = test_dl, 
+    #                                          dataset = test_dset, 
+    #                                          best_trainstates = best_trainstates, 
+    #                                          jitted_determine_seqlen_bin = jitted_determine_seqlen_bin,
+    #                                          jitted_determine_alignlen_bin = jitted_determine_alignlen_bin,
+    #                                          eval_fn_jitted = eval_fn_jitted,
+    #                                          out_alph_size = args.full_alphabet_size, 
+    #                                          save_arrs = args.save_arrs,
+    #                                          save_per_sample_losses = args.save_per_sample_losses,
+    #                                          interms_for_tboard = args.interms_for_tboard, 
+    #                                          logfile_dir = args.logfile_dir,
+    #                                          out_arrs_dir = args.out_arrs_dir,
+    #                                          outfile_prefix = f'test-set',
+    #                                          tboard_writer = writer)
+    
+    
+    # ###########################################
+    # ### update the logfile with final losses  #
+    # ###########################################
+    # to_write_prefix = {'RUN': args.training_wkdir}
+    # to_write_train = {**to_write_prefix, **train_summary_stats}
+    # to_write_test = {**to_write_prefix, **test_summary_stats}
+    
+    # with open(f'{args.logfile_dir}/TRAIN-AVE-LOSSES.tsv','w') as g:
+    #     for k, v in to_write_train.items():
+    #         g.write(f'{k}\t{v}\n')
+    
+    # with open(f'{args.logfile_dir}/TEST-AVE-LOSSES.tsv','w') as g:
+    #     for k, v in to_write_test.items():
+    #         g.write(f'{k}\t{v}\n')
+        
+    # post_training_real_end = wall_clock_time()
+    # post_training_cpu_end = process_time()
+    
+    # # record total time spent on post-training actions; write this to a table
+    # #   instead of a scalar
+    # cpu_sys_time = post_training_cpu_end - post_training_cpu_start
+    # real_time = post_training_real_end - post_training_real_start
+    
+    # df = pd.DataFrame({'label': ['Real time', 'CPU+sys time'],
+    #                    'value': [real_time, cpu_sys_time]})
+    # markdown_table = df.to_markdown()
+    # writer.add_text(tag = 'Code Timing | Post-training actions',
+    #                 text_string = markdown_table,
+    #                 global_step = 0)
+    
+    # # when you're done with the function, close the tensorboard writer and
+    # #   compress the output file
+    # writer.close()
+    
+    # # don't remove source on macOS (when I'm doing CPU testing)
+    # print('\n\nDONE; compressing tboard folder')
+    # if platform.system() == 'Darwin':
+    #     os.system(f"tar -czvf {args.training_wkdir}/tboard.tar.gz {args.training_wkdir}/tboard")
+    
+    # # DO remove source on linux (when I'm doing real experiments)
+    # elif platform.system() == 'Linux':
+    #     os.system(f"tar -czvf {args.training_wkdir}/tboard.tar.gz  --remove-files {args.training_wkdir}/tboard")    
     

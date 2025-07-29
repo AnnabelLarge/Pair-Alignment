@@ -36,7 +36,7 @@ from models.neural_hmm_predict.transition_models import (GlobalTKF91,
                                                          GlobalTKF91FromFile,
                                                          GlobalTKF92FromFile)
 
-from models.neural_utils.postprocessing_models import (FeedforwardPostproc,
+from models.neural_shared.postprocessing_models import (FeedforwardPostproc,
                                                        SelectMask)
 
 

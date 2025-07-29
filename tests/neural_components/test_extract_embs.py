@@ -12,7 +12,7 @@ import numpy as np
 import numpy.testing as npt
 import unittest
 
-from train_eval_fns.neural_tkf_train_eval import _preproc
+from train_eval_fns.neural_hmm_predict_train_eval_one_batch import _preproc
 from models.sequence_embedders.initial_embedding_blocks import PlaceholderEmbedding
 from models.sequence_embedders.concatenation_fns import extract_embs
 

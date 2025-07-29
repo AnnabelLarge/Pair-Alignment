@@ -39,7 +39,7 @@ import jax.numpy as jnp
 import optax
 
 from models.BaseClasses import ModuleBase
-from models.neural_utils.postprocessing_models import (FeedforwardPostproc,
+from models.neural_shared.postprocessing_models import (FeedforwardPostproc,
                                                        SelectMask)
 from models.feedforward_predict.model_functions import confusion_matrix
 

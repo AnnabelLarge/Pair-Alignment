@@ -332,9 +332,7 @@ def create_all_tstates(seq_shapes,
                        anc_enc_config: dict, 
                        desc_dec_config: dict, 
                        pred_config: dict,
-                       t_array_for_all_samples: Optional[jnp.array]
-                       ):
-    
+                       t_array_for_all_samples: Optional[jnp.array] ):
     # largest_seqs is (B, max_seq_len)
     # largest_aligns is (B, max_align_len)
     # max_seq_len != max_align_len

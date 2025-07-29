@@ -45,10 +45,10 @@ from utils.train_eval_utils import write_approx_dict
 # specific to training this model
 from utils.edit_argparse import neural_hmm_fill_with_default_values as fill_with_default_values
 from utils.edit_argparse import neural_hmm_share_top_level_args as share_top_level_args
-from models.neural_utils.neural_initializer import create_all_tstates 
-from train_eval_fns.neural_tkf_train_eval import ( train_one_batch,
+from models.neural_shared.neural_initializer import create_all_tstates 
+from train_eval_fns.neural_hmm_predict_train_eval_one_batch import ( train_one_batch,
                                                    eval_one_batch )
-from train_eval_fns.full_length_final_eval_wrapper import final_eval_wrapper
+from train_eval_fns.neural_final_eval_wrapper import final_eval_wrapper
 
 
 

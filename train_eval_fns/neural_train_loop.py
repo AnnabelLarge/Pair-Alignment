@@ -11,23 +11,44 @@ import numpy
 import pickle
 import sys
 
-def save_all_trainstates( all_save_model_filenames,
-                          all_trainstates,
-                          suffix = None ):
-    for i in range(3):
-        new_outfile = all_save_model_filenames[i]
-        
-        if suffix is not None:
-            new_outfile = new_outfile.replace('.pkl',f'_{suffix}.pkl')
-        
-        with open(new_outfile, 'wb') as g:
-            model_state_dict = flax.serialization.to_state_dict(all_trainstates[i])
-            pickle.dump(model_state_dict, g)
+from models.neural_shared.save_all_neural_trainstates import save_all_neural_trainstates
+from utils.train_eval_utils import ( timers,
+                                     metrics_for_epoch,
+                                     write_timing_file,
+                                     best_models_base_class,
+                                     write_approx_dict )
+from utils.tensorboard_recording_utils import (write_optional_outputs_during_training)
 
-def set_sequence_lengths_for_jit( args,
-                                  determine_seqlen_bin_fn,
-                                  determine_alignlen_bin,
-                                  batch ):
+
+###############################################################################
+### Helpers specific to the neural training loop   ############################
+###############################################################################
+class _best_models_neural( best_models_base_class ):
+    def maybe_save_best_model(self,
+                         args,
+                         epoch_loss,
+                         epoch_idx,
+                         all_trainstates,
+                         all_save_model_filenames):
+        if epoch_loss < self.best_test_loss:
+            with open(args.logfile_name,'a') as g:
+                g.write( f'New best test loss at epoch {epoch_idx}: {epoch_loss}\n' )
+            
+            # update "best" recordings
+            self.best_test_loss = epoch_loss
+            self.best_trainstates = all_trainstates
+            self.best_epoch = epoch_idx
+            
+            # save models to regular python pickles too (in case training is 
+            #   interrupted)
+            save_all_neural_trainstates( all_save_model_filenames = all_save_model_filenames,
+                                  all_trainstates = all_trainstates, 
+                                  suffix = 'BEST' )
+    
+def _set_sequence_lengths_for_jit( args,
+                                   determine_seqlen_bin_fn,
+                                   determine_alignlen_bin,
+                                   batch ):
     # unpack briefly to get max len and number of samples in the 
     #   batch; place in some bin (this controls how many jit 
     #   compilations you do)
@@ -44,7 +65,8 @@ def set_sequence_lengths_for_jit( args,
     
     return batch_max_seqlen, batch_max_alignlen
 
-def maybe_checkpoint_during_training( args,
+
+def _maybe_checkpoint_neural_tstates_during_training( args,
                                       prev_checkpoint_counter,
                                       epoch_idx,
                                       batch_idx,
@@ -62,7 +84,7 @@ def maybe_checkpoint_during_training( args,
             g.write(f'Current loss for the training set batch is: {batch_loss}\n')
         
         # save the trainstates
-        save_all_trainstates( all_save_model_filenames = all_save_model_filenames,
+        save_all_neural_trainstates( all_save_model_filenames = all_save_model_filenames,
                               all_trainstates = all_trainstates, 
                               suffix = 'INPROGRESS' )
         
@@ -75,189 +97,36 @@ def maybe_checkpoint_during_training( args,
     return new_counter
 
 
-### this should actually also be shared with pairHMMs
-def check_tkf_approximation( args,
-                             used_approx,
-                             epoch_idx,
-                             batch_idx,
-                             out_file ):
-    # check if any approximations were used; sum is returned by default
-    subline = f'epoch {epoch_idx}, batch {batch_idx}:'
-    write_approx_dict( approx_dict = used_approx, 
-                       out_arrs_dir = args.out_arrs_dir,
-                       out_file = out_file, #'TRAIN_tkf_approx.tsv',
-                       subline = subline,
-                       calc_sum = False )
-
-
-### some helpful classes for all training loops (not just neural)
-class timers:
-    def __init__(self, 
-                 num_epochs):
-        self.num_epochs = num_epochs
-        self.all_times = np.zeros( (self.num_epochs, 2) )
-        self.cache = None
-        
-    def start_timer(self):
-        real = wall_clock_time()
-        cpu = process_time()
-        self.cache = (real, cpu)
-    
-    def end_timer(self):
-        real_start, cpu_start = self.cache
-        real_end = wall_clock_time()
-        cpu_end = process_time() 
-        
-        # get deltas
-        real_delta = real_end - real_start
-        cpu_delta = cpu_end - cpu_start
-        
-        # clear cache
-        self.cache = None
-        
-        return (real_delta, cpu_delta)
-        
-    def end_timer_and_write_to_tboard(self, 
-                                      epoch_idx,
-                                      writer,
-                                      tag ):
-        real_delta, cpu_delta = end_timer()
-        
-        # record for later
-        self.all_times[epoch_idx, 0] = real_delta
-        self.all_times[epoch_idx, 1] = cpu_delta
-
-        # write to tensorboard
-        write_times(cpu_start = cpu_start, 
-                    cpu_end = cpu_end, 
-                    real_start = real_start, 
-                    real_end = real_end, 
-                    tag = tag, 
-                    step = epoch_idx, 
-                    writer_obj = writer)        
-        
-        
-class metrics_for_epoch:
-    def  __init__(self,
-                  have_acc,
-                  epoch_idx):
-        self.have_acc = have_acc
-        self.epoch_idx = epoch_idx
-        
-        self.epoch_ave_loss = 0
-        self.epoch_ave_perpl = 0
-        
-        if self.have_acc:
-            self.epoch_ave_acc = 0
-            
-    def update_after_batch(self,
-                           batch_weight,
-                           batch_loss,
-                           batch_perpl,
-                           batch_acc = None):
-        self.epoch_ave_loss += batch_loss * batch_weight
-        self.epoch_ave_perpl += batch_perpl * batch_weight
-        if self.have_acc and (batch_acc is not None):
-            self.epoch_ave_acc += batch_acc * batch_weight
-    
-    def write_epoch_metrics_to_tensorboard(self,
-                                           writer,
-                                           tag):
-        writer.add_scalar(tag = f'Loss/{tag}', 
-                          scalar_value = self.epoch_ave_loss.item(), 
-                          global_step = self.epoch_idx)
-        
-        writer.add_scalar(tag=f'Perplexity/{tag}',
-                          scalar_value=self.epoch_ave_perpl.item(), 
-                          global_step=self.epoch_idx)
-        
-        if self.have_acc:
-            writer.add_scalar(tag=f'Accuracy/{tag}',
-                              scalar_value=self.epoch_ave_acc.item(), 
-                              global_step=self.epoch_idx)
-        
-        
-class best_models:
-    def  __init__(self,
-                  initial_trainstates):
-        self.best_epoch = -1
-        self.best_test_loss = jnp.finfo(jnp.float32).max
-        self.best_trainstates = initial_trainstates
-        
-        self.prev_test_loss = jnp.finfo(jnp.float32).max
-        self.early_stopping_counter = 0
-    
-    def maybe_checkpoint(self,
-                         args,
-                         epoch_loss,
-                         epoch_idx,
-                         all_trainstates,
-                         all_save_model_filenames):
-        if epoch_loss < self.best_test_loss:
-            with open(args.logfile_name,'a') as g:
-                g.write( f'New best test loss at epoch {epoch_idx}: {epoch_loss}\n' )
-            
-            # update "best" recordings
-            self.best_test_loss = epoch_loss
-            self.best_trainstates = all_trainstates
-            self.best_epoch = epoch_idx
-            
-            # save models to regular python pickles too (in case training is 
-            #   interrupted)
-            save_all_trainstates( all_save_model_filenames = all_save_model_filenames,
-                                  all_trainstates = all_trainstates, 
-                                  suffix = 'BEST' )
-    
-    def check_early_stop(self,
-                         args,
-                         epoch_loss):
-        ### condition 1: if test loss stagnates or starts to go up, compared
-        ###              to previous epoch's test loss
-        cond1 = jnp.allclose( self.prev_test_loss, 
-                              jnp.minimum (self.prev_test_loss, epoch_loss), 
-                              atol=args.early_stop_cond1_atol,
-                              rtol=0 )
-
-        ### condition 2: if test loss is substatially worse than best test loss
-        cond2 = (epoch_loss - self.best_test_loss) > args.early_stop_cond2_gap
-
-        if cond1 or cond2:
-            self.early_stopping_counter += 1
-        else:
-            self.early_stopping_counter = 0
-        
-        if self.early_stopping_counter == args.patience:
-            return True
-        
-        else:
-            return False
-    
-    
+###############################################################################
+### Main function   ###########################################################
+###############################################################################
 def neural_train_loop( args,
                        epoch_arr,
                        all_trainstates,
-                       rngkey,
+                       training_rngkey,
                        have_acc,
-                       training_dl,
-                       test_dl,
-                       training_dset,
-                       test_dset,
+                       dataloader_dict,
                        jitted_determine_seqlen_bin,
                        jitted_determine_alignlen_bin,
                        train_fn_jitted,
                        eval_fn_jitted,
                        all_save_model_filenames,
-                       writer ): #range(args.num_epochs)
-    # some classes with memory, to help me keep track of things
-    best_models_class = best_models( initial_trainstates = all_trainstates )
+                       writer ): 
+    ### model-specific prep BEFORE starting training loop
+    # unpack dataloader
+    training_dset = dataloader_dict['training_dset']
+    training_dl = dataloader_dict['training_dl']
+    test_dset = dataloader_dict['test_dset']
+    test_dl = dataloader_dict['test_dl']
+    
+    # init classes with memory, to help me keep track of things
+    best_models_class = _best_models_neural( initial_trainstates = all_trainstates )
     train_loop_timer_class = timers( num_epochs = args.num_epochs )
     eval_loop_timer_class = timers( num_epochs = args.num_epochs )
     whole_epoch_timer_class = timers( num_epochs = args.num_epochs )
      
     
-    # rng key for train
-    rngkey, training_rngkey = jax.random.split(rngkey, num=2)
-    
+    ### start actual training loop
     for epoch_idx in tqdm(epoch_arr):    
         # classes to remember metrics THIS EPOCH
         # get re-initialized at the start of every epoch
@@ -281,7 +150,7 @@ def neural_train_loop( args,
 
 #__4___8__12: batch level (three tabs) 
             # prep for training         
-            out = set_sequence_lengths_for_jit( args = args,
+            out = _set_sequence_lengths_for_jit( args = args,
                                                 determine_seqlen_bin_fn = jitted_determine_seqlen_bin,
                                                 determine_alignlen_bin = jitted_determine_alignlen_bin,
                                                 batch = batch )
@@ -301,14 +170,15 @@ def neural_train_loop( args,
             
             # if applicable: check for TKF approximation use
             if train_metrics.get('used_approx', None) is not None:
-                check_tkf_approximation( args = args,
-                                         used_approx = train_metrics['used_approx'],
-                                         epoch_idx = epoch_idx,
-                                         batch_idx = batch_idx,
-                                         out_file = 'TRAIN_tkf_approx.tsv' )
+                subline = f'epoch {epoch_idx}, batch {batch_idx}:'
+                write_approx_dict( approx_dict = train_metrics['used_approx'], 
+                                   out_arrs_dir = args.out_arrs_dir,
+                                   out_file = 'TRAIN_tkf_approx.tsv', #'TRAIN_tkf_approx.tsv',
+                                   subline = subline,
+                                   calc_sum = True )
             
             # potentially save the trainstates during training
-            checkpoint_counter = maybe_checkpoint_during_training( args = args,
+            checkpoint_counter = _maybe_checkpoint_neural_tstates_during_training( args = args,
                                                    prev_checkpoint_counter = checkpoint_counter,
                                                    epoch_idx = epoch_idx,
                                                    batch_idx = batch_idx,
@@ -327,7 +197,7 @@ def neural_train_loop( args,
                     pickle.dump(args, g)
                 
                 # save the trainstates
-                save_all_trainstates( all_save_model_filenames = all_save_model_filenames,
+                save_all_neural_trainstates( all_save_model_filenames = all_save_model_filenames,
                                       all_trainstates = all_trainstates, 
                                       suffix = 'BROKEN' )
                 
@@ -381,7 +251,7 @@ def neural_train_loop( args,
             this_batch_size = batch[0].shape[0]
             
             # prep for eval         
-            out = set_sequence_lengths_for_jit( args = args,
+            out = _set_sequence_lengths_for_jit( args = args,
                                                 determine_seqlen_bin_fn = jitted_determine_seqlen_bin,
                                                 determine_alignlen_bin = jitted_determine_alignlen_bin,
                                                 batch = batch )
@@ -426,7 +296,7 @@ def neural_train_loop( args,
         ### 3.5: if this is the best epoch TEST loss,            #
         ###      save the model params and args for later eval   #
         ##########################################################
-        best_models_class.maybe_checkpoint( args = args,
+        best_models_class.maybe_save_best_model( args = args,
                                             epoch_loss = eval_metrics_class.epoch_ave_loss,
                                             epoch_idx = epoch_idx,
                                             all_trainstates = all_trainstates,
@@ -452,7 +322,6 @@ def neural_train_loop( args,
             
             # rage quit
             sys.exit(1)
-        
 
 #__4___8: epoch level (two tabs) 
         ### before next epoch, do this stuff

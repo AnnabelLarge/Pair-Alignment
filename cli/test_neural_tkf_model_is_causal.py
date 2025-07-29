@@ -18,12 +18,12 @@ from flax import linen as nn
 import optax
 
 from dloaders.init_full_len_dset import init_full_len_dset
-from models.neural_utils.neural_initializer import create_all_tstates
+from models.neural_shared.neural_initializer import create_all_tstates
 from train_eval_fns.build_optimizer import build_optimizer
 from utils.train_eval_utils import (determine_seqlen_bin, 
                                            determine_alignlen_bin)
 from models.sequence_embedders.concatenation_fns import extract_embs
-from train_eval_fns.neural_tkf_train_eval import ( _preproc,
+from train_eval_fns.neural_hmm_predict_train_eval_one_batch import ( _preproc,
                                                    _one_hot_pad_with_zeros )
 
 

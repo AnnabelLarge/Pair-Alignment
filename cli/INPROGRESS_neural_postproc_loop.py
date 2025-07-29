@@ -6,18 +6,6 @@ Created on Wed Jul 23 17:44:15 2025
 @author: annabel
 """
 
-### might be able to use this across ALL models
-def write_final_eval_results(args,
-                             summary_stats: dict,
-                             filename: str):
-    to_write_prefix = {'RUN': args.training_wkdir}
-    to_write = {**to_write_prefix, **summary_stats}
-    
-    with open(f'{args.logfile_dir}/{filename}','w') as g:
-        for k, v in to_write.items():
-            g.write(f'{k}\t{v}\n')
-        
-
 
 ### handle time
 # write final timing
@@ -144,12 +132,4 @@ writer.add_text(tag = 'Code Timing | Post-training actions',
 # when you're done with the function, close the tensorboard writer and
 #   compress the output file
 writer.close()
-
-# don't remove source on macOS (when I'm doing CPU testing)
-print('\n\nDONE; compressing tboard folder')
-if platform.system() == 'Darwin':
-    os.system(f"tar -czvf {args.training_wkdir}/tboard.tar.gz {args.training_wkdir}/tboard")
-
-# DO remove source on linux (when I'm doing real experiments)
-elif platform.system() == 'Linux':
-    os.system(f"tar -czvf {args.training_wkdir}/tboard.tar.gz  --remove-files {args.training_wkdir}/tboard")    
+pigz_compress_tensorboard_file( args )

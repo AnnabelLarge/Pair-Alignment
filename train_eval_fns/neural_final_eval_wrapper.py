@@ -5,7 +5,7 @@ Created on Thu Jul  4 12:53:15 2024
 
 @author: annabel
 
-used for both feedforward and neural TKF92?
+used for both feedforward and neural TKF92
 """
 # regular python
 import numpy as np
@@ -89,7 +89,7 @@ def final_eval_wrapper(dataloader,
                                out_arrs_dir = out_arrs_dir,
                                out_file = 'FINAL-EVAL_tkf_approx.tsv',
                                subline = subline,
-                               calc_sum = False )
+                               calc_sum = True )
         del write_approx_dict_flag
          
         # always returned from eval_metrics:
