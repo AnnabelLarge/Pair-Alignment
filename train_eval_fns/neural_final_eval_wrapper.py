@@ -94,6 +94,8 @@ def final_eval_wrapper(dataloader,
          
         # always returned from eval_metrics:
         #     - loss; float
+        #     - batch_ave_perpl; float
+        #     - batch_ave_acc; float or None
         #     - sum_neg_logP; (B,)
         #     - neg_logP_length_normed; (B,)
         #     - perplexity_perSamp; (B,)
@@ -132,14 +134,14 @@ def final_eval_wrapper(dataloader,
         wf = ( num_samples_in_batch / len(dataset) )
         sum_cond_logprobs += final_loglikes['logP'].sum()
         final_ave_loss_seqlen_normed += final_loglikes['logP/normlength'].mean() * wf
-        final_perplexity += final_loglikes['perplexity'].mean() * wf
+        final_perplexity += eval_metrics['batch_ave_perpl'] * wf
 
         # model may or may not record accuracy as well    
         acc_perSamp = eval_metrics.get('acc_perSamp', None)
         if acc_perSamp is not None:
             have_acc_metrics = True
             final_loglikes['generative_accuracy'] = acc_perSamp
-            final_acc += acc_perSamp.mean() * wf
+            final_acc += eval_metrics['batch_ave_acc'] * wf
         
         # write dataframe
         if save_per_sample_losses:

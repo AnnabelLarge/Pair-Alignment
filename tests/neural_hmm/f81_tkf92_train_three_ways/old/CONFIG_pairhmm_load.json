@@ -1,0 +1,61 @@
+{
+    "training_wkdir": "RESULT_load_params_from_nonlocal_runs",
+    "rng_seednum": 0,
+
+    "data_dir": "example_data",
+    "train_dset_splits": ["sevenSamp", "twoSamp"],
+    "test_dset_splits": ["sevenSamp", "twoSamp"],
+    "toss_alignments_longer_than": null,
+    "bos_eos_as_match": false,
+    "batch_size": 9,
+    "emission_alphabet_size": 20,
+    "norm_loss_by": "desc_len",
+    "gap_tok": 43,
+
+    "num_epochs": 1,
+    "update_grads": false,
+    "optimizer_config": {
+        "init_value": 0.005,
+        "peak_value": 0.005,
+        "end_value": 0.005,
+        "warmup_steps": 0,
+        "weight_decay": 0,
+        "every_k_schedule": 1
+    },
+    "early_stop_cond1_atol": 1e-7,
+    "early_stop_cond2_gap": 3,
+    "patience": 20,
+
+    "use_scan_fns": false,
+
+    "interms_for_tboard": {
+        "finalpred_sow_outputs": false,
+        "forward_pass_outputs": false,
+        "gradients": false
+    },
+    "save_per_sample_losses": true,
+    "histogram_output_freq": 5000,
+
+    "pred_model_type": "pairhmm_indp_sites",
+    "pred_config": {
+        "load_all": true,
+        "num_mixtures": 1,
+        "random_init_exchanges": false,
+        "norm_loss_by_length": false,
+
+        "subst_model_type": "f81",
+        "norm_rate_matrix": true,
+        "norm_rate_mults": false,
+        "rate_mult_activation": "bound_sigmoid",
+
+        "indel_model_type": "tkf92",
+        "tkf_function": "regular_tkf",
+
+        "times_from": "t_per_sample",
+
+        "filenames": {
+            "equl_dist": "equl.npy",
+            "tkf_params_file": "tkf_params_dict.pkl"
+        }
+    }
+}

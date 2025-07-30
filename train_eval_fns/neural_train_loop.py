@@ -10,13 +10,15 @@ from jax import numpy as jnp
 import numpy 
 import pickle
 import sys
+from tqdm import tqdm
 
 from models.neural_shared.save_all_neural_trainstates import save_all_neural_trainstates
 from utils.train_eval_utils import ( timers,
                                      metrics_for_epoch,
                                      write_timing_file,
                                      best_models_base_class,
-                                     write_approx_dict )
+                                     write_approx_dict,
+                                     jit_compilation_tracker )
 from utils.tensorboard_recording_utils import (write_optional_outputs_during_training)
 
 
@@ -71,6 +73,7 @@ def _maybe_checkpoint_neural_tstates_during_training( args,
                                       epoch_idx,
                                       batch_idx,
                                       batch_loss,
+                                      all_trainstates,
                                       all_save_model_filenames ):
     new_counter = prev_checkpoint_counter + 1
     
@@ -120,10 +123,14 @@ def neural_train_loop( args,
     test_dl = dataloader_dict['test_dl']
     
     # init classes with memory, to help me keep track of things
-    best_models_class = _best_models_neural( initial_trainstates = all_trainstates )
+    best_models_class = _best_models_neural( initial_trainstate_objs = all_trainstates )
     train_loop_timer_class = timers( num_epochs = args.num_epochs )
     eval_loop_timer_class = timers( num_epochs = args.num_epochs )
     whole_epoch_timer_class = timers( num_epochs = args.num_epochs )
+    
+    # track when jit compilations are made
+    jit_compilation_in_train_tracking_class = jit_compilation_tracker( num_epochs = args.num_epochs )
+    jit_compilation_in_eval_tracking_class = jit_compilation_tracker( num_epochs = args.num_epochs )
      
     
     ### start actual training loop
@@ -147,13 +154,15 @@ def neural_train_loop( args,
         for batch_idx, batch in enumerate(training_dl):
             this_batch_size = batch[0].shape[0]
             batch_epoch_idx = epoch_idx * len(training_dl) + batch_idx
-
+            
 #__4___8__12: batch level (three tabs) 
             # prep for training         
             out = _set_sequence_lengths_for_jit( args = args,
-                                                determine_seqlen_bin_fn = jitted_determine_seqlen_bin,
-                                                determine_alignlen_bin = jitted_determine_alignlen_bin,
-                                                batch = batch )
+                                                 determine_seqlen_bin_fn = jitted_determine_seqlen_bin,
+                                                 determine_alignlen_bin = jitted_determine_alignlen_bin,
+                                                 batch = batch )
+            jit_compilation_in_train_tracking_class.maybe_record_jit_compilation( clipped_lens = out,
+                                                                         epoch_idx = epoch_idx )
             batch_max_seqlen, batch_max_alignlen = out
             del out
             
@@ -178,12 +187,14 @@ def neural_train_loop( args,
                                    calc_sum = True )
             
             # potentially save the trainstates during training
-            checkpoint_counter = _maybe_checkpoint_neural_tstates_during_training( args = args,
-                                                   prev_checkpoint_counter = checkpoint_counter,
-                                                   epoch_idx = epoch_idx,
-                                                   batch_idx = batch_idx,
-                                                   batch_loss = train_metrics['batch_loss'],
-                                                   all_save_model_filenames = all_save_model_filenames )
+            if args.checkpoint_freq_during_training is not None:
+                checkpoint_counter = _maybe_checkpoint_neural_tstates_during_training( args = args,
+                                                       prev_checkpoint_counter = checkpoint_counter,
+                                                       epoch_idx = epoch_idx,
+                                                       batch_idx = batch_idx,
+                                                       batch_loss = train_metrics['batch_loss'],
+                                                       all_trainstates = all_trainstates, 
+                                                       all_save_model_filenames = all_save_model_filenames )
             
 #__4___8__12: batch level (three tabs)
             ################################################################
@@ -214,7 +225,9 @@ def neural_train_loop( args,
                 write_timing_file( outdir = args.logfile_dir,
                                    train_times = train_loop_timer_class.all_times,
                                    eval_times = eval_loop_timer_class.all_times,
-                                   total_times = whole_epoch_timer_class.all_times )
+                                   total_times = whole_epoch_timer_class.all_times,
+                                   train_jit_epochs = jit_compilation_in_train_tracking_class.epochs_with_jit_comp,
+                                   eval_jit_epochs = jit_compilation_in_eval_tracking_class.epochs_with_jit_comp )
                 
                 raise RuntimeError( ('NaN loss detected; saved intermediates '+
                                     'and quit training') )
@@ -255,6 +268,8 @@ def neural_train_loop( args,
                                                 determine_seqlen_bin_fn = jitted_determine_seqlen_bin,
                                                 determine_alignlen_bin = jitted_determine_alignlen_bin,
                                                 batch = batch )
+            jit_compilation_in_eval_tracking_class.maybe_record_jit_compilation( clipped_lens = out,
+                                                                         epoch_idx = epoch_idx )
             batch_max_seqlen, batch_max_alignlen = out
             del out
             
@@ -319,9 +334,7 @@ def neural_train_loop( args,
             whole_epoch_timer_class.end_timer_and_write_to_tboard( epoch_idx = epoch_idx,
                                                                   writer = writer,
                                                                   tag = 'Process one epoch' )
-            
-            # rage quit
-            sys.exit(1)
+            break
 
 #__4___8: epoch level (two tabs) 
         ### before next epoch, do this stuff
@@ -333,4 +346,12 @@ def neural_train_loop( args,
                                                               writer = writer,
                                                               tag = 'Process one epoch' )
     
-    return early_stop
+    ### record timing at the end of all this
+    write_timing_file( outdir = args.logfile_dir,
+                       train_times = train_loop_timer_class.all_times,
+                       eval_times = eval_loop_timer_class.all_times,
+                       total_times = whole_epoch_timer_class.all_times,
+                       train_jit_epochs = jit_compilation_in_train_tracking_class.epochs_with_jit_comp,
+                       eval_jit_epochs = jit_compilation_in_eval_tracking_class.epochs_with_jit_comp )
+    
+    return (early_stop, best_models_class)

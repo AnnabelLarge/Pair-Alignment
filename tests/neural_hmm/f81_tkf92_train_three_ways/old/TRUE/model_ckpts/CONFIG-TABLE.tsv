@@ -1,0 +1,22 @@
+training_wkdir	TRUE
+rng_seednum	1
+data_dir	example_data
+train_dset_splits	['sevenSamp', 'twoSamp']
+test_dset_splits	['sevenSamp', 'twoSamp']
+toss_alignments_longer_than	None
+bos_eos_as_match	False
+batch_size	9
+emission_alphabet_size	20
+norm_loss_by	desc_len
+gap_tok	43
+num_epochs	10000
+early_stop_cond1_atol	0.001
+early_stop_cond2_gap	3
+patience	10000
+update_grads	True
+save_per_sample_losses	True
+pred_model_type	pairhmm_indp_sites
+seq_padding_idx	0
+align_padding_idx	-9
+base_alphabet_size	23
+assert_no_overwrite	True

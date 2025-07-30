@@ -1,0 +1,6 @@
+RUN	RESULTS_force_global
+sum_cond_logprobs	15935.13371796916
+cond_ave_loss	1770.5704131076845
+cond_ave_loss_seqlen_normed	2.013931860573362
+cond_perplexity	8.931933687534046
+cond_ece	7.492719835907386

@@ -28,6 +28,8 @@ functions here:
 'true_beta',
 'upper_tri_vector_to_sym_matrix'
 """
+import pickle
+
 import jax
 from jax import numpy as jnp
 from jax.scipy.special import logsumexp
@@ -375,7 +377,7 @@ def logprob_gtr( exch_upper_triag_values,
         before_reshape = (B*L_align, A, A)
         after_reshape = (B, L_align, A, A)
         t_array = jnp.expand_dims(t_array, (1,2,3)) #(B, 1, 1, 1)
-    
+   
     oper = rate_mat * t_array # (T, B, L_align, A, A) or (B, L_align, A, A)
     
     # apply matrix exponential with vmap

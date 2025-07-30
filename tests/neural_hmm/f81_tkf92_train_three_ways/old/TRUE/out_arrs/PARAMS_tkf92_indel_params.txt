@@ -1,0 +1,6 @@
+insert rate, lambda: 0.023176729743851307
+deletion rate, mu: 0.02327138797660558
+offset: 0.004067580019267874
+
+extension prob, r: 0.7212245216615987	
+mean indel length: 3.5871160762070873	

@@ -693,6 +693,8 @@ def eval_one_batch(batch,
     ##########################################
     ### things that always get returned
     out_dict = {'batch_loss': loss, # float
+                'batch_ave_perpl': perplexity_perSamp.mean(), # float
+                'batch_ave_acc': loss_intermeds['acc_perSamp'].mean(), # float
                 'sum_neg_logP': loss_intermeds['sum_neg_logP'], #(B,)
                 'neg_logP_length_normed': loss_intermeds['neg_logP_length_normed'], #(B,)
                 'acc_perSamp': loss_intermeds['acc_perSamp'], #(B,)
@@ -744,6 +746,8 @@ def eval_one_batch(batch,
 
     # always returned from out_dict:
     #     - loss; float
+    #     - batch_ave_perpl; float
+    #     - batch_ave_acc; float
     #     - sum_neg_logP; (B,)
     #     - neg_logP_length_normed; (B,)
     #     - perplexity_perSamp; (B,)

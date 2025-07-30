@@ -68,6 +68,7 @@ def feedforward_fill_with_default_values(args):
         the output alphabet size; includes special tokens
     """
     general_fill_with_default_values(args)
+    provided_args = list(vars(args).keys())
     
     if 'chunk_length' not in provided_args:
         args.chunk_length = 512
@@ -93,6 +94,7 @@ def neural_hmm_fill_with_default_values(args):
         the output alphabet size; includes special tokens
     """
     general_fill_with_default_values(args)
+    provided_args = list(vars(args).keys())
     
     if 'chunk_length' not in provided_args:
         args.chunk_length = 512

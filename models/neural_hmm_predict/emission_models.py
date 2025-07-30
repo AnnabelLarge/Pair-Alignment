@@ -271,7 +271,7 @@ class GlobalF81(neuralTKFModuleBase):
                            unique_time_per_sample = unique_time_per_sample)
     
         intermed_params_dict = {'rate_multiplier': self.global_rate_multiplier}
-    
+        
         return cond_logprobs, intermed_params_dict
     
     

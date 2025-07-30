@@ -324,7 +324,7 @@ class IndpSites(ModuleBase):
                                            t_array = t_array,
                                            exponential_dist_param = self.exponential_dist_param,
                                            norm_reported_loss_by = self.norm_reported_loss_by,
-                                           return_intermeds=return_intermeds )
+                                           return_intermeds=True )
         aux_dict['used_approx'] = scoring_matrices_dict['used_approx']
         
         
@@ -334,7 +334,7 @@ class IndpSites(ModuleBase):
         to_add = anc_marginal_probs_from_counts( batch = batch,
                                             score_indels = False if self.indel_model_type is None else True,
                                             scoring_matrices_dict = scoring_matrices_dict,
-                                            return_intermeds=return_intermeds  )
+                                            return_intermeds=True  )
         
         aux_dict = {**aux_dict, **to_add}
         del to_add

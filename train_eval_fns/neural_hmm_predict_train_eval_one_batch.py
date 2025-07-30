@@ -286,7 +286,7 @@ def train_one_batch(batch,
         # logprob_emit_match: (T,B,L_align-1,A,A) or (B,L_align-1,A,A)
         # logprob_emit_indel: (B,L_align-1,A)
         # logprob_transits: (T,B,L_align-1,S,S) or (B,L_align-1,S,S)
-        # corr: a tuple of two arrays; each either (T,B) or (B,)
+        # corr: (T,B) or (B,)
         # approx_flags_dict: a dictionary of things (see model code)
         # subs_model_params: a dictionary of things (see model code)
         # indel_model_params: a dictionary of things (see model code)
@@ -645,7 +645,7 @@ def eval_one_batch(batch,
     # logprob_emit_match: (T,B,L_align-1,A,A) or (B,L_align-1,A,A)
     # logprob_emit_indel: (B,L_align-1,A)
     # logprob_transits: (T,B,L_align-1,S,S) or (B,L_align-1,S,S)
-    # corr: a tuple of two arrays; each either (T,B) or (B,)
+    # corr: (T,B) or (B,)
     # approx_flags_dict: a dictionary of things (see model code)
     # subs_model_params: a dictionary of things (see model code)
     # indel_model_params: a dictionary of things (see model code)
@@ -690,6 +690,8 @@ def eval_one_batch(batch,
     ##########################################
     ### things that always get returned
     out_dict = {'batch_loss': loss,
+                'batch_ave_perpl': perplexity_perSamp.mean(), # float
+                'batch_ave_acc': None, #not used here
                 'sum_neg_logP': loss_fn_dict['sum_neg_logP'],
                 'neg_logP_length_normed': loss_fn_dict['neg_logP_length_normed'],
                 'perplexity_perSamp': perplexity_perSamp,
@@ -742,6 +744,8 @@ def eval_one_batch(batch,
     
     # always returned from out_dict:
     #     - loss; float
+    #     - batch_ave_perpl; float
+    #     - batch_ave_acc = None (not used here)
     #     - sum_neg_logP; (B,)
     #     - neg_logP_length_normed; (B,)
     #     - perplexity_perSamp; (B,)

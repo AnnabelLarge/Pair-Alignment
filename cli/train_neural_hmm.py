@@ -40,7 +40,8 @@ from utils.train_eval_utils import (setup_training_dir,
                                     timers,
                                     write_timing_file,
                                     write_final_eval_results,
-                                    pigz_compress_tensorboard_file)
+                                    pigz_compress_tensorboard_file,
+                                    record_postproc_time_table)
 
 # specific to training this model
 from models.neural_shared.neural_initializer import create_all_tstates 
@@ -123,6 +124,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
     t_array_for_all_samples = dataloader_dict['t_array_for_all_samples']
     
     args.pred_config['training_dset_emit_counts'] = training_dset.emit_counts
+    args.pred_config['emissions_postproc_config']['training_dset_emit_counts'] = training_dset.emit_counts
     
     
     ###########################################################################
@@ -250,7 +252,7 @@ def train_neural_hmm(args, dataloader_dict: dict):
         g.write(f'3: main training loop\n')
     
     # returns bool to tell you if early stopping was activated or not
-    early_stop = neural_train_loop( args = args,
+    early_stop, best_models_class = neural_train_loop( args = args,
                                     epoch_arr = range(args.num_epochs),
                                     all_trainstates = all_trainstates,
                                     training_rngkey = rngkey,
@@ -262,6 +264,10 @@ def train_neural_hmm(args, dataloader_dict: dict):
                                     eval_fn_jitted = eval_fn_jitted,
                                     all_save_model_filenames = all_save_model_filenames,
                                     writer = writer )
+    
+    best_epoch = best_models_class.best_epoch
+    best_trainstates = best_models_class.best_trainstates
+    del best_models_class
     
     
     ###########################################################################
@@ -276,37 +282,28 @@ def train_neural_hmm(args, dataloader_dict: dict):
     # don't accidentally use old trainstates or eval fn
     del all_trainstates, eval_fn_jitted
     
-    
-    ### handle time
-    # write final timing
-    write_timing_file( outdir = args.logfile_dir,
-                       train_times = all_train_set_times,
-                       eval_times = all_eval_set_times,
-                       total_times = all_epoch_times )
-
-    del all_train_set_times, all_eval_set_times, all_epoch_times
-
-    # new timer
-    postproc_timer_class = timers( num_epochs = args.num_epochs )
+    # new timer for these steps
+    postproc_timer_class = timers( num_epochs = 1 )
+    postproc_timer_class.start_timer()
 
 
     ### write to output logfile
     with open(args.logfile_name,'a') as g:
         # if early stopping was never triggered, record results at last epoch
         if not early_stop:
-            g.write(f'Regular stopping after {epoch_idx} full epochs:\n\n')
+            g.write(f'Regular stopping after {args.num_epochs} full epochs:\n\n')
         
         # finish up logfile, regardless of early stopping or not
         g.write(f'Epoch with lowest average test loss ("best epoch"): {best_epoch}\n')
         g.write(f'RE-EVALUATING ALL DATA WITH BEST PARAMS\n\n')
-
-    del epoch_idx
-
+    
 
     ### save the argparse object by itself
     args.epoch_idx = best_epoch
     with open(f'{args.model_ckpts_dir}/TRAINING_ARGPARSE.pkl', 'wb') as g:
         pickle.dump(args, g)
+        
+    del best_epoch, early_stop
 
 
     ### jit compile new eval function
@@ -391,13 +388,8 @@ def train_neural_hmm(args, dataloader_dict: dict):
 
     # record total time spent on post-training actions; write this to a table
     #   instead of a scalar collection
-    real_time, cpu_sys_time = postproc_timer_class.end_timer()
-    df = pd.DataFrame({'label': ['Real time', 'CPU+sys time'],
-                       'value': [real_time, cpu_sys_time]})
-    markdown_table = df.to_markdown()
-    writer.add_text(tag = 'Code Timing | Post-training actions',
-                    text_string = markdown_table,
-                    global_step = 0)
+    record_postproc_time_table( already_started_timer_class = postproc_timer_class,
+                                writer = writer )
 
     # when you're done with the function, close the tensorboard writer and
     #   compress the output file

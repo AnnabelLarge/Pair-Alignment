@@ -210,7 +210,7 @@ def weight_summary_stats(all_trainstates,
             
             # add l2 norm
             l2_norm = np.linalg.norm(param_mat.reshape(-1), ord=2)
-            out_dict['L2_norm'] = l2_norm
+            out_dict['{tag_prefix}/WEIGHTS/L2_norm'] = l2_norm
     
     return out_dict
             

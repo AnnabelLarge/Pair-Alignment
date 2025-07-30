@@ -547,11 +547,20 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     
     
     ### handle time
+    # some placeholder vectors, to say that first epoch was the only one with
+    #    jit compilation
+    train_jit_epochs = np.zeros( (all_train_set_times[:,0].shape), dtype=bool )
+    eval_jit_epochs = np.zeros( (all_eval_set_times[:,0].shape), dtype=bool )
+    train_jit_epochs[0] = True
+    eval_jit_epochs[0] = True
+    
     # write final timing
     write_timing_file( outdir = args.logfile_dir,
                        train_times = all_train_set_times,
                        eval_times = all_eval_set_times,
-                       total_times = all_epoch_times )
+                       total_times = all_epoch_times,
+                       train_jit_epochs = train_jit_epochs,
+                       eval_jit_epochs = eval_jit_epochs )
     
     del all_train_set_times, all_eval_set_times, all_epoch_times
 

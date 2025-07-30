@@ -1,0 +1,4 @@
+activation for rate multipliers: N/A
+activation for exchangeabiliites: bound_sigmoid
+one branch length for each sample; times used for test-set_pt0:
+[1.38392 1.73303 2.17596 0.82531 0.26072 1.01075 0.58014 0.17639 0.45783]

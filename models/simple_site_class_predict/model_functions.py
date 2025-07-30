@@ -1472,16 +1472,9 @@ def cond_prob_from_counts( batch: tuple[ArrayLike],
     if score_indels:
         cond_transit_score = time_dep_score_fn(scoring_matrices_dict['all_transit_matrices']['conditional'], 
                                                 transCounts)
-        
-        # if starting with start -> I, will be missing a 1 / (lambda/mu) term
-        mask_s_i = transCounts[:,3,1]
-        corr_s_i = mask_s_i * scoring_matrices_dict['all_transit_matrices']['corr_start_to_ins']
-        cond_transit_score = cond_transit_score + corr_s_i
-        
-        # if ending with I -> end, will have extra (1/nu) term
-        mask_i_e = transCounts[:,1,3]
-        corr_i_e = mask_i_e * scoring_matrices_dict['all_transit_matrices']['corr_ins_to_end']
-        cond_transit_score = cond_transit_score + corr_i_e
+        mask = transCounts[:,3,1]
+        corr = scoring_matrices_dict['all_transit_matrices']['log_corr']
+        cond_transit_score = cond_transit_score - mask * corr
         
     elif not score_indels:
         align_lens = subCounts.sum(axis=(-1,-2))

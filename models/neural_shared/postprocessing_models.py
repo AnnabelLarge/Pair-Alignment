@@ -272,9 +272,6 @@ class FeedforwardPostproc(SelectMask):
             > n=1, if only using ancestor embedding OR descendant embedding
             > n=2, if using both embeddings
         """
-        # concat and norm embeddings, extra info
-        
-        
         ### First block
         # 1.1) select (potentially concat+norm) the ancestor and descendant embeddings
         datamat = self._concatenate_and_norm( padding_mask = padding_mask,
@@ -284,7 +281,7 @@ class FeedforwardPostproc(SelectMask):
                                               desc_causal_emb = desc_causal_emb,
                                               prev_align_one_hot_vec = prev_align_one_hot_vec,
                                               t_array = t_array,
-                                              norm_fn = None if not self.normalize_seq_embeddings_before_block else self.norm ) #(B, L, H_out)
+                                              norm_fn = None if not self.normalize_seq_embeddings_before_block else self.norm_layers[0] ) #(B, L, H_out)
         
         
         # 1.2) dense layer

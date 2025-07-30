@@ -1,0 +1,6 @@
+RUN	RESULTS_nonlocal_params
+sum_cond_logprobs	15859.916039926613
+cond_ave_loss	1762.2128933251793
+cond_ave_loss_seqlen_normed	2.0044525313726345
+cond_perplexity	8.845923875185655
+cond_ece	7.422029456003896

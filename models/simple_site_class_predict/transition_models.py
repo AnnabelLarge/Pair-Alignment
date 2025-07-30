@@ -400,8 +400,7 @@ class TKF91TransitionLogprobs(ModuleBase):
         
         matrix_dict = self.return_all_matrices(offset=offset,
                                                joint_matrix=joint_matrix)
-        matrix_dict['corr_start_to_ins'] = 0
-        matrix_dict['corr_ins_to_end'] = 0
+        matrix_dict['log_corr'] = 0
         return matrix_dict, approx_flags_dict
         
     
@@ -667,8 +666,7 @@ class TKF91TransitionLogprobsFromFile(TKF91TransitionLogprobs):
         
         matrix_dict = self.return_all_matrices(offset=offset,
                                                joint_matrix=joint_matrix)
-        matrix_dict['corr_start_to_ins'] = 0
-        matrix_dict['corr_ins_to_end'] = 0
+        matrix_dict['log_corr'] = 0
         return matrix_dict, None
         
     
@@ -922,14 +920,9 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
                                                r_ext_prob = r_extend,
                                                joint_matrix=joint_matrix)
         
-        # if starting with start -> I, will be missing a 1 / (lambda/mu) term;
-        #   fix this by multiplying total by (mu/lambda)
-        #   if ending with I -> end, will have extra (1/nu) term; fix this by
-        #   multiplying total by (nu)
-        #   add these correction factors; use them when scoring with the 
-        #   conditional matrix
-        matrix_dict['corr_start_to_ins'] = jnp.log(mu/lam)
-        matrix_dict['corr_ins_to_end'] = jnp.log( r_extend + (1-r_extend)*(lam/mu) )
+        
+        # correction factors for S->I transition
+        matrix_dict['log_corr'] = jnp.log(lam/mu) - jnp.log( r_extend + (1-r_extend)*(lam/mu) )
         
         return matrix_dict, approx_flags_dict
         
@@ -1226,13 +1219,7 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
                                                r_ext_prob=r_extend,
                                                joint_matrix=joint_matrix)
         
-        # if starting with start -> I, will be missing a 1 / (lambda/mu) term;
-        #   fix this by multiplying total by (mu/lambda)
-        #   if ending with I -> end, will have extra (1/nu) term; fix this by
-        #   multiplying total by (nu)
-        #   add these correction factors; use them when scoring with the 
-        #   conditional matrix
-        matrix_dict['corr_start_to_ins'] = jnp.log(mu/lam)
-        matrix_dict['corr_ins_to_end'] = jnp.log( r_extend + (1-r_extend)*(lam/mu) )
+        # correction factors for S->I transition
+        matrix_dict['log_corr'] = jnp.log(lam/mu) - jnp.log( r_extend + (1-r_extend)*(lam/mu) )
         
         return matrix_dict, None

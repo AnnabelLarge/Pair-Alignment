@@ -1,0 +1,7 @@
+training_wkdir	RESULT_load_params_from_nonlocal_runs
+init_value	0.005
+peak_value	0.005
+end_value	0.005
+warmup_steps	0
+weight_decay	0
+every_k_schedule	1

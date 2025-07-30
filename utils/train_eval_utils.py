@@ -8,6 +8,12 @@ Created on Mon Jul 28 18:06:40 2025
 These are used across the majority of train and/or eval scripts
 """
 import os
+from functools import partial
+from time import perf_counter as wall_clock_time
+from time import process_time
+import platform
+import numpy as np
+import pandas as pd
 
 import jax
 import jax.numpy as jnp
@@ -57,6 +63,19 @@ class metrics_for_epoch:
                               scalar_value=self.epoch_ave_acc.item(), 
                               global_step=self.epoch_idx)    
         
+class jit_compilation_tracker:
+    def __init__(self, num_epochs):
+        self.seen_lens = set()
+        self.epochs_with_jit_comp = np.zeros( (num_epochs,), dtype=bool )
+
+    def maybe_record_jit_compilation(self,
+                                     clipped_lens,
+                                     epoch_idx):
+        if clipped_lens not in self.seen_lens:
+            self.seen_lens.add( clipped_lens )
+            self.epochs_with_jit_comp[epoch_idx] = True
+    
+    
 def selective_squeeze(mat):
     """
     jnp.squeeze, but ignore batch dimension (dim0)
@@ -107,7 +126,7 @@ def clip_by_bins(datamat,
     
     # if length_with_all_chunks is greater than max_len, 
     #   use max_len instead
-    clip_to = jnp.where( length_with_all_chunks > max_len,
+    clip_to = jnp.where( length_with_all_chunks > L_max,
                          L_max,
                          length_with_all_chunks )
     return clip_to
@@ -122,7 +141,7 @@ def determine_seqlen_bin(batch,
     ### 2.) time (optional): (B,) or None
     ### 3.) dataloader idx (B,)
     unaligned_seqs = batch[0]
-    batch_max_seqlen = clip_by_bins(batch_seqs = unaligned_seqs, 
+    batch_max_seqlen = clip_by_bins(datamat = unaligned_seqs, 
                                     chunk_length = chunk_length, 
                                     padding_idx = seq_padding_idx)
     return batch_max_seqlen
@@ -148,7 +167,7 @@ def determine_alignlen_bin(batch,
     aligned_mats_excluding_bos = batch[1][:, 1:, 0]
     
     # get length
-    batch_max_alignlen = clip_by_bins(batch_seqs = aligned_mats_excluding_bos, 
+    batch_max_alignlen = clip_by_bins(datamat = aligned_mats_excluding_bos, 
                                       chunk_length = chunk_length, 
                                       padding_idx = seq_padding_idx)
       
@@ -268,17 +287,30 @@ class timers:
         cpu = process_time()
         self.cache = (real, cpu)
     
-    def end_timer(self):
+    def _end_timer(self):
         real_start, cpu_start = self.cache
         real_end = wall_clock_time()
         cpu_end = process_time() 
         
-        # get deltas
-        real_delta = real_end - real_start
-        cpu_delta = cpu_end - cpu_start
-        
         # clear cache
         self.cache = None
+        
+        # return all times
+        return {'real_start': real_start,
+                'cpu_start': cpu_start,
+                'real_end': real_end,
+                'cpu_end': cpu_end}
+    
+    def end_timer_get_deltas(self):
+        out = self._end_timer()
+        
+        real_start = out['real_start']
+        cpu_start = out['cpu_start']
+        real_end = out['real_end']
+        cpu_end = out['cpu_end']
+        
+        real_delta = real_end - real_start
+        cpu_delta = cpu_end - cpu_start
         
         return (real_delta, cpu_delta)
         
@@ -286,9 +318,16 @@ class timers:
                                       epoch_idx,
                                       writer,
                                       tag ):
-        real_delta, cpu_delta = end_timer()
+        out = self._end_timer()
+        
+        real_start = out['real_start']
+        cpu_start = out['cpu_start']
+        real_end = out['real_end']
+        cpu_end = out['cpu_end']
         
         # record for later
+        real_delta = real_end - real_start
+        cpu_delta = cpu_end - cpu_start
         self.all_times[epoch_idx, 0] = real_delta
         self.all_times[epoch_idx, 1] = cpu_delta
 
@@ -302,63 +341,68 @@ class timers:
                     writer_obj = writer)  
         
 def write_timing_file(outdir,
-                       train_times,
-                       eval_times,
-                       total_times):
+                      train_times,
+                      eval_times,
+                      total_times,
+                      train_jit_epochs,
+                      eval_jit_epochs):
     """
     record real and cpu times during training
     """
-    num_nonzero_times = (total_times[...,0] > 0).sum(axis=0)
+    total_jit_epochs = train_jit_epochs & eval_jit_epochs
     
-    if num_nonzero_times >= 1:
-        first_epoch_train_time = train_times[0,:]
-        first_epoch_eval_time = eval_times[0,:]
-        first_epoch_total_time = total_times[0,:]
-        
-        with open(f'{outdir}/TIMING.txt','w') as g:
-            g.write('# First epoch (with jit-compilation)\n')
-            g.write(f'\t\treal\tcpu\n')
-            
-            g.write(f'train\t')
-            g.write(f'{first_epoch_train_time[0].item()}\t')
-            g.write(f'{first_epoch_train_time[1].item()}\n')
-            
-            g.write(f'eval\t')
-            g.write(f'{first_epoch_eval_time[0].item()}\t')
-            g.write(f'{first_epoch_eval_time[1].item()}\n')
-            
-            g.write(f'total\t')
-            g.write(f'{first_epoch_total_time[0].item()}\t')
-            g.write(f'{first_epoch_total_time[1].item()}\n')
-            
-            g.write(f'\n')
-        
-        if num_nonzero_times > 1:
-            n = num_nonzero_times - 1
-            
-            following_train_times = train_times[1:,:].mean(axis=0)
-            following_eval_times = eval_times[1:,:].mean(axis=0)
-            following_total_times = total_times[1:,:].mean(axis=0)
-            
-            with open(f'{outdir}/TIMING.txt','a') as g:
-                g.write(f'# Average over following {n} epochs\n')
-                g.write(f'\t\treal\tcpu\n')
-                
-                g.write(f'train\t')
-                g.write(f'{following_train_times[0].item()}\t')
-                g.write(f'{following_train_times[1].item()}\n')
-                
-                g.write(f'eval\t')
-                g.write(f'{following_eval_times[0].item()}\t')
-                g.write(f'{following_eval_times[1].item()}\n')
-                
-                g.write(f'total\t')
-                g.write(f'{following_total_times[0].item()}\t')
-                g.write(f'{following_total_times[1].item()}\n')
+    # these times were gathered when jit compilation occured
+    train_times_with_jit_comp = train_times[train_jit_epochs, :].mean(axis=0)
+    eval_times_with_jit_comp = eval_times[eval_jit_epochs, :].mean(axis=0)
+    total_times_with_jit_comp = total_times[(train_jit_epochs & eval_jit_epochs), :].mean(axis=0)
     
-    else:
-        print('No times to record')
+    # these times were gathered WITHOUT jit compilation (used a cached function)
+    train_times_no_jit = train_times[~train_jit_epochs, :].mean(axis=0)
+    eval_times_no_jit = eval_times[~eval_jit_epochs, :].mean(axis=0)
+    total_times_no_jit = total_times[~(train_jit_epochs & eval_jit_epochs), :].mean(axis=0)
+    
+    with open(f'{outdir}/TIMING.txt','w') as g:
+        g.write('# Epochs with jit compilation\n')
+        g.write(f'\t\treal\tcpu\n')
+        
+        g.write(f'train\t')
+        g.write(f'{train_times_with_jit_comp[0].item()}\t')
+        g.write(f'{train_times_with_jit_comp[1].item()}\n')
+        
+        g.write(f'eval\t')
+        g.write(f'{eval_times_with_jit_comp[0].item()}\t')
+        g.write(f'{eval_times_with_jit_comp[1].item()}\n')
+        
+        g.write(f'total\t')
+        g.write(f'{total_times_with_jit_comp[0].item()}\t')
+        g.write(f'{total_times_with_jit_comp[1].item()}\n')
+        
+        g.write(f'\n')
+    
+        g.write('# Epochs with cached, pre-compiled functions\n')
+        g.write(f'\t\treal\tcpu\n')
+        
+        g.write(f'train\t')
+        g.write(f'{train_times_no_jit[0].item()}\t')
+        g.write(f'{train_times_no_jit[1].item()}\n')
+        
+        g.write(f'eval\t')
+        g.write(f'{eval_times_no_jit[0].item()}\t')
+        g.write(f'{eval_times_no_jit[1].item()}\n')
+        
+        g.write(f'total\t')
+        g.write(f'{total_times_no_jit[0].item()}\t')
+        g.write(f'{total_times_no_jit[1].item()}\n')
 
+def record_postproc_time_table( already_started_timer_class,
+                                writer ):
+    elapsed_real_time, elapsed_cpu_sys_time = already_started_timer_class.end_timer_get_deltas()
+    df = pd.DataFrame({'label': ['Real time', 'CPU+sys time'],
+                       'value': [elapsed_real_time, elapsed_cpu_sys_time]})
+    markdown_table = df.to_markdown()
+    writer.add_text(tag = 'Code Timing | Post-training actions',
+                    text_string = markdown_table,
+                    global_step = 0)
 
 def setup_training_dir(args):
     if 'assert_no_overwrite' not in dir(args):
