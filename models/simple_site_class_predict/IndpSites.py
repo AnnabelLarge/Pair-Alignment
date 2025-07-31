@@ -302,7 +302,7 @@ class IndpSites(ModuleBase):
         #   used_approx, dict
         scoring_matrices_dict = self._get_scoring_matrices(t_array=times_for_matrices,
                                         sow_intermediates=False,
-                                        return_intermeds=False)
+                                        return_intermeds=True)
         
         #########################
         ### joint probability   #
@@ -364,10 +364,6 @@ class IndpSites(ModuleBase):
         
         
         # ## uncomment to explicitly calculate this
-        # # recalculate this, to add cond logprob at match to the scoring matrices
-        # scoring_matrices_dict_again = self._get_scoring_matrices(t_array=times_for_matrices,
-        #                                 sow_intermediates=False,
-        #                                 return_intermeds=True)
         # to_add = cond_prob_from_counts( batch = batch,
         #                                 times_from = self.times_from,
         #                                 score_indels = False if self.indel_model_type is None else True,

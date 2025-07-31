@@ -272,15 +272,43 @@ def final_eval_wrapper(dataloader,
             summary_stats[f'{prefix}_perplexity'] += to_add
             del to_add
             
-        # write dataframe
+        # write loglikes
         if save_per_sample_losses:
+            # as dataframe
             final_loglikes.to_csv((f'{logfile_dir}/{outfile_prefix}_pt{batch_idx}_'+
                                   'FINAL-LOGLIKES.tsv'), sep='\t')
+            
+            # as numpy array
+            # col1 is sample_idx
+            # col2 is sum of the negative JOINT log-likleihoods
+            # col3 is sum of the negative ANC MARGINAL log-likleihoods
+            # col4 is sum of the negative DESC MARGINAL log-likleihoods
+            # col5 is sum of the negative CONDITIONAL log-likleihoods
+            col1 = batch[-1]
+            col2 = eval_metrics['joint_neg_logP']
+            col3 = eval_metrics['cond_neg_logP']
+            col4 = eval_metrics['anc_neg_logP']
+            col5 = eval_metrics['desc_neg_logP']
+            
+            to_write = np.stack([col1, col2, col3, col4, col5], axis=1)
+            with open(f'{logfile_dir}/NP-MAT_{outfile_prefix}_pt{batch_idx}_FINAL-LOGLIKES.npy', 'wb') as g:
+                np.save(g, to_write)
+            
+            del col1, col2, col3, col4, col5, g, to_write
     
     
     ######################
     ### POST EVAL LOOP   #
     ######################
+    # record the column order for the numpy matrix written earlier
+    if save_per_sample_losses:
+        with open(f'{logfile_dir}/COLS-FOR-NP-MAT_{outfile_prefix}_pt{batch_idx}_FINAL-LOGLIKES.tsv', 'w') as g:
+            g.write(f'dataloader_idx\n')
+            g.write(f'sum_joint_loglikes\n')
+            g.write(f'sum_cond_loglikes\n')
+            g.write(f'sum_anc_loglikes\n')
+            g.write(f'sum_desc_loglikes\n')
+    
     # add ECE for all
     for prefix in ['joint','cond','anc','desc']:
         to_add = jnp.exp( summary_stats[f'{prefix}_ave_loss_seqlen_normed'] )

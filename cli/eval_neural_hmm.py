@@ -43,7 +43,7 @@ from utils.train_eval_utils import (setup_training_dir,
 
 # specific to training this model
 from models.neural_shared.neural_initializer import create_all_tstates 
-from models.neural_shared import save_all_neural_trainstates
+from models.neural_shared.save_all_neural_trainstates import save_all_neural_trainstates
 from utils.edit_argparse import neural_hmm_fill_with_default_values as fill_with_default_values
 from utils.edit_argparse import neural_hmm_share_top_level_args as share_top_level_args
 from train_eval_fns.neural_hmm_predict_train_eval_one_batch import eval_one_batch
@@ -91,7 +91,7 @@ def eval_neural_hmm( args,
         g.write(f'Neural sequence embedders with Markovian alignment assumption\n')
         g.write( f'Substitution model: {training_argparse.pred_config["subst_model_type"]}\n' )
         g.write( f'Indel model: {training_argparse.pred_config["indel_model_type"]}\n' )
-        g.write( f'when reporting, normalizing losses by: {training_argparse.norm_loss_by}\n\n' )
+        g.write( f'when reporting, normalizing losses by: {training_argparse.norm_reported_loss_by}\n\n' )
         
         g.write( f'Evolutionary model parameters (global vs local):\n' )
         
@@ -105,9 +105,9 @@ def eval_neural_hmm( args,
         
         
     ### provide filenames of saved model parameters
-    encoder_save_model_filename = f'ANC_ENC.pkl'
-    decoder_save_model_filename = f'DESC_DEC.pkl'
-    finalpred_save_model_filename = f'FINAL_PRED.pkl'
+    encoder_save_model_filename = f'ANC_ENC_BEST.pkl'
+    decoder_save_model_filename = f'DESC_DEC_BEST.pkl'
+    finalpred_save_model_filename = f'FINAL_PRED_BEST.pkl'
     all_save_model_filenames = [encoder_save_model_filename, 
                                 decoder_save_model_filename,
                                 finalpred_save_model_filename]
@@ -221,7 +221,7 @@ def eval_neural_hmm( args,
                               interms_for_tboard = no_returns,
                               t_array_for_all_samples = t_array_for_all_samples,  
                               concat_fn = concat_fn,
-                              norm_loss_by_for_reporting = args.norm_loss_by,                  
+                              norm_loss_by_for_reporting = args.norm_reported_loss_by,                  
                               extra_args_for_eval = extra_args_for_eval )
     del extra_args_for_eval
     

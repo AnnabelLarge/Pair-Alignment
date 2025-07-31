@@ -143,10 +143,20 @@ def final_eval_wrapper(dataloader,
             final_loglikes['generative_accuracy'] = acc_perSamp
             final_acc += eval_metrics['batch_ave_acc'] * wf
         
-        # write dataframe
+        # write losses
         if save_per_sample_losses:
+            # as dataframe
             final_loglikes.to_csv((f'{logfile_dir}/{outfile_prefix}_pt{batch_idx}_'+
                                   'FINAL-LOGLIKES.tsv'), sep='\t')
+            
+            # as numpy array
+            # col1 is sample_idx, col2 is sum of the negative log-likleihoods
+            col1 = batch[-1]
+            col2 = eval_metrics['sum_neg_logP']
+            to_write = np.stack([col1, col2], axis=1)
+            with open(f'{logfile_dir}/NP-MAT_{outfile_prefix}_pt{batch_idx}_FINAL-LOGLIKES.npy', 'wb') as g:
+                np.save(g, to_write)
+            del col1, col2, g, to_write
         
         
         ###############################################
@@ -235,6 +245,12 @@ def final_eval_wrapper(dataloader,
     ######################
     ### POST EVAL LOOP   #
     ######################
+    # record the column order for the numpy matrix written earlier
+    if save_per_sample_losses:
+        with open(f'{logfile_dir}/COLS-FOR-NP-MAT_{outfile_prefix}_pt{batch_idx}_FINAL-LOGLIKES.tsv', 'w') as g:
+            g.write(f'dataloader_idx\n')
+            g.write(f'sum_cond_loglikes\n')
+            
     # extract whole-dataset performance
     final_ave_loss = sum_cond_logprobs / len(dataset)
     final_ece = jnp.exp( final_ave_loss_seqlen_normed )
