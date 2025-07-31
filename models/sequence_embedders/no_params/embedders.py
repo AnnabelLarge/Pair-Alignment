@@ -131,10 +131,6 @@ class OneHotEmb(SeqEmbBase):
         return one_hot_final
         
 
-
-###############################################################################
-### for debugging and unit tests only   #######################################
-###############################################################################
 class MaskingEmb(SeqEmbBase):
     """
     Return (B, L, 1) matrix of indicators:

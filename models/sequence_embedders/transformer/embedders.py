@@ -165,8 +165,8 @@ class TransfSeqEmb(SeqEmbBase):
     
     def apply_seq_embedder_in_eval(self, 
                                    seqs, 
-                                   final_trainstate, 
-                                   sow_outputs, 
+                                   tstate, 
+                                   sow_intermediates, 
                                    extra_args_for_eval):
         output_attn_weights = extra_args_for_eval.get('output_attn_weights', 
                                                       False)
@@ -177,11 +177,11 @@ class TransfSeqEmb(SeqEmbBase):
             mut_lst = []
         
         # embed the sequence
-        out = final_trainstate.apply_fn(variables = final_trainstate.params,
+        out = tstate.apply_fn(variables = tstate.params,
                                         datamat = seqs,
                                         training = False,
-                                        sow_intermediates = sow_outputs,
-                                        mutable = mut_lst +['histograms','scalars'] if sow_outputs else mut_lst)
+                                        sow_intermediates = sow_intermediates,
+                                        mutable = mut_lst +['histograms','scalars'] if sow_intermediates else mut_lst)
         out_embeddings, out_aux_dict = out
         del out
         

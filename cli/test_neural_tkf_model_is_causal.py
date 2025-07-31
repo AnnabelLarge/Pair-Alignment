@@ -253,7 +253,8 @@ def test_neural_tkf_model_is_causal(config_file):
         # anc_embeddings is (B, L_seq-1, H)
         out = encoder_instance.apply_seq_embedder_in_eval( seqs = anc_seqs,
                                                            tstate = encoder_trainstate,
-                                                           sow_intermediates = False )
+                                                           sow_intermediates = False,
+                                                           extra_args_for_eval = extra_args_for_eval )
         anc_embeddings, _ = out
         del out
         
@@ -262,7 +263,8 @@ def test_neural_tkf_model_is_causal(config_file):
         # desc_embeddings is (B, L_seq-1, H)
         out = decoder_instance.apply_seq_embedder_in_eval( seqs = desc_seqs,
                                                            tstate = decoder_trainstate,
-                                                           sow_intermediates = False )
+                                                           sow_intermediates = False,
+                                                           extra_args_for_eval = extra_args_for_eval )
         desc_embeddings, _ = out
         del out
         

@@ -18,7 +18,7 @@ import jax
 import jax.numpy as jnp
 
 # custom
-from models.BaseClasses import ModuleBase
+from models.BaseClasses import ModuleBase, SeqEmbBase
 
 
 class PlaceholderEmbedding(nn.Module):
@@ -55,8 +55,73 @@ class PlaceholderEmbedding(nn.Module):
         
         # datamat is (B, L, H)
         # padding_mask is (B, L)
-        return (datamat, padding_mask)  
+        return (datamat, padding_mask)
+    
+    
+class OneHotEmb(SeqEmbBase):
+    """
+    Only one-hot encoding
+    
+    
+    init with:
+    ==========
+    config (dict): config to pass to each subsequent module
+    name (str): "ANCESTOR EMBEDDER" or "DESCENDANT EMBEDDER"
+    
+    
+    config will have:
+    =================
+    base_alphabet_size: 23 for proteins, 7 for DNA
+    
+    
+    call arguments are:
+    ===================
+    datamat: matrix of sequences (B, L)
+    training: NOT USED
+    sow_intermediates: NOT USED
+    
+    
+    outputs:
+    ========
+    datamat (altered matrix): one-hot encodings for all sequences 
+                              (B, L, base_alphabet_size)
+    """
+    embedding_which: str
+    config: dict
+    name: str
+    causal: Optional[Any] = None
+    
+    def setup(self):
+        self.base_alphabet_size = self.config.get('base_alphabet_size', 23)
+        self.seq_padding_idx = self.config.get('seq_padding_idx', 0)
+    
+    def __call__(self, 
+                 datamat, 
+                 *args,
+                 **kwargs):
+        """
+        Arguments
+        ----------
+        datamat : ArrayLike, (B, L)
+            > encoded with tokens from 1 to base_alphabet_size; padding is 
+              assumed to be zero
+        """
+        padding_mask = (datamat != self.seq_padding_idx) #(B, L)
+        padding_mask_template = padding_mask[...,None] #(B,L,1)
         
+        # flax's one-hot will start one-hot encoding at token 0 (padding)
+        #   run the one-hot encoding with an extra class, mask it, then remove 
+        #   the empty leading column
+        raw_one_hot = nn.one_hot(datamat, 
+                                 num_classes = self.base_alphabet_size,
+                                 axis=-1) #(B, L, base_alphabet_size)
+        
+        seq_mask = jnp.broadcast_to(padding_mask_template, 
+                                        raw_one_hot.shape) #(B, L, base_alphabet_size)
+        one_hot_masked = raw_one_hot * seq_mask  #(B, L, base_alphabet_size)
+        
+        one_hot_final = one_hot_masked[..., 1:] #(B, L, base_alphabet_size - 1)
+        return one_hot_final, padding_mask
 
 class EmbeddingWithPadding(ModuleBase):
     """
