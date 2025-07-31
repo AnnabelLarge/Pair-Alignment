@@ -451,12 +451,12 @@ class UnidirecMambaModule(ModuleBase):
     def setup(self):
         ### parse the config
         # required
+        self.in_alph_size = self.config.["in_alph_size"]
         self.expansion_factor = self.config["expansion_factor"] # E
         self.hidden_dim = self.config["hidden_dim"]
         
         # optional
         self.padding_idx = self.config.get("seq_padding_idx", 0)
-        self.base_alphabet_size = self.config.get("base_alphabet_size", 23)
         
         
         ### !!! inputs to keep as-is
@@ -585,7 +585,7 @@ class BidirecMambaModule(ModuleBase):
         
         # optional
         self.padding_idx = self.config.get("seq_padding_idx", 0)
-        self.base_alphabet_size = self.config.get("base_alphabet_size", 23)
+        self.in_alph_size = self.config.get("in_alph_size", 23)
         self.tie_in_proj = self.config.get("tie_in_proj", False)
         self.tie_gate = self.config.get("tie_gate", False)
         

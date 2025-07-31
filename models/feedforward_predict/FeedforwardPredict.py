@@ -14,17 +14,17 @@ Use these projection layers when generating possible descendant + alignment,
 
 full amino acid alphabet is 43 tokens:
   - <pad>: 0
-  - <eos>: 1
+  - <bos>, <eos>: 1
   - 20 AAs + match: 2-21
   - 20 AAs + insert: 22 - 41
   - gap: 42
 
 full DNA alphabet would be 11 tokens:
   - <pad>: 0
-  - <eos>: 1
+  - <bos>, <eos>: 1
   - 4 nucls + match: 2-5
-  - 4 nucls + insert: 6-0
-  - gap: 10 
+  - 4 nucls + insert: 6-9
+  - gap: 10
 
   
 """
@@ -54,7 +54,7 @@ class FeedforwardPredict(ModuleBase):
       > could have no blocks at all
     
     then, use final dense layer to project from last block's hidden dimension
-      to full_alphabet_size
+      to out_alph_size
     """
     config: dict
     name: str
@@ -62,13 +62,13 @@ class FeedforwardPredict(ModuleBase):
     def setup(self):
         # read config
         self.postproc_model_type = self.config['postproc_model_type']
-        self.output_size = self.config['full_alphabet_size'] - 1 #remove <bos> from alphabet
+        self.output_size = self.config['out_alph_size']
         self.use_bias = self.config.get('use_bias', True)
         
         # setup up postprocessing layers
         postproc_module_registry = {'selectmask': SelectMask,
                                     'feedforward': FeedforwardPostproc,
-                                    None: lambda *args, **kwargs: lambda *args, **kwargs: None}
+                                    None: lambda datamat, *args, **kwargs: None}
         
         postproc_module = postproc_module_registry[self.postproc_model_type]
         self.postproc = postproc_module( config = self.config,
@@ -76,13 +76,13 @@ class FeedforwardPredict(ModuleBase):
         
         # final projection to alignment-augmented alphabet
         self.final_proj = nn.Dense(features = self.output_size, 
-                                  use_bias = use_bias, 
+                                  use_bias = self.use_bias, 
                                   kernel_init = nn.initializers.lecun_normal(),
                                   name=f'{self.name}/final projection')
         
         # cm function
         self.parted_confusion_matrix = partial( confusion_matrix,
-                                                output_alph_with_pad = self.output_size )
+                                                output_alph_size_with_pad = self.output_size )
         
     @nn.compact
     def __call__(self, 
@@ -125,11 +125,6 @@ class FeedforwardPredict(ModuleBase):
         Cross-entropy loss per position, along with collecting accuracy metrics
         """
         ### loss
-        # subtract one from true_out (except for padding positions)
-        true_out = jnp.where( padding_mask,
-                              true_out-1,
-                              0 ) #(B, L)
-        
         # logP(desc, align | anc) comes from -cross_ent()
         logprob_perSamp_perPos = -optax.softmax_cross_entropy_with_integer_labels(logits = final_logits, 
                                                                                   labels = true_out) # (B, L)
@@ -147,7 +142,9 @@ class FeedforwardPredict(ModuleBase):
         valid_positions_perSamp = padding_mask.sum(axis=-1) #(B)
         
         # accumulate confusion matrices
-        cm_perSamp = confusion_matrix( true_out, pred_outputs, padding_mask ) #(B, A)
+        cm_perSamp = self.parted_confusion_matrix( true = true_out, 
+                                       pred = pred_outputs, 
+                                       mask = padding_mask ) #(B, A)
         
         out_dict = {'logprob_perSamp': logprob_perSamp, #(B)
                     'correct_predictions_perSamp': correct_predictions_perSamp,  #(B)

@@ -79,7 +79,7 @@ class OneHotEmb(SeqEmbBase):
     
     config will have:
     =================
-    base_alphabet_size: 23 for proteins, 7 for DNA
+    in_alph_size: 23 for proteins, 7 for DNA
     
     
     call arguments are:
@@ -92,7 +92,7 @@ class OneHotEmb(SeqEmbBase):
     outputs:
     ========
     datamat (altered matrix): one-hot encodings for all sequences 
-                              (B, L, base_alphabet_size)
+                              (B, L, in_alph_size-1)
     """
     embedding_which: str
     config: dict
@@ -100,7 +100,7 @@ class OneHotEmb(SeqEmbBase):
     
     
     def setup(self):
-        self.base_alphabet_size = self.config.get('base_alphabet_size', 23)
+        self.in_alph_size = self.config['in_alph_size']
         self.seq_padding_idx = self.config.get('seq_padding_idx', 0)
     
     def __call__(self, 
@@ -111,7 +111,7 @@ class OneHotEmb(SeqEmbBase):
         Arguments
         ----------
         datamat : ArrayLike, (B, L)
-            > encoded with tokens from 1 to base_alphabet_size; padding is 
+            > encoded with tokens from 1 to in_alph_size; padding is 
               assumed to be zero
         """
         padding_mask = (datamat != self.seq_padding_idx)[...,None] #(B,L)
@@ -120,14 +120,14 @@ class OneHotEmb(SeqEmbBase):
         #   run the one-hot encoding with an extra class, mask it, then remove 
         #   the empty leading column
         raw_one_hot = nn.one_hot(datamat, 
-                                 num_classes = self.base_alphabet_size,
-                                 axis=-1) #(B, L, base_alphabet_size)
+                                 num_classes = self.in_alph_size,
+                                 axis=-1) #(B, L, in_alph_size)
         
         padding_mask = jnp.broadcast_to(padding_mask, 
-                                        raw_one_hot.shape) #(B, L, base_alphabet_size)
-        one_hot_masked = raw_one_hot * padding_mask  #(B, L, base_alphabet_size)
+                                        raw_one_hot.shape) #(B, L, in_alph_size)
+        one_hot_masked = raw_one_hot * padding_mask  #(B, L, in_alph_size)
         
-        one_hot_final = one_hot_masked[..., 1:] #(B, L, base_alphabet_size - 1)
+        one_hot_final = one_hot_masked[..., 1:] #(B, L, in_alph_size - 1)
         return one_hot_final
         
 

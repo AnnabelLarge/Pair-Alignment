@@ -1,0 +1,62 @@
+{
+    "training_wkdir": "RESULTS_anc-desc",
+    "rng_seednum": 56,
+
+    "data_dir": "example_data",
+    "train_dset_splits": ["twoSamp"],
+    "test_dset_splits": ["twoSamp"],
+    "toss_alignments_longer_than": null,
+    "batch_size": 2,
+    "chunk_length": 512,
+    "out_alph_size": 43,
+    "in_alph_size": 22,
+    "norm_reported_loss_by": "desc_len",
+    "gap_idx": 43,
+
+    "num_epochs": 10000,
+    "optimizer_config": {
+        "init_value": 0.05,
+        "peak_value": 0.05,
+        "end_value": 0.05,
+        "warmup_steps": 0,
+        "weight_decay": 0,
+        "every_k_schedule": 1
+    },
+    "early_stop_cond1_atol": 1e-3,
+    "early_stop_cond2_gap": 0.5,
+    "patience": 10000,
+    "update_grads": true,
+    "use_scan_fns": false,
+
+    "interms_for_tboard": {
+        "encoder_sow_outputs": false,
+        "ancestor_embeddings": false,
+        "decoder_sow_outputs": false,
+        "descendant_embeddings": false,
+        "finalpred_sow_outputs": false,
+        "forward_pass_outputs": true,
+        "gradients": false,
+        "weights": false,
+        "optimizer": false,
+        "final_logprobs": true
+    },
+    "save_arrs": false,
+    "save_per_sample_losses": true,
+    "checkpoint_freq_during_training": 1000,
+
+    "anc_model_type": "onehot",
+    "anc_enc_config": {},
+
+    "desc_model_type": "onehot",
+    "desc_dec_config": {},
+
+    "pred_model_type": "feedforward",
+    "pred_config": {
+        "postproc_model_type": "selectmask",
+        "use_bias": false,
+        "use_anc_emb": true,
+        "use_desc_emb": true,
+        "use_prev_align_info": false,
+        "t_per_sample": false }
+    
+}

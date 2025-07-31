@@ -34,7 +34,7 @@ class SelectMask(ModuleBase):
         self.use_anc_emb = self.config['use_anc_emb']
         self.use_desc_emb = self.config['use_desc_emb']
         self.use_prev_align_info = self.config['use_prev_align_info']
-        self.use_t_per_sample = self.config.get('use_t_per_sample', False)
+        self.use_t_per_sample = self.config.get('t_per_sample', False)
         
         # for debugging
         self.normalize_seq_embeddings_before_block = self.config.get('normalize_seq_embeddings_before_block', False)

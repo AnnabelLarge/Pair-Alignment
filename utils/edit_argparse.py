@@ -49,9 +49,6 @@ def general_fill_with_default_values(args):
     if 'align_padding_idx' not in provided_args:
         args.align_padding_idx = -9
     
-    if 'base_alphabet_size' not in provided_args:
-        args.base_alphabet_size = args.emission_alphabet_size + 3
-    
     if 'update_grads' not in provided_args:
         args.update_grads = True
     
@@ -67,15 +64,29 @@ def feedforward_fill_with_default_values(args):
         residues/nucleotides are different from matched residues/nucleotides; 
         the output alphabet size; includes special tokens
     """
+    provided_args = list(vars(args).keys())
     general_fill_with_default_values(args)
+
+    # 20 aa
+    # <bos>/<eos> (same token)
+    # pad
+    # total: 22
+    if 'in_alph_size' not in provided_args:
+        args.in_alph_size = args.emission_alphabet_size + 2
+
     provided_args = list(vars(args).keys())
     
     if 'chunk_length' not in provided_args:
         args.chunk_length = 512
     
-    # note: different from neural_hmm! don't include <bos>
-    if 'full_alphabet_size' not in provided_args:
-        args.full_alphabet_size = 43
+    # 20 aa+match
+    # 20 aa+ins
+    # gap
+    # <bos>/<eos> (same token)
+    # <pad>
+    # total: 43
+    if 'out_alph_size' not in provided_args:
+        args.out_alph_size = 43
     
     # remap option
     if args.pred_config['t_per_sample']:
@@ -94,15 +105,20 @@ def neural_hmm_fill_with_default_values(args):
         the output alphabet size; includes special tokens
     """
     general_fill_with_default_values(args)
+
+    # 20 aa
+    # <bos>
+    # <eos>
+    # pad
+    # total: 23
+    if 'in_alph_size' not in provided_args:
+        args.in_alph_size = args.emission_alphabet_size + 3
+
     provided_args = list(vars(args).keys())
     
     if 'chunk_length' not in provided_args:
         args.chunk_length = 512
     
-    # note: different from feedforward! Have to use <bos> in these models
-    if 'full_alphabet_size' not in provided_args:
-        args.full_alphabet_size = 44
-        
 
 def pairhmm_indp_sites_fill_with_default_values(args):
     """
@@ -126,7 +142,7 @@ def pairhmm_frag_and_site_classes_fill_with_default_values(args):
 def general_share_top_level_args(args):    
     args.pred_config['seq_padding_idx'] = args.seq_padding_idx
     args.pred_config['align_padding_idx'] = args.align_padding_idx
-    args.pred_config['base_alphabet_size'] = args.base_alphabet_size
+    args.pred_config['in_alph_size'] = args.in_alph_size
     args.pred_config['norm_reported_loss_by'] = args.norm_reported_loss_by
     args.pred_config['gap_idx'] = args.gap_idx
 
@@ -134,31 +150,22 @@ def general_share_top_level_args(args):
 def feedforward_share_top_level_args(args):
     general_share_top_level_args(args)
     
-    args.anc_enc_config['base_alphabet_size'] = args.base_alphabet_size
+    args.anc_enc_config['in_alph_size'] = args.in_alph_size
     args.anc_enc_config['seq_padding_idx'] = args.seq_padding_idx
 
-    args.desc_dec_config['base_alphabet_size'] = args.base_alphabet_size
+    args.desc_dec_config['in_alph_size'] = args.in_alph_size
     args.desc_dec_config['seq_padding_idx'] = args.seq_padding_idx
     
-    args.pred_config['full_alphabet_size'] = args.full_alphabet_size
+    args.pred_config['out_alph_size'] = args.out_alph_size
     
     
 def neural_hmm_share_top_level_args(args):
     general_share_top_level_args(args)
-    
-    args.anc_enc_config['base_alphabet_size'] = args.base_alphabet_size
     args.anc_enc_config['seq_padding_idx'] = args.seq_padding_idx
-    
-    args.desc_dec_config['base_alphabet_size'] = args.base_alphabet_size
     args.desc_dec_config['seq_padding_idx'] = args.seq_padding_idx
     
-    args.pred_config['full_alphabet_size'] = args.full_alphabet_size
     args.pred_config['emission_alphabet_size'] = args.emission_alphabet_size
-
-    args.pred_config['emissions_postproc_config']['full_alphabet_size'] = args.full_alphabet_size
     args.pred_config['emissions_postproc_config']['emission_alphabet_size'] = args.emission_alphabet_size
-
-    args.pred_config['transitions_postproc_config']['full_alphabet_size'] = args.full_alphabet_size
     args.pred_config['transitions_postproc_config']['emission_alphabet_size'] = args.emission_alphabet_size
     
     

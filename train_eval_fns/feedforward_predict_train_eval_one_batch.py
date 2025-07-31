@@ -163,8 +163,8 @@ def train_one_batch(batch,
     del all_model_instances, all_trainstates
     
     # flags for later
-    use_prev_align_info = finalpred_instance.config['pred_config']['use_prev_align_info']
-    use_t_per_sample = finalpred_instance.config['pred_config']['use_t_per_sample']
+    use_prev_align_info = finalpred_instance.config['use_prev_align_info']
+    use_t_per_sample = finalpred_instance.config['t_per_sample']
     
     # clip to max lengths, split into prefixes and suffixes
     # batch_unaligned_seqs is (B, L, 2)
@@ -187,7 +187,8 @@ def train_one_batch(batch,
     ##################
     # preprocess with helper
     out_dict = _preproc( unaligned_seqs = clipped_unaligned_seqs, 
-                         aligned_mats = clipped_aligned_mats )
+                         aligned_mats = clipped_aligned_mats,
+                         use_prev_align_info = use_prev_align_info )
     anc_seqs = out_dict['anc_seqs'] # (B, L_seq)
     desc_seqs = out_dict['desc_seqs'] # (B, L_seq) 
     align_idxes = out_dict['align_idxes'] #(B, L_align-1, 2)
@@ -294,6 +295,7 @@ def train_one_batch(batch,
         # loss_intermeds['cm_perSamp'] (B, A_aug-1, A_aug-1)
         loss_intermeds = finalpred_trainstate.apply_fn( variables = finalpred_params,
                                                        final_logits = final_logits,
+                                                       padding_mask = padding_mask,
                                                        true_out = true_out,
                                                        return_result_before_sum = False,
                                                        method = 'neg_loglike_in_scan_fn' ) 
@@ -469,7 +471,6 @@ def train_one_batch(batch,
 ### EVAL ON ONE BATCH    ######################################################
 ###############################################################################
 def eval_one_batch(batch, 
-                   training_rngkey,
                    all_trainstates,  
                    all_model_instances,
                    max_seq_len,
@@ -540,8 +541,8 @@ def eval_one_batch(batch,
     del all_model_instances, all_trainstates
     
     # flags for later
-    use_prev_align_info = finalpred_instance.config['pred_config']['use_prev_align_info']
-    use_t_per_sample = finalpred_instance.config['pred_config']['use_t_per_sample']
+    use_prev_align_info = finalpred_instance.config['use_prev_align_info']
+    use_t_per_sample = finalpred_instance.config['t_per_sample']
     
     # clip to max lengths, split into prefixes and suffixes
     # batch_unaligned_seqs is (B, L, 2)
@@ -553,10 +554,6 @@ def eval_one_batch(batch,
     clipped_unaligned_seqs = batch_unaligned_seqs[:, :max_seq_len, :] # (B, L_seq, 2)
     clipped_aligned_mats = batch_aligned_mats[:, :max_align_len, :] # (B, L_align, 4)
     
-    # produce new keys for each network
-    all_keys = jax.random.split(training_rngkey, num=4)
-    training_rngkey, enc_key, dec_key, finalpred_key = all_keys
-    del all_keys
     
     
     ##################
@@ -564,7 +561,8 @@ def eval_one_batch(batch,
     ##################
     # preprocess with helper
     out_dict = _preproc( unaligned_seqs = clipped_unaligned_seqs, 
-                         aligned_mats = clipped_aligned_mats )
+                         aligned_mats = clipped_aligned_mats,
+                         use_prev_align_info = use_prev_align_info )
     anc_seqs = out_dict['anc_seqs'] # (B, L_seq)
     desc_seqs = out_dict['desc_seqs'] # (B, L_seq) 
     align_idxes = out_dict['align_idxes'] #(B, L_align-1, 2)
@@ -587,8 +585,8 @@ def eval_one_batch(batch,
     ### embed with ancestor encoder
     # anc_embeddings is (B, L_seq-1, H)
     out = encoder_instance.apply_seq_embedder_in_eval(seqs = anc_seqs,
-                                                      final_trainstate = encoder_trainstate,
-                                                      sow_outputs = encoder_sow_outputs,
+                                                      tstate = encoder_trainstate,
+                                                      sow_intermediates = encoder_sow_outputs,
                                                       extra_args_for_eval = extra_args_for_eval)
     
     anc_embeddings, embeddings_aux_dict = out
@@ -598,8 +596,8 @@ def eval_one_batch(batch,
     ### embed with descendant decoder
     # desc_embeddings is (B, L_seq-1, H)
     out = decoder_instance.apply_seq_embedder_in_eval(seqs = desc_seqs,
-                                                      final_trainstate = decoder_trainstate,
-                                                      sow_outputs = decoder_sow_outputs,
+                                                      tstate = decoder_trainstate,
+                                                      sow_intermediates = decoder_sow_outputs,
                                                       extra_args_for_eval = extra_args_for_eval)
     desc_embeddings, to_add = out
     del out
@@ -668,6 +666,7 @@ def eval_one_batch(batch,
     loss_intermeds = finalpred_trainstate.apply_fn( variables = finalpred_trainstate.params,
                                                    final_logits = final_logits,
                                                    true_out = true_out,
+                                                   padding_mask = padding_mask,
                                                    return_result_before_sum = return_forward_pass_outputs,
                                                    method = 'neg_loglike_in_scan_fn' ) 
     
@@ -739,10 +738,10 @@ def eval_one_batch(batch,
     write_optional_outputs(value_to_save = desc_embeddings,
                            flag = return_desc_embs,
                            varname_to_write = 'final_descendant_embeddings')
-    
-    write_optional_outputs(value_to_save = loss_intermeds['neg_logP_perSamp_perPos'],
+
+    write_optional_outputs(value_to_save = final_logits,
                            flag = return_final_logprobs,
-                           varname_to_write = 'final_logprobs')
+                           varname_to_write = 'final_logits')
 
     # always returned from out_dict:
     #     - loss; float
@@ -762,6 +761,6 @@ def eval_one_batch(batch,
     #     - desc_attn_weights 
     #     - final_ancestor_embeddings
     #     - final_descendant_embeddings
-    #     - final_logprobs (i.e. AFTER log_softmax)
+    #     - final_logits (i.e. BEFORE log_softmax)
          
     return out_dict

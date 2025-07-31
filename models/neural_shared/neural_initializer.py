@@ -77,7 +77,7 @@ def create_seq_model_tstate(embedding_which,
                                        name = f'ONE-HOT {model_name_suffix}')
         
         # adjust dim3 size
-        expected_dim3_size = model_config['base_alphabet_size']-1
+        expected_dim3_size = model_config['in_alph_size']-1
     
     
     ### CNN (only one block type: ConvnetBlock)
@@ -338,10 +338,20 @@ def create_all_tstates(seq_shapes,
     # max_seq_len != max_align_len
     largest_seqs, largest_aligns, t_per_sample = seq_shapes
     
-    if t_array_for_all_samples is None:
+    have_t_grid = t_array_for_all_samples is not None
+    have_t_per_sample = t_per_sample is not None
+    
+    # for neural TKF and feedforward
+    if have_t_grid and ~have_t_per_sample:
         t_array_for_init = jnp.zeros( t_per_sample.shape ) #(B,)
-    elif t_array_for_all_samples is not None:
+
+    elif ~have_t_grid and have_t_per_sample:
         t_array_for_init = t_array_for_all_samples #(T,)
+    
+    # could happen for feedforward
+    elif ~have_t_grid and ~have_t_per_sample:
+        t_array_for_init = None
+    del have_t_grid, have_t_per_sample
     
     # keep track of dim3 size
     expected_dim3_size = 0

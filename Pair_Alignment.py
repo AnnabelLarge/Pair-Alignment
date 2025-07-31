@@ -89,7 +89,7 @@ def main():
     
     # ## UNCOMMENT TO RUN IN SPYDER IDE
     # top_level_args.task = 'train'
-    # top_level_args.configs = 'CONFIG_transf-site-classes.json'
+    # top_level_args.configs = 'CONFIG_feedforward_anc-only.json'
     # top_level_args.load_dset_pkl = None
     
     
@@ -155,7 +155,7 @@ def main():
                 from cli.train_neural_hmm import train_neural_hmm as train_fn
     
             elif pred_model_type == 'feedforward':
-                raise NotImplementedError('not ready')
+                from cli.train_feedforward import train_feedforward as train_fn
                 
         # make dataloder list
         if top_level_args.load_dset_pkl is None:

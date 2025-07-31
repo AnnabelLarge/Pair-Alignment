@@ -45,7 +45,7 @@ class CNNSeqEmb(SeqEmbBase):
     
     automatically added:
     --------------------
-    base_alphabet_size (int): <pad>, <bos>, <eos>, then all alphabet 
+    in_alph_size (int): <pad>, <bos>, <eos>, then all alphabet 
                               (20 for amino acids, 4 for DNA)
     seq_padding_idx (int = 0): padding token
     

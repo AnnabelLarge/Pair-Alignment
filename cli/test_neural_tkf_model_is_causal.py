@@ -46,19 +46,19 @@ def test_neural_tkf_model_is_causal(config_file):
     # add to pred_config
     A = args.emission_alphabet_size
     args.pred_config['emission_alphabet_size'] = A
-    args.pred_config['base_alphabet_size'] = A+3
+    args.pred_config['in_alph_size'] = A+3
     args.pred_config['training_dset_emit_counts'] = np.array( [1/A]*A ) 
     
-    args.anc_enc_config['base_alphabet_size'] = A+3
-    args.desc_dec_config['base_alphabet_size'] = A+3
+    args.anc_enc_config['in_alph_size'] = A+3
+    args.desc_dec_config['in_alph_size'] = A+3
     
     
     if args.pred_model_type == 'neural_hmm':
         args.pred_config['emissions_postproc_config']['emission_alphabet_size'] = A
-        args.pred_config['emissions_postproc_config']['base_alphabet_size'] = A+3
+        args.pred_config['emissions_postproc_config']['in_alph_size'] = A+3
         
         args.pred_config['transitions_postproc_config']['emission_alphabet_size'] = A
-        args.pred_config['transitions_postproc_config']['base_alphabet_size'] = A+3
+        args.pred_config['transitions_postproc_config']['in_alph_size'] = A+3
         
     
     

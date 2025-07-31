@@ -9,10 +9,10 @@ import jax
 from jax import numpy as jnp
 
 
-def confusion_matrix( true, pred, mask, output_alph_with_pad ):
+def confusion_matrix( true, pred, mask, output_alph_size_with_pad ):
     B = true.shape[0]
     L = true.shape[1]
-    A = output_alph_with_pad
+    A = output_alph_size_with_pad
     
     # flatten
     true_flat = true.reshape(-1) #(B * L)

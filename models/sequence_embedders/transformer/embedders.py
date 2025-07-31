@@ -47,7 +47,7 @@ class TransfSeqEmb(SeqEmbBase):
     hidden_dim (int): length of the embedded vector
     dropout (float = 0.0): dropout rate in transformer block
     padding_idx (int = 0): padding token
-    base_alphabet_size (int = 23): <pad>, <bos>, <eos>, then all alphabet 
+    in_alph_size (int = 23): <pad>, <bos>, <eos>, then all alphabet 
                                   (20 for amino acids, 4 for DNA)
     
     

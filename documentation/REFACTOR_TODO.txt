@@ -22,8 +22,8 @@ Changes to note:
 - default tokens (that I won't change) are:
   > seq_padding_idx: 0
   > align_padding_idx: -9
-  > base_alphabet_size: 23
-  > full_alphabet_size: 44
+  > in_alph_size: 23
+  > out_alph_size: 44
 
 - have some things in the training script that are used at debug time; mark them in comments with "DEBUG-ONLY"
 

@@ -89,6 +89,6 @@ optional inputs (won't change though):
 =======================================
 seq_padding_idx
 align_padding_idx
-base_alphabet_size
-full_alphabet_size
+in_alph_size
+out_alph_size
 
