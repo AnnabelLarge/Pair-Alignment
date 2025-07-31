@@ -588,7 +588,8 @@ def eval_one_batch(batch,
     # anc_embeddings is (B, L_seq-1, H)
     out = encoder_instance.apply_seq_embedder_in_eval( seqs = anc_seqs,
                                                        tstate = encoder_trainstate,
-                                                       sow_intermediates = encoder_sow_outputs )
+                                                       sow_intermediates = encoder_sow_outputs,
+                                                       extra_args_for_eval = extra_args_for_eval)
     anc_embeddings, embeddings_aux_dict = out
     del out
     
@@ -597,7 +598,8 @@ def eval_one_batch(batch,
     # desc_embeddings is (B, L_seq-1, H)
     out = decoder_instance.apply_seq_embedder_in_eval( seqs = desc_seqs,
                                                        tstate = decoder_trainstate,
-                                                       sow_intermediates = decoder_sow_outputs )
+                                                       sow_intermediates = decoder_sow_outputs,
+                                                       extra_args_for_eval = extra_args_for_eval )
     desc_embeddings, to_add = out
     del out
     
