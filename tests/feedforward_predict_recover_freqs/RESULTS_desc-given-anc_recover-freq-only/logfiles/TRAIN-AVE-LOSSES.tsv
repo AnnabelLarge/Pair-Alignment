@@ -1,0 +1,7 @@
+RUN	RESULTS_desc-given-anc_recover-freq-only
+sum_cond_logprobs	1978.028564453125
+cond_ave_loss	989.0142822265625
+cond_ave_loss_seqlen_normed	1.104495644569397
+cond_perplexity	3.160903215408325
+cond_ece	3.017702102661133
+acc	0.739829421043396

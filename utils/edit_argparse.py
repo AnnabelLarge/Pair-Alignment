@@ -67,26 +67,16 @@ def feedforward_fill_with_default_values(args):
     provided_args = list(vars(args).keys())
     general_fill_with_default_values(args)
 
-    # 20 aa
-    # <bos>/<eos> (same token)
-    # pad
-    # total: 22
     if 'in_alph_size' not in provided_args:
-        args.in_alph_size = args.emission_alphabet_size + 2
+        args.in_alph_size = args.emission_alphabet_size + 3
 
     provided_args = list(vars(args).keys())
     
     if 'chunk_length' not in provided_args:
         args.chunk_length = 512
     
-    # 20 aa+match
-    # 20 aa+ins
-    # gap
-    # <bos>/<eos> (same token)
-    # <pad>
-    # total: 43
     if 'out_alph_size' not in provided_args:
-        args.out_alph_size = 43
+        args.out_alph_size = 44
     
     # remap option
     if args.pred_config['t_per_sample']:
@@ -106,11 +96,6 @@ def neural_hmm_fill_with_default_values(args):
     """
     general_fill_with_default_values(args)
 
-    # 20 aa
-    # <bos>
-    # <eos>
-    # pad
-    # total: 23
     if 'in_alph_size' not in provided_args:
         args.in_alph_size = args.emission_alphabet_size + 3
 

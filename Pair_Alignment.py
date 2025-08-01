@@ -89,7 +89,7 @@ def main():
     
     # ## UNCOMMENT TO RUN IN SPYDER IDE
     # top_level_args.task = 'train'
-    # top_level_args.configs = 'CONFIG_feedforward_anc-only.json'
+    # top_level_args.configs = 'CONFIG_feedforward_desc-only_recover-freq.json'
     # top_level_args.load_dset_pkl = None
     
     

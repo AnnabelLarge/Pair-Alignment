@@ -284,7 +284,6 @@ def _load_aligned_mats(data_dir,
     
     ### model-specific transformations, concatenation
     ### feedforward: add 20 to insert sites in descendant, toss ancestor
-    # move all except <pad> and <bos> down by one
     if pred_model_type == 'feedforward':
         ### zero-padded items
         gapped_anc = gapped_seqs[...,0] #(B, L)
@@ -294,11 +293,12 @@ def _load_aligned_mats(data_dir,
         ins_pos = np.argwhere( gapped_anc == gap_idx ) #(B,)
         gapped_desc[ ins_pos[:,0], ins_pos[:,1] ] += emission_alphabet_size #(B, L, 3)
         
-        # move all descendant sequence tokens down (except <bos> and <pad>)
-        # both bos and eos will be encoded with "1"
-        gapped_desc = np.where( np.isin(gapped_desc, [0, bos_idx] ),
-                                gapped_desc,
-                                gapped_desc - 1 ) #(B, L)
+        # # move all descendant sequence tokens down (except <bos> and <pad>)
+        # # both bos and eos will be encoded with "1"
+        # gapped_desc = np.where( np.isin(gapped_desc, [0, bos_idx] ),
+        #                         gapped_desc,
+        #                         gapped_desc - 1 ) #(B, L)
+        
         zero_padded_mat = np.stack([gapped_desc, alignment], axis=-1) # (B, L, 2)
         del gapped_anc, gapped_desc, ins_pos
         

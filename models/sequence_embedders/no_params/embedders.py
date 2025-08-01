@@ -10,7 +10,7 @@ ABOUT:
 Sequence embedders with no params: one-hot encoding and a placeholder class
 
 """
-from typing import Optional
+from typing import Optional, Any
 
 from flax import linen as nn
 import jax
@@ -92,12 +92,12 @@ class OneHotEmb(SeqEmbBase):
     outputs:
     ========
     datamat (altered matrix): one-hot encodings for all sequences 
-                              (B, L, in_alph_size-1)
+                              (B, L, in_alph_size)
     """
     embedding_which: str
     config: dict
     name: str
-    
+    causal: Optional[Any] = None
     
     def setup(self):
         self.in_alph_size = self.config['in_alph_size']
@@ -114,7 +114,8 @@ class OneHotEmb(SeqEmbBase):
             > encoded with tokens from 1 to in_alph_size; padding is 
               assumed to be zero
         """
-        padding_mask = (datamat != self.seq_padding_idx)[...,None] #(B,L)
+        padding_mask = (datamat != self.seq_padding_idx) #(B, L)
+        padding_mask_template = padding_mask[...,None] #(B,L,1)
         
         # flax's one-hot will start one-hot encoding at token 0 (padding)
         #   run the one-hot encoding with an extra class, mask it, then remove 
@@ -123,11 +124,9 @@ class OneHotEmb(SeqEmbBase):
                                  num_classes = self.in_alph_size,
                                  axis=-1) #(B, L, in_alph_size)
         
-        padding_mask = jnp.broadcast_to(padding_mask, 
-                                        raw_one_hot.shape) #(B, L, in_alph_size)
-        one_hot_masked = raw_one_hot * padding_mask  #(B, L, in_alph_size)
-        
-        one_hot_final = one_hot_masked[..., 1:] #(B, L, in_alph_size - 1)
+        seq_mask = jnp.broadcast_to(padding_mask_template, 
+                                    raw_one_hot.shape) #(B, L, in_alph_size)
+        one_hot_final = raw_one_hot * seq_mask  #(B, L, in_alph_size)
         return one_hot_final
         
 

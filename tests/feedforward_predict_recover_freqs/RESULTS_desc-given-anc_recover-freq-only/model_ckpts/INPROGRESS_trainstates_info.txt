@@ -1,0 +1,2 @@
+Checkpoint created at: epoch 9999, batch 0
+Current loss for the training set batch is: 989.0142211914062

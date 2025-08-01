@@ -201,7 +201,7 @@ def train_one_batch(batch,
     length_for_normalization_for_reporting = (true_out != seq_padding_idx).sum(axis=1) #(B, )
     
     if norm_loss_by_for_reporting == 'desc_len':
-        num_gaps = ( true_out == (gap_idx-1) ).sum(axis=1) #(B, )
+        num_gaps = ( true_out == (gap_idx) ).sum(axis=1) #(B, )
         length_for_normalization_for_reporting = length_for_normalization_for_reporting - num_gaps #(B, )
      
         
@@ -575,7 +575,7 @@ def eval_one_batch(batch,
     length_for_normalization_for_reporting = (true_out != seq_padding_idx).sum(axis=1) #(B, )
     
     if norm_loss_by_for_reporting == 'desc_len':
-        num_gaps = ( true_out == (gap_idx-1) ).sum(axis=1) #(B, )
+        num_gaps = ( true_out == (gap_idx) ).sum(axis=1) #(B, )
         length_for_normalization_for_reporting = length_for_normalization_for_reporting - num_gaps #(B, )
     
         

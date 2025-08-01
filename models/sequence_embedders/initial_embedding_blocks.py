@@ -84,7 +84,7 @@ class OneHotEmb(SeqEmbBase):
     outputs:
     ========
     datamat (altered matrix): one-hot encodings for all sequences 
-                              (B, L, in_alph_size-1)
+                              (B, L, in_alph_size)
     """
     embedding_which: str
     config: dict
@@ -117,10 +117,8 @@ class OneHotEmb(SeqEmbBase):
                                  axis=-1) #(B, L, in_alph_size)
         
         seq_mask = jnp.broadcast_to(padding_mask_template, 
-                                        raw_one_hot.shape) #(B, L, in_alph_size)
-        one_hot_masked = raw_one_hot * seq_mask  #(B, L, in_alph_size)
-        
-        one_hot_final = one_hot_masked[..., 1:] #(B, L, in_alph_size - 1)
+                                    raw_one_hot.shape) #(B, L, in_alph_size)
+        one_hot_final = raw_one_hot * seq_mask  #(B, L, in_alph_size)
         return one_hot_final, padding_mask
 
 class EmbeddingWithPadding(ModuleBase):

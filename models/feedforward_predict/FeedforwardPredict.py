@@ -12,19 +12,21 @@ Use these projection layers when generating possible descendant + alignment,
 
 (note: REMOVE <bos> token from output alphabet)
 
-full amino acid alphabet is 43 tokens:
+full amino acid alphabet is 44 tokens:
   - <pad>: 0
-  - <bos>, <eos>: 1
-  - 20 AAs + match: 2-21
-  - 20 AAs + insert: 22 - 41
-  - gap: 42
+  - <bos>: 1
+  - <eos>: 2
+  - 20 AAs + match: 3-22
+  - 20 AAs + insert: 23 - 42
+  - gap: 43
 
-full DNA alphabet would be 11 tokens:
+full DNA alphabet would be 12 tokens:
   - <pad>: 0
-  - <bos>, <eos>: 1
-  - 4 nucls + match: 2-5
-  - 4 nucls + insert: 6-9
-  - gap: 10
+  - <bos>: 1
+  - <eos>: 2
+  - 4 nucls + match: 3-6
+  - 4 nucls + insert: 7-10
+  - gap: 11
 
   
 """

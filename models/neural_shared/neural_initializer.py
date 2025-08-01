@@ -77,7 +77,7 @@ def create_seq_model_tstate(embedding_which,
                                        name = f'ONE-HOT {model_name_suffix}')
         
         # adjust dim3 size
-        expected_dim3_size = model_config['in_alph_size']-1
+        expected_dim3_size = model_config['in_alph_size']
     
     
     ### CNN (only one block type: ConvnetBlock)
