@@ -1,0 +1,53 @@
+{
+    "training_wkdir": "RESULTS_frag-mix_trained-f81",
+    "rng_seednum": 0,
+
+    "data_dir": "example_data",
+    "train_dset_splits": ["twoSamp"],
+    "test_dset_splits": ["twoSamp"],
+    "toss_alignments_longer_than": null,
+    "chunk_length": 512,
+    "batch_size": 2,
+    "emission_alphabet_size": 20,
+    "gap_idx": 43,
+
+    "num_epochs": 10000,
+    "optimizer_config": {
+        "init_value": 0.005,
+        "peak_value": 0.005,
+        "end_value": 0.005,
+        "warmup_steps": 0,
+        "weight_decay": 0,
+        "every_k_schedule": 1
+    },
+    "early_stop_cond1_atol": 1e-3,
+    "early_stop_cond2_gap": 3,
+    "patience": 10000,
+    "update_grads": true,
+
+    "interms_for_tboard": {
+        "finalpred_sow_outputs": false,
+        "forward_pass_outputs": false,
+        "gradients": false
+    },
+    "save_arrs": false,
+    "save_per_sample_losses": true,
+    "norm_reported_loss_by": "desc_len",
+
+    "pred_model_type": "pairhmm_frag_and_site_classes",
+    "pred_config": {
+        "load_all": false,
+        "num_mixtures": 2,
+
+        "subst_model_type": "f81",
+        "k_rate_mults": 4,
+        "indp_rate_mults": false,
+        "norm_rate_matrix": true,
+        "norm_rate_mults": true,
+
+        "indel_model_type": "tkf92",
+
+        "times_from": "t_per_sample"
+    }
+    
+}

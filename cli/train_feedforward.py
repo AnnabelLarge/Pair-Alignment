@@ -237,17 +237,17 @@ def train_feedforward(args, dataloader_dict: dict):
     
     # returns bool to tell you if early stopping was activated or not
     early_stop, best_models_class = neural_train_loop( args = args,
-                                    epoch_arr = range(args.num_epochs),
-                                    all_trainstates = all_trainstates,
-                                    training_rngkey = rngkey,
-                                    have_acc = True,
-                                    dataloader_dict = dataloader_dict,
-                                    jitted_determine_seqlen_bin = jitted_determine_seqlen_bin,
-                                    jitted_determine_alignlen_bin = jitted_determine_alignlen_bin,
-                                    train_fn_jitted = train_fn_jitted,
-                                    eval_fn_jitted = eval_fn_jitted,
-                                    all_save_model_filenames = all_save_model_filenames,
-                                    writer = writer )
+                                        epoch_arr = range(args.num_epochs),
+                                        all_trainstates = all_trainstates,
+                                        training_rngkey = rngkey,
+                                        have_acc = True,
+                                        dataloader_dict = dataloader_dict,
+                                        jitted_determine_seqlen_bin = jitted_determine_seqlen_bin,
+                                        jitted_determine_alignlen_bin = jitted_determine_alignlen_bin,
+                                        train_fn_jitted = train_fn_jitted,
+                                        eval_fn_jitted = eval_fn_jitted,
+                                        all_save_model_filenames = all_save_model_filenames,
+                                        writer = writer )
     
     best_epoch = best_models_class.best_epoch
     best_trainstates = best_models_class.best_trainstates

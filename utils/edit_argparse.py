@@ -127,7 +127,6 @@ def pairhmm_frag_and_site_classes_fill_with_default_values(args):
 def general_share_top_level_args(args):    
     args.pred_config['seq_padding_idx'] = args.seq_padding_idx
     args.pred_config['align_padding_idx'] = args.align_padding_idx
-    args.pred_config['in_alph_size'] = args.in_alph_size
     args.pred_config['norm_reported_loss_by'] = args.norm_reported_loss_by
     args.pred_config['gap_idx'] = args.gap_idx
 
@@ -135,13 +134,15 @@ def general_share_top_level_args(args):
 def feedforward_share_top_level_args(args):
     general_share_top_level_args(args)
     
+    args.pred_config['in_alph_size'] = args.in_alph_size
+    args.pred_config['out_alph_size'] = args.out_alph_size
+    
     args.anc_enc_config['in_alph_size'] = args.in_alph_size
     args.anc_enc_config['seq_padding_idx'] = args.seq_padding_idx
 
     args.desc_dec_config['in_alph_size'] = args.in_alph_size
     args.desc_dec_config['seq_padding_idx'] = args.seq_padding_idx
     
-    args.pred_config['out_alph_size'] = args.out_alph_size
     
     
 def neural_hmm_share_top_level_args(args):

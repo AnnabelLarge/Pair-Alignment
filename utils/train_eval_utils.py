@@ -57,18 +57,18 @@ class metrics_for_epoch:
             self.epoch_ave_acc = 0
             
     def update_after_batch(self,
-                           batch_weight,
-                           batch_loss,
-                           batch_perpl,
-                           batch_acc = None):
+                            batch_weight,
+                            batch_loss,
+                            batch_perpl,
+                            batch_acc = None):
         self.epoch_ave_loss += batch_loss * batch_weight
         self.epoch_ave_perpl += batch_perpl * batch_weight
         if self.have_acc and (batch_acc is not None):
             self.epoch_ave_acc += batch_acc * batch_weight
     
     def write_epoch_metrics_to_tensorboard(self,
-                                           writer,
-                                           tag):
+                                            writer,
+                                            tag):
         writer.add_scalar(tag = f'Loss/{tag}', 
                           scalar_value = self.epoch_ave_loss.item(), 
                           global_step = self.epoch_idx)
@@ -88,10 +88,10 @@ class jit_compilation_tracker:
         self.epochs_with_jit_comp = np.zeros( (num_epochs,), dtype=bool )
 
     def maybe_record_jit_compilation(self,
-                                     clipped_lens,
-                                     epoch_idx):
-        if clipped_lens not in self.seen_lens:
-            self.seen_lens.add( clipped_lens )
+                                      size_tuple,
+                                      epoch_idx):
+        if size_tuple not in self.seen_lens:
+            self.seen_lens.add( size_tuple )
             self.epochs_with_jit_comp[epoch_idx] = True
     
     
@@ -257,43 +257,6 @@ def write_final_eval_results(args,
 ###############################################################################
 ### TRAIN ONLY   ##############################################################
 ###############################################################################
-class best_models_base_class:
-    def  __init__(self,
-                  initial_trainstate_objs: list):
-        self.best_epoch = -1
-        self.best_test_loss = jnp.finfo(jnp.float32).max
-        self.best_trainstates = initial_trainstate_objs
-        
-        self.prev_test_loss = jnp.finfo(jnp.float32).max
-        self.early_stopping_counter = 0
-    
-    def maybe_save_best_model(self, *args, **kwargs):
-        raise NotImplementedError('Must be model-specific')
-    
-    def check_early_stop(self,
-                         args,
-                         epoch_loss):
-        ### condition 1: if test loss stagnates or starts to go up, compared
-        ###              to previous epoch's test loss
-        cond1 = jnp.allclose( self.prev_test_loss, 
-                              jnp.minimum (self.prev_test_loss, epoch_loss), 
-                              atol=args.early_stop_cond1_atol,
-                              rtol=0 )
-
-        ### condition 2: if test loss is substatially worse than best test loss
-        cond2 = (epoch_loss - self.best_test_loss) > args.early_stop_cond2_gap
-
-        if cond1 or cond2:
-            self.early_stopping_counter += 1
-        else:
-            self.early_stopping_counter = 0
-        
-        if self.early_stopping_counter == args.patience:
-            return True
-        
-        else:
-            return False
-
 class timers:
     def __init__(self, 
                  num_epochs):
