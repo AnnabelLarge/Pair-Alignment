@@ -188,8 +188,9 @@ def rate_matrix_from_exch_equl(exchangeabilities: ArrayLike,
     
     only one exchangeability; rho and pi are properties of the class
     
-    C = number of latent site classes
-    A = alphabet size
+    C_trans: number of mixtures associated with transitions (variable) 
+    C_sites: number of latent site classes 
+    A: alphabet size 
     
     
     Arguments
@@ -197,98 +198,71 @@ def rate_matrix_from_exch_equl(exchangeabilities: ArrayLike,
     exchangeabilities : ArrayLike, (A, A)
         symmetric exchangeability parameter matrix
         
-    equilibrium_distributions : ArrayLike, (C, A)
+    equilibrium_distributions : ArrayLike, (C_trans, C_sites, A)
         amino acid equilibriums per site
     
     norm : bool
 
     Returns
     -------
-    subst_rate_mat : ArrayLike, (C, A, A)
-        rate matrix Q, for every class
+    subst_rate_mat : ArrayLike, (C_trans, C_sites, A, A)
+        rate matrix Q, for every latent site class
 
     """
-    C = equilibrium_distributions.shape[0]
-    A = equilibrium_distributions.shape[1]
+    C_tr = equilibrium_distributions.shape[0] # f
+    C_s = equilibrium_distributions.shape[1] # g
+    A = equilibrium_distributions.shape[2] # i,j 
 
     # just in case, zero out the diagonals of exchangeabilities
     exchangeabilities_without_diags = exchangeabilities * ~jnp.eye(A, dtype=bool)
 
     # Q = chi * diag(pi); q_ij = chi_ij * pi_j
-    rate_mat_without_diags = jnp.einsum('ij, cj -> cij', 
-                                        exchangeabilities_without_diags, 
-                                        equilibrium_distributions)   # (C, A, A)
+    rate_mat_without_diags = jnp.multiply( exchangeabilities_without_diags[None, None, :, :],
+                                           equilibrium_distributions[:, :, None, :] ) # (C_tr, C_s, A, A)
     
     # put the row sums in the diagonals
-    row_sums = rate_mat_without_diags.sum(axis=2)  # (C, A)
-    ones_diag = jnp.eye( A, dtype=bool )[None,:,:]   # (1, A, A)
-    ones_diag = jnp.broadcast_to( ones_diag, (C,
-                                              ones_diag.shape[1],
-                                              ones_diag.shape[2]) )
-    diags_to_add = -jnp.einsum('ci,cij->cij', row_sums, ones_diag)  #(C, A, A)
-    subst_rate_mat = rate_mat_without_diags + diags_to_add  #(C, A, A)
+    row_sums = rate_mat_without_diags.sum(axis=-1)  # (C_tr, C_s, A)
+    ones_diag = jnp.eye( A, dtype=bool )[None,None,...]   # (1, 1, A, A)
+    ones_diag = jnp.broadcast_to( ones_diag, (C_tr,
+                                              C_s,
+                                              ones_diag.shape[-2],
+                                              ones_diag.shape[-1]) ) # (C_tr, C_s, A, A)
+    diags_to_add = -jnp.multiply( row_sums[...,None], ones_diag ) # (C_tr, C_s, A, A)  
+    subst_rate_mat = rate_mat_without_diags + diags_to_add  # (C_tr, C_s, A, A)
     
     # normalize (true by default)
     if norm:
-        diag = jnp.einsum("cii->ci", subst_rate_mat)  # (C, A)
-        norm_factor = -jnp.sum(diag * equilibrium_distributions, axis=1)[:,None,None]  #(C, 1, 1)
-        subst_rate_mat = subst_rate_mat / norm_factor  # (C, A, A)
+        diag = jnp.diagonal(subst_rate_mat, axis1=-2, axis2=-1) # (C_tr, C_s, A )
+        norm_factor = -jnp.multiply( diag, equilibrium_distributions ).sum(-1) #(C_tr, C_s)
+        subst_rate_mat = subst_rate_mat / ( norm_factor[...,None,None] )  # (C_tr, C_s, A, A)
     
-    return subst_rate_mat
-
-def scale_rate_multipliers( unnormed_rate_multipliers: ArrayLike,
-                            log_class_probs: ArrayLike ):
-    """
-    scale rate multipliers such rate sum_c rho_c * P(c) = 1
-    
-    C = number of latent site classes
-    A = alphabet size
-    
-    
-    Arguments
-    ----------
-    log_class_probs : ArrayLike, (C,)
-        log-probability per class
-    
-    unnormed_rate_multipliers : ArrayLike, (C,)
-
-
-    Returns
-    -------
-    ArrayLike, (C, )
-        scaled rate multipliers
-
-    """
-    class_probs = jnp.exp(log_class_probs) #(C,)
-    norm_factor = jnp.multiply(unnormed_rate_multipliers, class_probs) #one float
-    norm_factor = norm_factor.sum()  #one float
-    return unnormed_rate_multipliers / norm_factor #(C,)
-    
+    return subst_rate_mat # (C_tr, C_s, A, A)
 
 def scale_rate_matrix(subst_rate_mat: ArrayLike,
                       rate_multipliers: ArrayLike):
     """
     Scale Q by rate multipliers, rho
     
-    C = number of latent site classes
-    K = number of rate multipliers
-    A = alphabet size
+    C_trans: number of mixtures associated with transitions (variable) 
+    C_sites: number of latent site classes 
+    K = number of rate multipliers 
+    A = alphabet size 
     
     
     Arguments
     ----------
-    subst_rate_mat : ArrayLike, (C, A, A)
+    subst_rate_mat : ArrayLike, (C_trans, C_sites, A, A)
     
-    rate_multipliers : ArrayLike, (C, K)
+    rate_multipliers : ArrayLike, (C_trans, C_sites, K)
 
     Returns
     -------
-    scaled rate matrix : ArrayLike, (C, K, A, A)
+    scaled rate matrix : ArrayLike, (C_trans, C_sites, K, A, A)
 
     """
-    subst_rate_mat = subst_rate_mat[:,None,:,:] #(C, 1, A, A)
-    rate_multipliers = rate_multipliers[...,None,None] #(C, K, 1, 1)
-    return jnp.multiply( subst_rate_mat, rate_multipliers ) #(C, K, A, A)
+    subs_rate_mat = subs_rate_mat[:,:,None,...] #(C_tr, C_s, 1, A, A)
+    rate_multipliers = rate_multipliers[...,None,None] #(C_tr, C_s, K, 1, 1)
+    return jnp.multiply( subs_rate_mat, rate_multipliers )#(C_tr, C_s, K, A, A)
 
 
 ###############################################################################
@@ -297,11 +271,12 @@ def scale_rate_matrix(subst_rate_mat: ArrayLike,
 def cond_logprob_emit_at_match_per_mixture( t_array: ArrayLike,
                                             scaled_rate_mat_per_mixture: ArrayLike ):
     """
-    P(y|x,t,c,k) = expm( \rho_{c,k} * Q_c * t )
+    P(y|x,t,c_tr,c_s,k) = expm( \rho_{c_tr, c_s, k} * Q_{c_tr, c_s} * t )
 
-    C = number of latent site classes
-    K = number of rate multipliers
-    A = alphabet size
+    C_trans: number of mixtures associated with transitions (variable)
+    C_sites: number of latent site classes 
+    K = number of rate multipliers 
+    A = alphabet size 
     T = number of branch lengths; this could be: 
         > an array of times for all samples (T; marginalize over these later)
         > an array of time per sample (T=B)
@@ -312,20 +287,21 @@ def cond_logprob_emit_at_match_per_mixture( t_array: ArrayLike,
     t_array : ArrayLike, (T,) or (B,)
         branch lengths
         
-    scaled_rate_mat_per_mixture : ArrayLike, (C, K, A, A)
+    scaled_rate_mat_per_mixture : ArrayLike, (C_trans, C_sites, K, A, A)
         \rho_{c,k} * Q_c
 
     Returns
     -------
-    cond_logprob_emit_at_match_per_mixture :  ArrayLike, (T, C, K, A, A)
-        final conditional log-probability
+    cond_logprob_emit_at_match_per_mixture :  ArrayLike, (T, C_trans, C_sites, K, A, A)
+        final conditional log-probability; NOT YET SCALED BY 
+        CLASS/RATE PROBABILITIES!!!
 
     """
-    scaled_rate_mat_per_mixture = scaled_rate_mat_per_mixture[None, ...] #(1, C, K, A, A)
-    t_array = t_array[:, None, None, None, None] #(T, 1, 1, 1)
-    operand = jnp.multiply( scaled_rate_mat_per_mixture, t_array ) #(T, C, K, A, A)
-    cond_prob_emit_at_match_per_mixture = expm(operand) #(T, C, K, A, A) 
-    cond_logprob_emit_at_match_per_mixture = safe_log( cond_prob_emit_at_match_per_mixture )  #(T, C, K, A, A)
+    operand = jnp.multiply( scaled_rate_mat_per_mixture[None,...],
+                            t_array[:, None, None, None, None] ) #(T, C_tr, C_s, K, A, A)
+    
+    cond_prob_emit_at_match_per_mixture = expm(operand) #(T, C_tr, C_s, K, A, A)
+    cond_logprob_emit_at_match_per_mixture = safe_log( cond_prob_emit_at_match_per_mixture ) #(T, C_tr, C_s, K, A, A)
     return cond_logprob_emit_at_match_per_mixture
 
 
@@ -334,9 +310,10 @@ def joint_logprob_emit_at_match_per_mixture( cond_logprob_emit_at_match_per_mixt
     """
     P(x,y|t,c,k) = P(x|c) * P(y|x,t,c,k)
 
-    C = number of latent site classes
-    K = number of possible rate multipliers
-    A = alphabet size
+    C_trans: number of mixtures associated with transitions (variable)
+    C_sites: number of latent site classes 
+    K = number of rate multipliers 
+    A = alphabet size 
     T = number of branch lengths; this could be: 
         > an array of times for all samples (T; marginalize over these later)
         > an array of time per sample (T=B)
@@ -344,108 +321,20 @@ def joint_logprob_emit_at_match_per_mixture( cond_logprob_emit_at_match_per_mixt
 
     Arguments
     ----------
-    cond_logprob_emit_at_match_per_mixture : ArrayLike, (T, C, K, A, A)
+    cond_logprob_emit_at_match_per_mixture : ArrayLike, (T, C_tr, C_s, K, A, A)
         P(y|x,c,t), calculated before
     
-    log_equl_dist_per_mixture : ArrayLike, (C, A)
+    log_equl_dist_per_mixture : ArrayLike, (C_tr, C_s, A)
         equlibrium distribution
 
     Returns
     -------
-    ArrayLike, (T, C, K, A, A)
+    ArrayLike, (T, C_tr, C_s, K, A, A)
         joint logprob
 
     """
-    log_equl_dist_per_mixture = log_equl_dist_per_mixture[None, :, None, :, None] #(1, C, 1, A, 1)
-    return ( cond_logprob_emit_at_match_per_mixture + log_equl_dist_per_mixture ) #(T, C, K, A, A)
-
-
-
-###############################################################################
-### for indp site classes, functions to marginalize over possible classes   ###
-###############################################################################
-def lse_over_match_logprobs_per_mixture(log_class_probs: jnp.array,
-                                        log_rate_mult_probs: jnp.array, 
-                                        logprob_emit_at_match_per_mixture: jnp.array):
-    """
-    For indp sites emission model
-    
-    for joint probability:
-        P(x,y|t) = \sum_c \sum_k P(c) * P(k|c) * P(x,y|t, c, k)
-    
-    for cond probability:
-        P(y|x,t) = \sum_c \sum_k P(c) * P(k|c) * P(y|x, t, c, k)
-    
-    C = number of latent site classes
-    K = number of rate multipliers
-    A = alphabet size
-    T = number of branch lengths; this could be: 
-        > an array of times for all samples (T; marginalize over these later)
-        > an array of time per sample (T=B)
-    
-
-    Arguments
-    ----------
-    log_class_probs : ArrayLike, (C,)
-        log-transformed class probabilities 
-    
-    log_rate_mult_probs : ArrayLike, (C, K)
-        log-transformed probabilities of rate multipliers, given the class
-    
-    logprob_emit_at_match_per_mixture : ArrayLike, (T, C, K, A, A)
-        log-probability of emissions at match sites (either cond or joint)
-        
-    Returns
-    -------
-    ArrayLike, (T, A, A)
-
-    """
-    # P(C, K) = P(C) * P(K | C)
-    log_mixture_weight = log_class_probs[:, None] + log_rate_mult_probs #(C, K)
-    
-    # broadcast up
-    log_mixture_weight = log_mixture_weight[None, :, :, None, None] #(1, C, K, 1, 1)
-    
-    # apply per-class and per-mixture weighting
-    weighted_logprobs = log_mixture_weight + logprob_emit_at_match_per_mixture  #(T, C, K, A, A)
-    
-    # logsumexp over C and K dimensions
-    lse_over_classes = logsumexp( weighted_logprobs, axis=1 ) #(T, K, A, A)
-    lse_over_rate_mults = logsumexp( lse_over_classes, axis=1 ) #(T, A, A)
-    
-    return lse_over_rate_mults
-
-
-def lse_over_equl_logprobs_per_mixture(log_class_probs: ArrayLike,
-                                       log_equl_dist_per_mixture: ArrayLike):
-    """
-    For indp sites emission model
-    
-    P(x) = \sum_c P(c) * P(x|c)
-    
-    C = number of latent site classes
-    A = alphabet size
-    T = number of branch lengths; this could be: 
-        > an array of times for all samples (T; marginalize over these later)
-        > an array of time per sample (T=B)
-        > a quantized array of times per sample (T = T', where T' <= T)
-    
-    
-    Arguments
-    ----------
-    log_class_probs : ArrayLike, (C,)
-        log-transformed class probabilities (i.e. mixture weights)
-    
-    log_equl_dist_per_mixture : ArrayLike, (A,)
-        log-transformed equilibrium distributions
-        
-    Returns
-    -------
-    ArrayLike, (T, A)
-    
-    """
-    weighted_logprobs = log_equl_dist_per_mixture + log_class_probs[:, None] #(C, A)
-    return logsumexp( weighted_logprobs, axis=0 )
+    log_equl_dist_per_mixture = log_equl_dist_per_mixture[None, :, :, None, :, None] #(1, C_tr, C_s, 1, A, 1)
+    return ( cond_logprob_emit_at_match_per_mixture + log_equl_dist_per_mixture ) #(T, C_tr, C_s, K, A, A)
 
 
 ###############################################################################
@@ -457,7 +346,8 @@ def fill_f81_logprob_matrix(equl: jnp.array,
                             norm_rate_matrix: bool = True,
                             return_cond: bool = False):
     """
-    C = number of latent site classes
+    C_trans: number of mixtures associated with transitions (variable)
+    C_sites: number of latent site classes
     K = number of site rates
     A = alphabet size
     
@@ -466,75 +356,163 @@ def fill_f81_logprob_matrix(equl: jnp.array,
     
     Arguments
     ----------
-    equl : ArrayLike, (C, A)
+    equl : ArrayLike, (C_trans, C_sites, A)
         log-transformed equilibrium distribution
     
-    rate_multipliers : ArrayLike, (C, K)
-        rate multiplier k for site class c; \rho_{c,k}
+    rate_multipliers : ArrayLike, (C_trans, C_sites, K)
+        rate multiplier k for site classes c_tr and c_s; \rho_{c_tr, c_s, k}
     
     t_array : ArrayLike, (T,) or (B,)
         either one time grid for all samples (T,) or unique branch
         length for each sample (B,)
     
-    norm_rate_matrix : bool
+    norm_rate_matrix : bool; default is true
         whether or not to normalize the rate matrix to 1 substitution per t
     
-    return_cond : bool
+    return_cond : bool; default is false
         whether or not to return conditional logprob; only really used
         when unit testing parts, not in full training script
     
     """
     T = t_array.shape[0]
-    C = rate_multipliers.shape[0]
+    C_tr = equilibrium_distributions.shape[0] # f
+    C_s = equilibrium_distributions.shape[1] # g
     K = rate_multipliers.shape[1]
     A = equl.shape[-1]
     
     # possibly normalize to one substitution per time t
     if norm_rate_matrix:
         # \sum_i pi_i chi_{ii} = \sum_i pi_i (1-\pi_i) = 1 - \sum_i pi_i^2
-        norm_factor = 1 / ( 1 - jnp.square(equl).sum(axis=(-1)) ) # (C,)
-        norm_factor = jnp.broadcast_to( norm_factor[:,None], (C, K) ) #(C, K)
+        norm_factor = 1 / ( 1 - jnp.square(equl).sum(axis=(-1)) ) # (C_tr, C_s)
         
     elif not norm_rate_matrix:
-        norm_factor = jnp.ones( (C, K) ) #(C, K)
-    
-    # broadcast to compatible dims
-    rate_multipliers = rate_multipliers[None,...] #(1, C, K)
-    norm_factor = norm_factor[None,...] #(1, C, K)
-    t_array = t_array[:, None, None] #(T, 1, 1)
+        norm_factor = jnp.ones( (C_tr, C_s) ) #(C_tr, C_s)
     
     # the exponential operand
-    oper = -( rate_multipliers * norm_factor * t_array ) #(T, C, K)
-    exp_oper = jnp.exp(oper) #(T, C, K)
+    oper = -( rate_multipliers[None,...] * 
+              norm_factor[None,..., None] * 
+              t_array[:, None, None, None] ) #(T, C_tr, C_s, K)
+    exp_oper = jnp.exp(oper) #(T, C_tr, C_s, K)
 
-    # broadcast again
-    exp_oper = exp_oper[...,None] #(T, C, K, 1)
-    equl = equl[None, :, None, :] #(1, C, 1, A)
+    # expand permanently, for further use
+    exp_oper = exp_oper[...,None] #(T, C_tr, C_s, K, 1)
+    equl = equl[None, :, :, None, :] #(1, C_tr, C_s, 1, A)
     
     # all off-diagonal entries, i != j
     # pi_j * ( 1 - exp(-rate*t) )
-    row = jnp.multiply( equl, ( 1 - exp_oper ) ) #(T, C, K, A)
-    cond_probs_raw = jnp.broadcast_to( row[..., None, :], (T, C, K, A, A) )  # (T, C, K, A, A)
+    row = jnp.multiply( equl, ( 1 - exp_oper ) ) #(T, C_tr, C_s, K, A)
+    cond_probs_raw = jnp.broadcast_to( row[..., None, :], (T, C_tr, C_s, K, A, A) )  #(T, C_tr, C_s, K, A, A)
     
     # diagonal entries, i = j
     #   pi_j + (1-pi_j) * exp(-rate*t)
-    diags = equl + jnp.multiply( (1-equl), exp_oper ) #(T, C, K, A)
+    diags = equl + jnp.multiply( (1-equl), exp_oper ) #(T, C_tr, C_s, K, A)
     diag_indices = jnp.arange(A)  # (A,)
-    cond_probs = cond_probs_raw.at[..., diag_indices, diag_indices].set(diags) # (T, C, K, A, A)
+    cond_probs = cond_probs_raw.at[..., diag_indices, diag_indices].set(diags) #(T, C_tr, C_s, K, A, A)
     
     if return_cond:
-        return safe_log( cond_probs ) # (T, C, K, A, A)
+        return safe_log( cond_probs ) #(T, C_tr, C_s, K, A, A)
     
     elif not return_cond:
         # return to original dimension, and get logprob_equl (as before)
-        equl = equl[0, :, 0, :] #(C, A)
-        logprob_equl = safe_log(logprob_equl) #(C, A)
+        equl = equl[0, :, :, 0, :] #(C_tr, C_s, A)
+        logprob_equl = safe_log(logprob_equl) #(C_tr, C_s, A)
         
-        # P(x) P(y|x,t) for all T, C, K
+        # P(x) P(y|x,t) for all T, C_tr, C_s, K
         joint_logprobs = joint_logprob_emit_at_match_per_mixture( cond_logprob_emit_at_match_per_mixture = cond_logprobs,
                                                                   log_equl_dist_per_mixture = logprob_equl )
         
-        return joint_logprobs # (T, C, K, A, A)
+        return joint_logprobs #(T, C_tr, C_s, K, A, A)
+    
+    
+#######################################################################
+### for emissions, functions to marginalize over possible classes   ###
+#######################################################################
+def lse_over_match_logprobs_per_mixture(log_site_class_probs: jnp.array,
+                                        log_rate_mult_probs: jnp.array, 
+                                        logprob_emit_at_match_per_mixture: jnp.array):
+    """
+    Sum over mixtures of rate multipliers and emission site classes 
+        (leave transition site classes untouched)
+    
+    for joint probability:
+        P(x,y|t,c_trans) = 
+        \sum_{c_st} \sum_k 
+        P(c_sites|c_trans) * P(k|c_trans,c_sites) * P(x,y|t, c_trans, c_sites, k)
+    
+    for cond probability:
+        P(y|x,t,c_trans) = 
+        \sum_{c_st} \sum_k 
+        P(c_sites|c_trans) * P(k|c_trans,c_sites) * P(y|x, t, c_trans, c_sites, k)
+    
+    C_trans: number of mixtures associated with transitions (variable)
+    C_sites: number of latent site classes
+    K = number of rate multipliers
+    A = alphabet size
+    T = number of branch lengths; this could be: 
+        > an array of times for all samples (T; marginalize over these later)
+        > an array of time per sample (T=B)
+    
+
+    Arguments
+    ----------
+    log_site_class_probs : ArrayLike, (C_trans, C_sites)
+        the log-probability of latent class assignment for the emission and 
+        transition latent site classes
+    
+    log_rate_mult_probs : ArrayLike (C_trans, C_sites, K)
+        the log-probability of having rate class k, given that the column 
+        is assigned to latent site class c_st, in transit class c_trans
+    
+    logprob_emit_at_match_per_mixture : ArrayLike, (T, C_trans, C_sites, K, A, A)
+        log-probability of emissions at match sites (either cond or joint)
+        
+    Returns
+    -------
+    ArrayLike, (T, C_trans, A, A)
+
+    """
+    # P(C_sites, K | C_trans) = P(C_sites | C_trans) * P(K | C_trans, C_sites)
+    log_mixture_weight = log_class_probs[:, None] + log_rate_mult_probs #(C_tr, C_s, K)
+    
+    # apply per-class and per-mixture weighting
+    weighted_logprobs = ( log_mixture_weight[None, :, :, :, None, None] + 
+                          logprob_emit_at_match_per_mixture )  #(T, C_tr, C_s, K, A, A)
+    
+    # logsumexp over C_site and K dimensions
+    lse_over_site_classes = logsumexp( weighted_logprobs, axis=2 ) #(T, C_tr, K, A, A)
+    lse_over_rate_mults = logsumexp( lse_over_site_classes, axis=2 ) #(T, C_tr, A, A)
+    
+    return lse_over_rate_mults #(T, C_tr, A, A)
+
+
+def lse_over_equl_logprobs_per_mixture(log_site_class_probs: ArrayLike,
+                                        log_equl_dist_per_mixture: ArrayLike):
+    """
+    P(x | c_trans) = \sum_{c_sites} P(c_sites | c_trans) * P(x|c_trans,c_sites)
+    
+    C_trans: number of mixtures associated with transitions (variable)
+    C_sites: number of latent site classes
+    A = alphabet size
+    
+    
+    Arguments
+    ----------
+    log_site_class_probs : ArrayLike, (C_trans, C_sites)
+        log-transformed class probabilities (i.e. mixture weights for emissions)
+    
+    log_equl_dist_per_mixture : ArrayLike, (C_trans, C_sites, A)
+        log-transformed equilibrium distributions for every latent class label
+        
+    Returns
+    -------
+    ArrayLike, (C_trans, A)
+    
+    """
+    weighted_logprobs = log_equl_dist_per_mixture + log_class_probs[..., None] #(C_tr, C_s, A)
+    return logsumexp( weighted_logprobs, axis=1 ) #(C_trans, A)
+
+
+
 
 
 ###############################################################################
@@ -1231,6 +1209,7 @@ def joint_prob_from_counts( batch: tuple[ArrayLike],
         ins_emit_score = jnp.einsum('i,bi->b',
                                     scoring_matrices_dict['logprob_emit_at_indel'], 
                                     insCounts) #(B,)
+        
         ins_emit_score = _selectively_add_time_dim( ins_emit_score,
                                                    expected_num_output_dims )
         

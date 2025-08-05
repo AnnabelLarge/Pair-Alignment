@@ -212,6 +212,8 @@ class TKF91TransitionLogprobs(ModuleBase):
     TKF91 model; used for calculating transitions in model of
         P(anc, desc, align)
     
+    C_trans: number of mixtures associated with transitions (variable)
+        > for tkf91, there can NOT be mixtures over transitions (i.e. C_trans=1)
     B = batch size; number of samples
     T = number of branch lengths; this could be: 
         > an array of times for all samples (T; marginalize over these later)
@@ -955,7 +957,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         
         """
         ### need joint TKF91 for this (which already contains lam/mu terms)
-        log_U = self.fill_joint_tkf91(out_dict)
+        log_U = self.fill_joint_tkf91(out_dict) #(T, S_from, S_to)
         
         # dims
         T = out_dict['log_alpha'].shape[0]
@@ -963,9 +965,9 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         S = log_U.shape[-1] #hidden states (like start, M, I, D, and end)
         
         # converted log values and broadcast to (T,C)
-        log_r_ext_prob = jnp.broadcast_to( safe_log(r_extend)[None,...], (T,C) )
-        log_one_minus_r = log_one_minus_x(log_r_ext_prob)
-        log_class_prob = jnp.broadcast_to( safe_log(class_probs)[None,...], (T,C) )
+        log_r_ext_prob = jnp.broadcast_to( safe_log(r_extend)[None,...], (T,C) ) #(T, C)
+        log_one_minus_r = log_one_minus_x(log_r_ext_prob) #(T, C)
+        log_class_prob = jnp.broadcast_to( safe_log(class_probs)[None,...], (T,C) ) #(T, D)
         
         
         ### entries in the matrix
@@ -975,7 +977,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         operation_mask = jnp.ones( log_U.shape, dtype=bool )
         operation_mask = operation_mask.at[:, -1, :].set(False)
         operation_mask = jnp.broadcast_to( operation_mask[:, None, :, :], 
-                                           (T,C,S,S) )
+                                            (T,C,S,S) )
         log_tkf92_rate_mat = jnp.where( operation_mask,
                                         log_one_minus_r[:,:,None,None] + log_U[:, None, :, :],
                                         jnp.broadcast_to( log_U[:, None, :, :], (T,C,S,S) ) )
@@ -984,14 +986,14 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         # duplicate each C times and stack across C_to dimension 
         # (T, C_from, C_to, S_from, S_to)
         log_tkf92_rate_mat = jnp.broadcast_to( log_tkf92_rate_mat[:,:,None,:,:], 
-                                               (T,C,C,S,S) )
+                                                (T,C,C,S,S) )
     
         # multiply by P(c) across all C_to (not including transitions that 
         #   end with <end>)
         operation_mask = jnp.ones( log_U.shape, dtype=bool )
         operation_mask = operation_mask.at[:, :, -1].set(False)
         operation_mask = jnp.broadcast_to( operation_mask[:, None, None, :, :], 
-                                           (T,C,C,S,S) )
+                                            (T,C,C,S,S) )
         log_tkf92_rate_mat = jnp.where( operation_mask,
                                         log_tkf92_rate_mat + log_class_prob[:, None, :, None, None],
                                         log_tkf92_rate_mat )

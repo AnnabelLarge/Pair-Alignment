@@ -59,149 +59,15 @@ from models.simple_site_class_predict.model_functions import (bound_sigmoid,
                                                               joint_logprob_emit_at_match_per_mixture,
                                                               fill_f81_logprob_matrix)
 
+def _load_params(in_file, target_ndim: int):
+    with open(in_file, 'rb') as f:
+        mat = jnp.load(f)
 
-###############################################################################
-### Probability of being in site classes   ####################################
-###############################################################################
-class SiteClassLogprobs(ModuleBase):
-    """
-    Probability of being in site class, P(c)
-    
-    
-    Initialize with
-    ----------------
-    config : dict
-        config['num_mixtures'] : int
-            number of emission site classes
-    
-    name : str
-        class name, for flax
-    
-    Methods here
-    ------------
-    setup
-    __call__
-    
-    Methods inherited from models.model_utils.BaseClasses.ModuleBase
-    ----------------------------------------------------------------
-    sow_histograms_scalars
-        for tensorboard logging
-    
-    """
-    config: dict
-    name: str
-    
-    def setup(self):
-        """
-        C = number of site classes
-        
-        
-        Flax Module Parameters
-        -----------------------
-        class_logits : ArrayLike (C,)
-            initialize logits from unit normal
-        
-        """
-        self.n_classes = self.config['num_mixtures']
-        
-        if self.n_classes > 1:
-            self.class_logits = self.param('class_logits',
-                                            nn.initializers.normal(),
-                                            (self.n_classes,),
-                                            jnp.float32) #(C,)
-        
-    def __call__(self,
-                 sow_intermediates: bool):
-        """
-        C: number of site classes
-        
-        
-        Arguments
-        ----------
-        sow_intermediates : bool
-            switch for tensorboard logging
-          
-        Returns
-        -------
-        log_class_probs : ArrayLike, (C,)
-            log-probability of being in each site class, P(c); if only one
-            site class, then logP(c) = 0
-          
-        """
-        if self.n_classes > 1:
-            log_class_probs = nn.log_softmax(self.class_logits) #(C,)
-        
-            # tensorboard logging
-            if sow_intermediates:
-                for i in range(log_class_probs.shape[0]):
-                    val_to_write = jnp.exp( log_class_probs[i] )
-                    lab = f'{self.name}/prob of class {i}'
-                    self.sow_histograms_scalars(mat= val_to_write, 
-                                                label=lab, 
-                                                which='scalars')
-                    del lab
-        
-        else:
-            log_class_probs = jnp.array([0]) #(1,)
-            
-        return log_class_probs
+    # Add leading singleton dims until desired ndim is reached
+    while mat.ndim < target_ndim:
+        mat = jnp.expand_dims(mat, axis=0)
 
-
-class SiteClassLogprobsFromFile(ModuleBase):
-    """
-    load probabilities of being in site class, P(c)
-    
-    If only using one model (no mixtures), then this does NOT read the file;
-      it just returns log(1) = 0
-    
-    
-    Initialize with
-    ----------------
-    config : dict
-        config['filenames']['class_probs'] :  str
-            file containing the class probabilities to load
-        
-    name : str
-        class name, for flax
-    
-    Methods here
-    ------------
-    setup
-    __call__
-    
-    """
-    config: dict
-    name: str
-    
-    def setup(self):
-        """
-        
-        Flax Module Parameters
-        -----------------------
-        none
-        
-        """
-        self.n_classes = self.config['num_mixtures']
-        
-        if self.n_classes > 1:
-            in_file = self.config['filenames']['class_probs']
-            with open(in_file,'rb') as f:
-                class_probs = jnp.load(f)
-            self.log_class_probs = safe_log(class_probs) #(C,)
-        
-        else:
-            self.log_class_probs = jnp.array([0])
-    
-    def __call__(self,
-                 **kwargs):
-        """
-        Returns
-        -------
-        log_class_probs : ArrayLike, (C,)
-            log-probability of being in each site class, P(c)
-          
-        """
-        return self.log_class_probs #(C,)
+    return mat
 
 
 ###############################################################################
@@ -209,20 +75,25 @@ class SiteClassLogprobsFromFile(ModuleBase):
 ###############################################################################
 class RateMultipliersPerClass(ModuleBase):
     """
-    C: number of latent site classes
-    K: numer of rate multipliers
+    C_trans: number of mixtures associated with transitions (variable)
+    C_sites: number of latent site classes
+    K: number of rate multipliers
     
     
-    Generate c * k rate multipliers, and probabilty of rate multiplier k, 
-      given class c: P(k|c)
+    Generate C_trans * C_sites * K rate multipliers, and 
+      probabilty of rate multiplier k, given mixture classes: P(k|c_site, c_trans)
     
     
     Initialize with
     ----------------
     config : dict
-        config['num_mixtures'] : int
-            number of mixtures
+        config['num_transit_mixtures'] : int
+            number of mixtures associated with the TRANSITIONS 
+            (like fragments, domains, etc.)
     
+        config['num_site_mixtures'] : int
+            number of mixtures associated with the EMISSIONS
+        
         config['k_rate_mults'] : int
             number of rate multipliers
             
@@ -230,7 +101,9 @@ class RateMultipliersPerClass(ModuleBase):
             min and max rate multiplier; default is (0.01, 10)
 
         config['norm_rate_mults'] : bool
-            if true, enforce constraint: \sum_c \sum_k P(c,k) * \rho_{c,k} = 1
+            if true, enforce constraint: 
+            \sum_{c_transit} \sum_{c_sites} \sum_k 
+                P(c_trans, c_sites, k) * \rho_{c_transit, c_sites, k} = 1
     
     name : str
         class name, for flax
@@ -255,35 +128,41 @@ class RateMultipliersPerClass(ModuleBase):
     
     def setup(self):
         """
-        K = number of site classes
-        C = number of site classes
+        C_trans: number of mixtures associated with transitions (variable)
+        C_sites: number of latent site classes
+        K: numer of rate multipliers
         
         a shared method; shapes vary depending on how this module is used
         
         
         Flax Module Parameters
         -----------------------
-        rate_mult_prob_logits : ArrayLike 
-            if fitting P(k|c): (C, K)
-            if fitting P(k): (K,)
+        rate_mult_prob_logits : ArrayLike (C_trans, C_sites, K)
+            logits for probability of selecting rate multiplier k;
+            P(k|c_trans, c_sites)
         
-        rate_mult_logits : ArrayLike (K,)
-            if rate multipliers are per class: (C, K)
-            if rate multipliers are independent: (K,)
+        rate_mult_logits : ArrayLike (C_trans, C_sites, K)
+            logits for rate multiplier k; \rho_{c_trans, c_sites, k}
         
         """
         ### read config file
-        self.num_mixtures = self.config['num_mixtures']
-        self.k_rate_mults = self.config['k_rate_mults']
+        self.num_transit_mixtures = self.config['num_transit_mixtures'] # C_tr
+        self.num_site_mixtures = self.config['num_site_mixtures'] # C_s
+        self.k_rate_mults = self.config['k_rate_mults'] #K
         
         # optional
         self.rate_mult_min_val, self.rate_mult_max_val  = self.config.get( 'rate_mult_range', (0.01, 10) )
         
-        # sometimes, might use model simplifications
-        # also decide norm_rate_mult here; sometimes I read this from config
-        #   file, but at other times, I never have to normalize my rate 
-        #   multipliers
-        self._set_model_simplification_flags
+        # sometimes, might use model simplifications; also set 
+        # norm_rate_mults flag here
+        #
+        # adds attributes:
+        # > self.prob_rate_mult_is_one: P(k|...)=1, because no mixtures over 
+        #   rates (but could site have mixtures over sites or transition classes;
+        #   this just restricts the model to have one unique rate for ever one
+        #   of these other classes)
+        # > self.use_unit_rate_mult: \rho = 1, because no mixtures present at 
+        #   all; sets norm_rate_mults to false
         self._set_model_simplification_flags()
         
             
@@ -292,27 +171,22 @@ class RateMultipliersPerClass(ModuleBase):
             self.rate_multiplier_activation = partial(bound_sigmoid,
                                                min_val = self.rate_mult_min_val,
                                                max_val = self.rate_mult_max_val)
-        
-            # if \rho_{c, k}, then logits are (C, K)
-            # if \rho_{k}, then logits are (K,)
-            self._init_rate_logits()
+            self._init_rate_logits() #(C_tr, C_s, K)
         
         
         ### probability of choosing a specific rate multiplier
         if not self.prob_rate_mult_is_one:
-            # if P(k | c), then logits are (C, K)
-            # if P(k), then logits are (K,)
-            self._init_prob_logits()            
+            self._init_prob_logits() #(C_tr, C_s, K)
     
         
     def __call__(self,
                  sow_intermediates: bool,
-                 log_class_probs: jnp.array):
+                 log_site_class_probs: jnp.array,
+                 log_transit_class_probs: jnp.array):
         """
-        K = number of site classes
-        C: number of site classes
-        
-        a shared method; shapes vary depending on how this module is used
+        C_trans: number of mixtures associated with transitions (variable)
+        C_sites: number of latent site classes
+        K: number of rate multipliers
         
         
         Arguments
@@ -320,30 +194,33 @@ class RateMultipliersPerClass(ModuleBase):
         sow_intermediates : bool
             switch for tensorboard logging
         
-        log_class_probs : ArrayLike, (C,)
+        log_site_class_probs : ArrayLike, (C_trans, C_cites)
             (from a different module); the log-probability of latent class 
-            assignment
+            assignment for the emission site mixture
+        
+        log_transit_class_probs : ArrayLike, (C_trans,)
+            (from a different module); the log-probability of latent class 
+            assignment for the transition site mixture
         
         Returns
         -------
-        log_rate_mult_probs : ArrayLike
+        log_rate_mult_probs : ArrayLike (C_trans, C_sites, K)
             the log-probability of having rate class k, given that the column 
-            is assigned to latent class c
-            > if fitting P(k|c): (C, K)
-            > if fitting P(k): (K,)
+            is assigned to latent site class c_st, in transit class c_trans
         
-        rate_multipliers : ArrayLike, (C, K)
-            the actual rate multiplier for rate class k and latent class c
-            > if rate multipliers are per class: (C, K)
-            > if rate multipliers are independent: (K,)
+        rate_multipliers : ArrayLike, (C_trans, C_sites, K)
+            the actual rate multiplier for rate class k, latent site class 
+              c_sites, and latent transition class c_trans
           
         """
         # all outputs must be this size
-        out_size = ( self.num_mixtures, self.k_rate_mults )
+        out_size = ( self.num_transit_mixtures, 
+                     self.num_site_mixtures,
+                     self.k_rate_mults ) #(C_tr, C_s, K)
             
-        ### P(K|C) or P(K)
+        ### P(K|C_sites, C_trans)
         if not self.prob_rate_mult_is_one:
-            log_rate_mult_probs = nn.log_softmax( self.rate_mult_prob_logits, axis=-1 ) #(C, K) or (K,)
+            log_rate_mult_probs = nn.log_softmax( self.rate_mult_prob_logits, axis=-1 ) #(C_tr, C_s, K) or (C_tr, K)
             
             if sow_intermediates:
                 lab = (f'{self.name}/prob of rate multipliers')
@@ -351,17 +228,14 @@ class RateMultipliersPerClass(ModuleBase):
                                             label=lab, 
                                             which='scalars')
                 del lab
-
-            # possibly broadcast up to (C, K)
-            log_rate_mult_probs = self._maybe_duplicate(log_rate_mult_probs) #(C, K)
-        
+                
         elif self.prob_rate_mult_is_one:
-            log_rate_mult_probs = jnp.zeros( out_size ) #(C, K) 
+            log_rate_mult_probs = jnp.zeros( out_size ) #(C_tr, C_s, K) 
         
         
-        ### \rho_{c,k}
+        ### \rho_{c_trans, c_sites, k}
         if not self.use_unit_rate_mult:
-            rate_multipliers = self.rate_multiplier_activation( self.rate_mult_logits ) #(C, K) or (K,)
+            rate_multipliers = self.rate_multiplier_activation( self.rate_mult_logits ) #(C_tr, C_s, K) or (C_tr, K)
     
             if sow_intermediates:
                 lab = (f'{self.name}/rate multipliers')
@@ -370,48 +244,46 @@ class RateMultipliersPerClass(ModuleBase):
                                             which='scalars')
                 del lab
         
-            # possibly normalize to enforce one of these constraints:
-            # \sum_c \sum_k P(c, k) * \rho_{c,k} = 1
-            # \sum_k P(k) * \rho_{k} = 1
+            # possibly normalize to enforce average rate multiplier of one
             if self.norm_rate_mults:
                 norm_factor = self._get_norm_factor(rate_multipliers = rate_multipliers,
-                                                    log_rate_mult_probs = log_rate_mult_probs,
-                                                    log_class_probs = log_class_probs) #float
-                rate_multipliers = rate_multipliers / norm_factor #(C, K) or (K,)
+                                                    log_transit_class_probs = log_transit_class_probs,
+                                                    log_site_class_probs = log_site_class_probs,
+                                                    log_rate_mult_probs = log_rate_mult_probs ) #float
+                rate_multipliers = rate_multipliers / norm_factor #(C_tr, C_s, K) or (C_tr, K)
             
-            # possibly broadcast up to (C, K)
-            rate_multipliers = self._maybe_duplicate(rate_multipliers) #(C, K)
-        
         elif self.use_unit_rate_mult:
-            rate_multipliers = jnp.ones( out_size ) #(C, K) 
+            rate_multipliers = jnp.ones( out_size ) #(C_tr, C_s, K)
                 
         return (log_rate_mult_probs, rate_multipliers)
         
     
     def _set_model_simplification_flags(self):
         """
-        If C = 1 and K = 1: no mixtures
+        C_mix = C_sites + C_transits
+        
+        If C_mix = 1 and K = 1: no mixtures
             > prob_rate_mult_is_one = True
             > use_unit_rate_mult = True
             > don't ever have to normalize
         
-        If C > 1 and K = 1: then there's one unique rate per site class 
+        If C_mix > 1 and K = 1: then there's one unique rate per site class 
             (as was done in previous results); for each class, the probability
             of selecting the single possible rate multiplier is 1
             > prob_rate_mult_is_one = True
             > use_unit_rate_mult = False
-            > may have to normalize rates by log_class_probs
+            > may have to normalize rates by log_site_class_probs
         
-        If C = 1 and K > 1: no mixtures over site classes, but still
-            have a mixture over rate multipliers
+        If C_mix = 1 and K > 1: no mixtures over site classes, but still
+            have a mixture over rate multipliers (and potentially, transitions)
             > prob_rate_mult_is_one = False
             > use_unit_rate_mult = False
             > may have to normalize rates by log_rate_mult_probs
         
-        If C > 1 and K > 1: mixtures over both
+        If C_mix > 1 and K > 1: mixtures over both
             > prob_rate_mult_is_one = False
             > use_unit_rate_mult = False
-            > may have to normalize rates by log_rate_mult_probs AND log_class_probs
+            > may have to normalize rates by log_rate_mult_probs AND log_site_class_probs
         
         """
         # defaults
@@ -419,13 +291,13 @@ class RateMultipliersPerClass(ModuleBase):
         use_unit_rate_mult = False
         norm_rate_mults = self.config.get('norm_rate_mults', True)
         
-        # if k_rate_mults = 1, then P(k|c) = 1 ( or P(k)=1 )
+        # if k_rate_mults = 1, then P(k|c_trans, c_sites) = 1
         if self.k_rate_mults == 1:
             prob_rate_mult_is_one = True
             
-            # if num_mixtures = 1 AND k_rate_mults = 1, then just use unit rate
+            # if there are NO mixtures, then just use unit rate multiplier
             # also NEVER normalize the rate multiplier (since its just one)
-            if self.num_mixtures == 1:
+            if (self.num_transit_mixtures + self.num_site_mixtures) == 1:
                 use_unit_rate_mult = True
                 norm_rate_mults = False
                 
@@ -436,48 +308,61 @@ class RateMultipliersPerClass(ModuleBase):
     
     def _init_prob_logits(self):
         """
-        initialize the (C, K) logits for P(K|C)
+        initialize the (C_trans, C_sites, K) logits for P(K|C_trans, C_sites)
         
-        self.rate_mult_prob_logits is a flax parameter
+        self.rate_mult_prob_logits is the flax parameter
         """
-        out_size = ( self.num_mixtures, self.k_rate_mults )
+        out_size = ( self.num_transit_mixtures, 
+                     self.num_site_mixtures,
+                     self.k_rate_mults ) #(C_tr, C_s, K)
+        
         self.rate_mult_prob_logits = self.param('rate_mult_prob_logits',
                                         nn.initializers.normal(),
                                         out_size,
-                                        jnp.float32) #(C,K)
+                                        jnp.float32)  #(C_tr, C_s, K)
     
     def _init_rate_logits(self):
         """
-        initialize the (C, K) logits for rate multiplier \rho_{c,k}
-        self.rate_mult_logits is a flax parameter
+        initialize the (C_trans, C_sites, K) logits for \rho_{c_trans, c_sites, k}
+        self.rate_mult_logits is the flax parameter
         """
-        out_size = ( self.num_mixtures, self.k_rate_mults )
+        out_size = ( self.num_transit_mixtures, 
+                     self.num_site_mixtures,
+                     self.k_rate_mults ) #(C_tr, C_s, K)
+        
         self.rate_mult_logits = self.param('rate_mult_logits',
                                            nn.initializers.normal(),
                                            out_size,
-                                           jnp.float32) #(C,K)
+                                           jnp.float32)  #(C_tr, C_s, K)
     
     def _get_norm_factor(self,
                          rate_multipliers: jnp.array,
+                         log_transit_class_probs: jnp.array,
+                         log_site_class_probs: jnp.array,
                          log_rate_mult_probs: jnp.array,
-                         log_class_probs: jnp.array,
                          *args,
                          **kwargs):
         """
         return the normalization factor needed for constraint:
-            \sum_c \sum_k P(c, k) * \rho_{c, k} = 1
+            \sum_{c_transit} \sum_{c_sites} \sum_k 
+                P(c_trans, c_sites, k) * \rho_{c_transit, c_sites, k} = 1
         
         Arguments:
         ----------
-        rate_multipliers : ArrayLike, (C,K)
-            \rho_{c, k}; the un-normalized rate multipliers
+        rate_multipliers : ArrayLike, (C_trans, C_sites, K)
+            \rho_{c_trans, c_sites, k}; the un-normalized rate multipliers
             
-        log_rate_mult_probs : ArrayLike, (C,K)
-            P(k | c); probability of having rate class k, given that the 
-            latent class assignment is c
+        log_transit_class_probs : ArrayLike, (C_trans)
+            P(c_trans); marginal probability of transition latent class 
+            assignment c_trans (for example, fragment type c_frag)
         
-        log_class_probs : ArrayLike, (C,)
-            P(c); marginal probability of latent class assignment c
+        log_site_class_probs : ArrayLike, (C_trans, C_sites)
+            P(c_sites | c_trans); probability of site class, given transition
+            latent class assignment
+        
+        log_rate_mult_probs : ArrayLike, (C_trans, C_sites, K)
+            P(k | c_trans, c_sites); probability of assigning a specific rate
+            multiplier, given transition and site class assignment
         
         
         Returns:
@@ -485,41 +370,45 @@ class RateMultipliersPerClass(ModuleBase):
         norm_factor : float
         
         """
-        # logP(C) + logP(K|C) = logP(C, K)
-        joint_logprob_class_rate_mult = log_class_probs[:, None] + log_rate_mult_probs #(C, K)
+        # logP(C_trans) + logP(C_sites | C_trans) + logP(K|C_sites, C_trans) =
+        #   logP(C_trans, C_sites, K)
+        log_joint_mix_weight = ( log_transit_class_probs[...,None,None] +
+                                 log_site_class_probs[...,None] +
+                                 log_rate_mult_probs ) #(C_tr, C_s, K)
         
-        # exp( logP(C, K) ) = P(C, K)
-        joint_prob_class_rate_mult = jnp.exp(joint_logprob_class_rate_mult) #(C, K)
+        # P(C_trans, C_sites, K) = exp( logP(C_trans, C_sites, K) )
+        joint_mix_weight = jnp.exp( log_joint_mix_weight ) #(C_tr, C_s, K)
         
-        # \sum_c \sum_k P(c, k) * \rho_{c, k}
-        norm_factor = jnp.multiply(joint_prob_class_rate_mult, rate_multipliers).sum() #float
+        # normalization factor is
+        #   sum_{c_trans, c_sites, k} 
+        #   P(C_trans, C_sites, K) * \rho(c_trans, c_sites, k)
+        norm_factor = jnp.multiply(joint_mix_weight, rate_multipliers).sum() #float
         
         return norm_factor
-    
-    def _maybe_duplicate(self, 
-                         matrix):
-        """
-        this is a placeholder function, for now
-        """
-        return matrix #(C,K)
         
     
 class IndpRateMultipliers(RateMultipliersPerClass):
     """
-    C: number of latent site classes
+    C_trans: number of mixtures associated with transitions (variable)
+    C_sites: number of latent site classes
     K: numer of rate multipliers
     
+    Generate C_trans * C_sites * K rate multipliers, and 
+      probabilty of rate multiplier k, given mixture classes: P(k|c_site, c_trans)
     
-    Generate c * k rate multipliers, and probabilty of rate multiplier k, P(k)
-    
-    THIS ASSUMES K IS INDEPENDENT OF C
+    THIS ASSUMES K IS INDEPENDENT OF C_sites and C_trans (past models make
+      this assumption)
     
     
     Initialize with
     ----------------
     config : dict
-        config['num_mixtures'] : int
-            number of mixtures
+        config['num_transit_mixtures'] : int
+            number of mixtures associated with the TRANSITIONS 
+            (like fragments, domains, etc.)
+            
+        config['num_site_mixtures'] : int
+            number of mixtures associated with the EMISSIONS
     
         config['k_rate_mults'] : int
             number of rate multipliers
@@ -556,30 +445,33 @@ class IndpRateMultipliers(RateMultipliersPerClass):
       
     def _set_model_simplification_flags(self):
         """
-        If C = 1 and K = 1: no mixtures
+        C_mix = C_sites + C_transits
+        
+        If C_mix = 1 and K = 1: no mixtures
             > prob_rate_mult_is_one = True
             > use_unit_rate_mult = True
             > dont ever have to normalize
         
-        If C > 1 and K = 1: no mixtures over rate multipliers; all classes 
+        If C_mix > 1 and K = 1: no mixtures over rate multipliers; all classes 
             use rate multiplier of 1
             > prob_rate_mult_is_one = True
             > use_unit_rate_mult = True
             > also dont ever have to normalize, since rate multipliers are
               independent of class label
         
-        If C = 1 and K > 1: no mixtures over site classes, but still
+        If C_mix = 1 and K > 1: no mixtures over site classes, but still
             have a mixture over rate multipliers
             > prob_rate_mult_is_one = False
             > use_unit_rate_mult = False
             > might normalize over log_rate_mult_probs
         
-        If C > 1 and K > 1: mixtures over both, but the same mixture over rate 
+        If C_mix > 1 and K > 1: mixtures over both, but the same mixture over rate 
             multipliers is used for all possible latent site class labels
             > prob_rate_mult_is_one = False
             > use_unit_rate_mult = False
-            > might normalize over log_rate_mult_probs (but not log_class_probs,
-              since this is independent of class label)
+            > might normalize over log_rate_mult_probs (but not 
+              log_site_class_probs or log_transit_class_probs,
+              since this is independent of other mixture class labels)
         """
         if self.k_rate_mults == 1:
             self.prob_rate_mult_is_one = True
@@ -594,25 +486,27 @@ class IndpRateMultipliers(RateMultipliersPerClass):
         
     def _init_prob_logits(self):
         """
-        initialize the (K,) logits for P(K)
+        initialize the (1, 1, K) logits (have dummy axes for other mixtures) 
+          for P(k)
         
         self.rate_mult_prob_logits is a flax parameter
         """
         self.rate_mult_prob_logits = self.param( 'rate_mult_prob_logits',
                                             nn.initializers.normal(),
-                                            self.k_rate_mults,
-                                            jnp.float32 ) #(K,)
+                                            (1, 1, self.k_rate_mults),
+                                            jnp.float32 ) #(1, 1, K)
     
     def _init_rate_logits(self):
         """
-        initialize the (K,) logits for rate multiplier \rho_{k}
+        initialize the (1, 1, K) logits (have dummy axes for other mixtures) 
+          for rate multiplier \rho_{k}
         
         self.rate_mult_logits is a flax parameter
         """
         self.rate_mult_logits = self.param( 'rate_mult_logits',
                                        nn.initializers.normal(),
-                                       self.k_rate_mults,
-                                       jnp.float32 ) #(K,)
+                                       (1, 1, self.k_rate_mults),
+                                       jnp.float32 ) #(1,1,K)
         
     def _get_norm_factor(self,
                          rate_multipliers: jnp.array,
@@ -625,10 +519,10 @@ class IndpRateMultipliers(RateMultipliersPerClass):
         
         Arguments:
         ----------
-        rate_multipliers : ArrayLike, (K,)
+        rate_multipliers : ArrayLike, (1,1,K)
             \rho_{k}; the un-normalized rate multipliers
             
-        log_rate_mult_probs : ArrayLike, (K,)
+        log_rate_mult_probs : ArrayLike, (1,1,K)
             P(k); probability of having rate class k
         
         
@@ -638,26 +532,18 @@ class IndpRateMultipliers(RateMultipliersPerClass):
         
         """
         # exp( logP(K) ) = P(K)
-        rate_mult_probs = jnp.exp(log_rate_mult_probs) #(K)
+        mix_weights = jnp.exp(log_rate_mult_probs) #(1, 1, K)
         
         # \sum_k P(K) \rho_{k} 
-        norm_factor = jnp.multiply( rate_mult_probs, rate_multipliers ).sum()
+        norm_factor = jnp.multiply( mix_weights, rate_multipliers ).sum() #float
         
         return norm_factor
-    
-    def _maybe_duplicate(self, 
-                         matrix):
-        """
-        matrix is technically (K,), and I need to duplicate to (C, K)
-        """
-        out_size = ( self.num_mixtures, self.k_rate_mults )
-        return jnp.broadcast_to( matrix[None,:], out_size )
-
 
 class RateMultipliersPerClassFromFile(RateMultipliersPerClass):
     """
-    C: number of latent site classes
-    K: numer of rate multipliers
+    C_trans: number of mixtures associated with transitions (variable)
+    C_sites: number of latent site classes
+    K: number of rate multipliers
     
     load probabilities and rate multipliers from files
     
@@ -665,8 +551,12 @@ class RateMultipliersPerClassFromFile(RateMultipliersPerClass):
     Initialize with
     ----------------
     config : dict
-        config['num_mixtures'] : int
-            number of mixtures
+        config['num_transit_mixtures'] : int
+            number of mixtures associated with the TRANSITIONS 
+            (like fragments, domains, etc.)
+    
+        config['num_site_mixtures'] : int
+            number of mixtures associated with the EMISSIONS
             
         config['k_rate_mults'] : int
             number of rate multipliers
@@ -678,7 +568,9 @@ class RateMultipliersPerClassFromFile(RateMultipliersPerClass):
             file of probabilities
             
         config['norm_rate_mults'] : bool
-            if true, enforce constraint: \sum_c \sum_k P(c,k) * \rho_{c,k} = 1
+            if true, enforce constraint: 
+            \sum_{c_transit} \sum_{c_sites} \sum_k 
+                P(c_trans, c_sites, k) * \rho_{c_transit, c_sites, k} = 1
     
     name : str
         class name, for flax
@@ -696,64 +588,103 @@ class RateMultipliersPerClassFromFile(RateMultipliersPerClass):
     """
     def setup(self):
         ### read config file
-        self.num_mixtures = self.config['num_mixtures']
-        self.k_rate_mults = self.config['k_rate_mults']
-        out_size = ( self.num_mixtures, self.k_rate_mults )
+        self.num_transit_mixtures = self.config['num_transit_mixtures'] #C_tr
+        self.num_site_mixtures = self.config['num_site_mixtures'] #C_s
+        self.k_rate_mults = self.config['k_rate_mults'] #K
+        out_size = ( self.num_transit_mixtures,
+                     self.num_site_mixtures, 
+                     self.k_rate_mults )
         
         # possibly simplify model setup
         self._set_model_simplification_flags()
         
         
-        ### rate files: rate multipliers
+        ### read files: rate multipliers
         if not self.use_unit_rate_mult:
             in_file = self.config['filenames']['rate_mults']
-            with open(in_file,'rb') as f:
-                self.rate_multipliers = jnp.load(f) #(C, K)
+            self.rate_multipliers = _load_params(in_file, target_ndim=3) #(C_tr, C_s, K)
+            del in_file
         
         elif self.use_unit_rate_mult:
-            self.rate_multipliers = jnp.ones( out_size ) #(C, K) 
+            self.rate_multipliers = jnp.ones( out_size ) #(C_tr, C_s, K)
             
             
-        ### read files: P(k|c)
+        ### read files: P(k|c_trans, c_sites)
         if not self.prob_rate_mult_is_one:
             in_file =  self.config['filenames']['rate_mult_probs']
-            with open(in_file,'rb') as f:
-                rate_mult_probs = jnp.load(f) #(C, K)
-            self.log_rate_mult_probs = safe_log( rate_mult_probs )
-        
+            self.log_rate_mult_probs = _load_params(in_file, target_ndim=3) #(C_tr, C_s, K)
+            del in_file
+            
         elif self.prob_rate_mult_is_one:
-            self.log_rate_mult_probs = jnp.zeros( out_size ) #(C, K) 
+            self.log_rate_mult_probs = jnp.zeros( out_size ) #(C_tr, C_s, K)
             
         
     def __call__(self,
                  sow_intermediates: bool,
-                 log_class_probs: jnp.array):
-        # P(K|C), \rho_{c,k}
-        log_rate_mult_probs = self.log_rate_mult_probs #(C,K)
-        rate_multipliers = self.rate_multipliers #(C,K)
+                 log_site_class_probs: jnp.array,
+                 log_transit_class_probs: jnp.array):
+        """
+        C_trans: number of mixtures associated with transitions (variable)
+        C_sites: number of latent site classes
+        K: number of rate multipliers
+        
+        
+        Arguments
+        ----------
+        sow_intermediates : bool
+            switch for tensorboard logging
+        
+        log_site_class_probs : ArrayLike, (C_trans, C_cites)
+            (from a different module); the log-probability of latent class 
+            assignment for the emission site mixture
+        
+        log_transit_class_probs : ArrayLike, (C_trans,)
+            (from a different module); the log-probability of latent class 
+            assignment for the transition site mixture
+        
+        Returns
+        -------
+        log_rate_mult_probs : ArrayLike (C_trans, C_sites, K)
+            the log-probability of having rate class k, given that the column 
+            is assigned to latent class c
+        
+        rate_multipliers : ArrayLike, (C_trans, C_sites, K)
+            the actual rate multiplier for rate class k, latent site class 
+              c_sites, and latent transition class c_trans
+          
+        """
+        # P(K|C_trans, C_sites), \rho_{c_trans, c_sites, k}
+        log_rate_mult_probs = self.log_rate_mult_probs #(C_tr, C_s, K)
+        rate_multipliers = self.rate_multipliers #(C_tr, C_s, K)
         
         # possibly normalize
         if self.norm_rate_mults:
             norm_factor = self._get_norm_factor(rate_multipliers = rate_multipliers,
-                                                log_rate_mult_probs = log_rate_mult_probs,
-                                                log_class_probs = log_class_probs) #float
-            rate_multipliers = rate_multipliers / norm_factor #(C, K)
-            
+                                                log_transit_class_probs = log_transit_class_probs,
+                                                log_site_class_probs = log_site_class_probs,
+                                                log_rate_mult_probs = log_rate_mult_probs ) #float
+            rate_multipliers = rate_multipliers / norm_factor #(C_tr, C_s, K) or (C_tr, K)
+        
         return (log_rate_mult_probs, rate_multipliers)
 
 
 class IndpRateMultipliersFromFile(IndpRateMultipliers):
     """
-    C: number of latent site classes
-    K: numer of rate multipliers
+    C_trans: number of mixtures associated with transitions (variable)
+    C_sites: number of latent site classes
+    K: number of rate multipliers
     
     load probabilities and rate multipliers from files
     
     Initialize with
     ----------------
     config : dict
-        config['num_mixtures'] : int
-            number of mixtures
+        config['num_transit_mixtures'] : int
+            number of mixtures associated with the TRANSITIONS 
+            (like fragments, domains, etc.)
+    
+        config['num_site_mixtures'] : int
+            number of mixtures associated with the EMISSIONS
             
         config['k_rate_mults'] : int
             number of rate multipliers
@@ -774,79 +705,349 @@ class IndpRateMultipliersFromFile(IndpRateMultipliers):
     ------------
     setup
     __call__
-    _maybe_dedup
     
     Methods inherited from IndpRateMultipliers
     -------------------------------------------
     _set_model_simplification_flags
     _get_norm_factor
-    _maybe_duplicate
     
     """
     def setup(self):
         ### read config file
-        self.num_mixtures = self.config['num_mixtures']
-        self.k_rate_mults = self.config['k_rate_mults']
+        self.num_transit_mixtures = self.config['num_transit_mixtures'] #C_tr
+        self.num_site_mixtures = self.config['num_site_mixtures'] #C_s
+        self.k_rate_mults = self.config['k_rate_mults'] #K
         
-        # possibly simplify model setup
+        # possibly simplify model setup; also set 
+        # norm_rate_mults flag here
+        #
+        # adds attributes:
+        # > self.prob_rate_mult_is_one: P(k|...)=1, because no mixtures over 
+        #   rates (but could site have mixtures over sites or transition classes;
+        #   this just restricts the model to have one unique rate for ever one
+        #   of these other classes)
+        # > self.use_unit_rate_mult: \rho = 1, because no mixtures present at 
+        #   all; sets norm_rate_mults to false
         self._set_model_simplification_flags()
         
         
-        ### rate files: rate multipliers
+        ### read files: rate multipliers
         if not self.use_unit_rate_mult:
             in_file = self.config['filenames']['rate_mults']
-            with open(in_file,'rb') as f:
-                rate_multipliers = jnp.load(f) #(C, K) or (K,)
-            self.rate_multipliers = self._maybe_dedup(rate_multipliers) #(K,)
-            
+            self.rate_multipliers = _load_params(in_file, target_ndim=3) #(1, 1, K)
+            del in_file
+        
         elif self.use_unit_rate_mult:
-            self.rate_multipliers = jnp.ones( (self.k_rate_mults,) ) #(K,)
+            self.rate_multipliers = jnp.ones( (1, 1, self.k_rate_mults,) ) #(1, 1, K)
             
             
-        ### read files: P(k|c)
+        ### read files: P(k|c_trans, c_sites)
         if not self.prob_rate_mult_is_one:
             in_file =  self.config['filenames']['rate_mult_probs']
-            with open(in_file,'rb') as f:
-                rate_mult_probs = jnp.load(f) #(C, K) or (K,)
-            rate_mult_probs = self._maybe_dedup(rate_mult_probs) #(K,)
-            self.log_rate_mult_probs = safe_log( rate_mult_probs ) #(K,)
-        
+            self.log_rate_mult_probs = _load_params(in_file, target_ndim=3) #(1, 1, K)
+            del in_file
+            
         elif self.prob_rate_mult_is_one:
-            self.log_rate_mult_probs = jnp.zeros( (self.k_rate_mults,) ) #(K,)
+            self.log_rate_mult_probs = jnp.zeros( (1, 1, self.k_rate_mults) ) #(1, 1, K)
     
     
     def __call__(self,
                  sow_intermediates: bool,
-                 log_class_probs: Optional[jnp.array] = None):
-        # P(K|C), \rho_{c,k}
-        log_rate_mult_probs = self.log_rate_mult_probs #(K,)
-        rate_multipliers = self.rate_multipliers #(K,)
+                 *args,
+                 **kwargs):
+        """
+        Arguments
+        ----------
+        sow_intermediates : bool
+            switch for tensorboard logging
+        
+        Returns
+        -------
+        log_rate_mult_probs : ArrayLike (1, 1, K)
+            the log-probability of having rate class k
+        
+        rate_multipliers : ArrayLike, (1, 1, K)
+            the actual rate multiplier for rate class k
+          
+        """
+        # P(K|C_trans, C_sites), \rho_{c_trans, c_sites, k}
+        log_rate_mult_probs = self.log_rate_mult_probs #(1, 1, K)
+        rate_multipliers = self.rate_multipliers #(1, 1, K)
         
         # possibly normalize
         if self.norm_rate_mults:
             norm_factor = self._get_norm_factor(rate_multipliers = rate_multipliers,
                                                 log_rate_mult_probs = log_rate_mult_probs ) #float
-            rate_multipliers = rate_multipliers / norm_factor #(K,)
-            
-        # broadcast both back up to (C, K)
-        log_rate_mult_probs = self._maybe_duplicate(log_rate_mult_probs) #(C, K) 
-        rate_multipliers = self._maybe_duplicate(rate_multipliers) #(C, K) 
+            rate_multipliers = rate_multipliers / norm_factor #(1,1,K)
             
         return (log_rate_mult_probs, rate_multipliers)
     
+
+###############################################################################
+### EQUILIBRIUM DISTRIBUTION MODELS   #########################################
+###############################################################################
+class EqulDistLogprobsPerClass(ModuleBase):
+    """
+    C_trans: number of mixtures associated with transitions (variable)
+    C_sites: number of latent site classes
+    A: alphabet size
     
-    def _maybe_dedup(self, 
-                     matrix: jnp.array):
+    Equilibrium distribution of emissions, as well as probability of 
+      site-level classes (i.e. latent site classes over EMISSIONS)
+    
+    
+    Initialize with
+    ----------------
+    config : dict
+        config['num_transit_mixtures'] : int
+            number of mixtures associated with the TRANSITIONS 
+            (like fragments, domains, etc.)
+    
+        config['num_site_mixtures'] : int
+            number of mixtures associated with the EMISSIONS
+            
+        config['emission_alphabet_size'] : int
+            size of emission alphabet; 20 for proteins, 4 for DNA
+            
+    name : str
+        class name, for flax
+    
+    Methods here
+    ------------
+    setup
+    __call__
+    
+    Methods inherited from models.model_utils.BaseClasses.ModuleBase
+    ----------------------------------------------------------------
+    sow_histograms_scalars
+        for tensorboard logging
+    
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
         """
-        if matrix is (C,K), reduce to (K,) by taking values from C=0
+        C_trans: number of mixtures associated with transitions (variable)
+        C_sites: number of latent site classes
+        A: alphabet size
+        
+        
+        Flax Module Parameters
+        -----------------------
+        equl_dist_logits : ArrayLike (C_trans, C_sites, A)
+            logits for the equilibrium distribution over emitted characters,
+            one distribution for every site class c_site a,d transit class 
+            c_trans
+        
+        site_class_probs : ArrayLike (C_trans, C_sites)
+            logits for probability of being in site class c_site
+            
+        
         """
-        duplicated_shape = (self.num_mixtures, self.k_rate_mults)
+        ### read config file
+        self.num_transit_mixtures = self.config['num_transit_mixtures'] #C_tr
+        self.num_site_mixtures = self.config['num_site_mixtures'] #C_s
+        emission_alphabet_size = self.config['emission_alphabet_size'] #A
         
-        if matrix.shape == duplicated_shape:
-            return matrix[0,:]
         
-        elif matrix.shape == (duplicated_shape[-1],):
-            return matrix
+        ### init flax parameters
+        # equilibrium distributions
+        out_size = ( self.num_transit_mixtures, 
+                     self.num_site_mixtures,
+                     emission_alphabet_size )
+        self.equl_dist_logits = self.param('equl_dist_logits',
+                                           nn.initializers.normal(),
+                                           out_size,
+                                           jnp.float32) #(C_tr, C_s, A)
+        del out_size
+        
+        # probability of emission site classes
+        out_size = ( self.num_transit_mixtures, 
+                     self.num_site_mixtures )
+        self.site_class_prob_logits = self.param('site_class_prob_logits',
+                                           nn.initializers.normal(),
+                                           out_size,
+                                           jnp.float32) #(C_tr, C_s)
+        
+        
+    def __call__(self,
+                 sow_intermediates: bool,
+                 *args,
+                 **kwargs):
+        """
+        C_trans: number of mixtures associated with transitions (variable)
+        C_sites: number of latent site classes
+        A: alphabet size
+        
+        Arguments
+        ----------
+        sow_intermediates : bool
+            switch for tensorboard logging
+          
+        Returns
+        -------
+        log_site_class_probs : ArrayLike
+            log-probability of site classes; P(C_sites | C_trans)
+
+        log_equl_dist : ArrayLike, (C_trans, C_sites, A)
+            log-transformed equilibrium distribution
+        """
+        ### equilibrium distribution
+        log_equl_dist = nn.log_softmax( self.equl_dist_logits, axis = -1 ) #(C_tr, C_s, A)
+
+        if sow_intermediates:
+            for c_tr in range(log_equl_dist.shape[0]):
+                for c_s in range(log_equl_dist.shape[1]):
+                    lab = f'{self.name}/equilibrium dist, transit class {c_tr}, site class {c_s}'
+                    self.sow_histograms_scalars(mat= jnp.exp(log_equl_dist[c_tr, c_s, ...]), 
+                                                label=lab, 
+                                                which='scalars')
+                    del lab
+        
+        
+        ### P(C_sites | C_trans)
+        log_site_class_probs = nn.log_softmax( self.site_class_prob_logits, axis = -1 ) #(C_tr, C_s)
+        
+        if sow_intermediates:
+            for c_tr in range(log_equl_dist.shape[0]):
+                lab = f'{self.name}/site class probabilities, transit class {c_tr}'
+                self.sow_histograms_scalars(mat= jnp.exp(log_site_class_probs[c_tr, ...]), 
+                                            label=lab, 
+                                            which='scalars')
+                del lab
+        
+        return ( log_site_class_probs, log_equl_dist )
+
+
+class EqulDistLogprobsFromFile(ModuleBase):
+    """
+    Load equilibrium distribution and log-probability of site classes from file
+    
+    
+    Initialize with
+    ----------------
+    config : dict
+        config['num_transit_mixtures'] : int
+            number of mixtures associated with the TRANSITIONS 
+            (like fragments, domains, etc.)
+    
+        config['num_site_mixtures'] : int
+            number of mixtures associated with the EMISSIONS
+            
+        config["filenames"]["equl_dist"]: str
+              file of equilibrium distributions to load
+        
+        config["filenames"]["site_class_probs"]: str
+              file of site class probabilities to load
+            
+    name : str
+        class name, for flax
+    
+    Methods here
+    ------------
+    setup
+    __call__
+    
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        """
+        
+        Flax Module Parameters
+        -----------------------
+        none
+        
+        """
+        ### read config file
+        self.num_transit_mixtures = self.config['num_transit_mixtures'] # C_tr
+        self.num_site_mixtures = self.config['num_site_mixtures'] # C_s
+        self.k_rate_mults = self.config['k_rate_mults'] #K
+        
+        equl_file = self.config['filenames']['equl_dist']
+        site_class_probs_file = self.config['filenames']['site_class_probs']
+        
+        
+        ### load params
+        # equilibrium distribution
+        equl_dist = _load_params(equl_file, target_ndim=3) #(C_tr, C_s, A)
+        self.log_equl_dist = safe_log(equl_dist) #(C_tr, C_s, A)
+        
+        # probability of site classes
+        site_class_probs = _load_params(equl_file, target_ndim=2) #(C_tr, C_s)
+        self.log_site_class_probs = safe_log(site_class_probs) #(C_tr, C_s)
+        
+    def __call__(self,
+                 *args,
+                 **kwargs):
+        """
+        Returns
+        -------
+        log_site_class_probs : ArrayLike
+            log-probability of site classes; P(C_sites | C_trans)
+
+        log_equl_dist : ArrayLike, (C_trans, C_sites, A)
+            log-transformed equilibrium distribution
+        """
+        return ( self.log_site_class_probs, self.log_equl_dist )
+    
+
+class EqulDistLogprobsFromCounts(ModuleBase):
+    """
+    If there's only one site and transition class, construct an equilibrium 
+      distribution from observed frequencies
+    
+    A = alphabet size
+    
+    
+    Initialize with
+    ----------------
+    config : dict
+        config["training_dset_emit_counts"] : ArrayLike, (A,)
+            observed counts to turn into frequencies
+            
+    name : str
+        class name, for flax
+    
+    Methods here
+    ------------
+    setup
+    __call__
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        """
+        
+        Flax Module Parameters
+        -----------------------
+        none
+        
+        """
+        training_dset_emit_counts = self.config['training_dset_emit_counts'] #(A,)
+        equl_dist = training_dset_emit_counts / ( training_dset_emit_counts.sum() ) #(A,)
+        log_equl_dist = safe_log( equl_dist ) #(A,)
+        
+        # C_trans = 1, C_sites = 1
+        self.log_equl_dist = log_equl_dist[None,None,...] #(1, 1, A)
+        self.log_site_class_probs = jnp.zeros( (1,1) ) #(1, 1)
+        
+    def __call__(self,
+                 *args,
+                 **kwargs):
+        """
+        Returns
+        -------
+        log_site_class_probs : ArrayLike
+            log-probability of site classes; P(C_sites | C_trans)
+
+        log_equl_dist : ArrayLike, (C_trans, C_sites, A)
+            log-transformed equilibrium distribution
+        """
+        return ( self.log_site_class_probs, self.log_equl_dist )
 
 
 ###############################################################################
@@ -862,7 +1063,7 @@ class GTRLogprobs(ModuleBase):
     config : dict
         config['random_init_exchanges'] : bool
             whether or not to initialize exchangeabilities from random; if 
-            not random, initialize with LG08 values
+            not random, need to provide filename of exchangeabilities
             
         config['norm_rate_matrix'] : bool
             flag to normalize rate matrix to t = one substitution
@@ -957,7 +1158,7 @@ class GTRLogprobs(ModuleBase):
         
         
     def __call__(self,
-                 logprob_equl: jnp.array,
+                 log_equl_dist: jnp.array,
                  rate_multipliers: jnp.array,
                  t_array: jnp.array, 
                  sow_intermediates: bool,
@@ -966,18 +1167,20 @@ class GTRLogprobs(ModuleBase):
                  *args,
                  **kwargs):
         """
-        C = number of latent site classes
+        C_trans: number of mixtures associated with transitions (variable)
+        C_sites: number of latent site classes
         K = number of site rates
-        A = alphabet size
+        A: alphabet size
         
         
         Arguments
         ----------
-        logprob_equl : ArrayLike, (C, A)
+        log_equl_dist : ArrayLike, (C_trans, C_sites, A)
             log-transformed equilibrium distribution
         
-        rate_multipliers : ArrayLike, (C, K)
-            rate multiplier k for site class c; \rho_{c,k}
+        rate_multipliers : ArrayLike, (C_trans, C_sites, K)
+            the actual rate multiplier for rate class k, latent site class 
+              c_sites, and latent transition class c_trans
         
         t_array : ArrayLike, (T,) or (B,)
             either one time grid for all samples (T,) or unique branch
@@ -991,16 +1194,17 @@ class GTRLogprobs(ModuleBase):
         
         return_intermeds : bool
             whether or not to return intermediate values:
-                > exchangeabilities: (C, A, A)
-                > rate_matrix: (A, A)
+                > exchangeabilities: (A, A)
+                > rate_matrix: (C_trans, C_sites, A, A)
           
         Returns
         -------
-        ArrayLike, (T, C, K, A, A)
-            either joint or conditional logprob of emissions at match sites
+        ArrayLike, (T, C_trans, C_sites, K, A, A)
+            either joint or conditional logprob of emissions at match sites;
+            NOT YET SCALED BY ANY CLASS/RATE PROBABILITIES!!!
         """
         # undo log transform on equilibrium
-        equl = jnp.exp(logprob_equl) #(C, A)
+        equl = jnp.exp(log_equl_dist) #(C_tr, C_s, A)
         
         # 1.) fill in square matrix, \chi
         exchangeabilities_mat = self._get_square_exchangeabilities_matrix(sow_intermediates) #(A, A)
@@ -1008,14 +1212,14 @@ class GTRLogprobs(ModuleBase):
         # 2.) prepare rate matrix Q_c = \chi * \diag(\pi_c); normalize if desired
         rate_matrix_Q = rate_matrix_from_exch_equl( exchangeabilities = exchangeabilities_mat,
                                                     equilibrium_distributions = equl,
-                                                    norm=self.norm_rate_matrix ) #(C, A, A)
+                                                    norm=self.norm_rate_matrix ) #(C_tr, C_s, A, A)
         
-        # 3.) scale by rate multipliers, \rho_{c,k}
+        # 3.) scale by rate multipliers, \rho_{C_tr, C_s, k}
         rate_matrix_times_rho = scale_rate_matrix(subst_rate_mat = rate_matrix_Q,
-                                                  rate_multipliers = rate_multipliers) #(C, K, A, A)
+                                                  rate_multipliers = rate_multipliers) #(C_tr, C_s, K, A, A)
         
         # 4.) apply matrix exponential to get conditional logprob
-        # cond_logprobs is either (T, C, K, A, A) or (B, C, K, A, A)
+        # cond_logprobs is either (T, C_tr, C_s, K, A, A) or (B, C_tr, C_s, K, A, A)
         cond_logprobs = cond_logprob_emit_at_match_per_mixture( t_array = t_array,
                                                                 scaled_rate_mat_per_mixture = rate_matrix_times_rho )
         
@@ -1024,10 +1228,10 @@ class GTRLogprobs(ModuleBase):
         
         # 5.) multiply by equilibrium distributions to get joint logprob
         elif not return_cond:
-            # joint_logprobs is either (T, C, K, A, A) or (B, C, K, A, A)
-            # NOTE: this uses original logprob_equl (before exp() operation)
+            # joint_logprobs is either (T, C_tr, C_s, K, A, A) or (B, C_tr, C_s, K, A, A)
+            # NOTE: this uses original log_equl_dist (before exp() operation)
             logprobs = joint_logprob_emit_at_match_per_mixture( cond_logprob_emit_at_match_per_mixture = cond_logprobs,
-                                                                log_equl_dist_per_mixture = logprob_equl )
+                                                                log_equl_dist_per_mixture = log_equl_dist )
         
         # optionally, return intermediates too; useful for final eval or debugging
         if return_intermeds:
@@ -1313,10 +1517,9 @@ class F81Logprobs(ModuleBase):
     
     Initialize with
     ----------------
-    config : dict
-        config['num_mixtures'] :  int
-            number of emission site classes
-        
+    config['norm_rate_matrix'] : bool
+        flag to normalize rate matrix to t = one substitution
+            
     name : str
         class name, for flax
     
@@ -1340,7 +1543,7 @@ class F81Logprobs(ModuleBase):
         
         
     def __call__(self,
-                 logprob_equl: jnp.array,
+                 log_equl_dist: jnp.array,
                  rate_multipliers: jnp.array,
                  t_array: jnp.array,
                  sow_intermediates: bool,
@@ -1348,18 +1551,20 @@ class F81Logprobs(ModuleBase):
                  *args,
                  **kwargs):
         """
-        C = number of latent site classes
+        C_trans: number of mixtures associated with transitions (variable)
+        C_sites: number of latent site classes
         K = number of site rates
-        A = alphabet size
+        A: alphabet size
         
         
         Arguments
         ----------
-        logprob_equl : ArrayLike, (C, A)
+        log_equl_dist : ArrayLike, (C_trans, C_sites, A)
             log-transformed equilibrium distribution
         
-        rate_multipliers : ArrayLike, (C, K)
-            rate multiplier k for site class c; \rho_{c,k}
+        rate_multipliers : ArrayLike, (C_trans, C_sites, K)
+            the actual rate multiplier for rate class k, latent site class 
+              c_sites, and latent transition class c_trans
         
         t_array : ArrayLike, (T,) or (B,)
             either one time grid for all samples (T,) or unique branch
@@ -1374,17 +1579,18 @@ class F81Logprobs(ModuleBase):
         
         Returns
         -------
-        ArrayLike, (T, C, K, A, A)
-            log-probability of emission at match sites, according to F81
+        ArrayLike, (T, C_trans, C_sites, K, A, A)
+            either joint or conditional logprob of emissions at match sites;
+            NOT YET SCALED BY ANY CLASS/RATE PROBABILITIES!!!
         """
         # undo log transform on equilibrium
-        equl = jnp.exp(logprob_equl) #(C, A)
+        equl = jnp.exp(log_equl_dist) #(C_tr, C_s, A)
         
         logprobs = fill_f81_logprob_matrix( equl = equl, 
                                         rate_multipliers = rate_multipliers, 
                                         norm_rate_matrix = self.norm_rate_matrix,
                                         t_array = t_array,
-                                        return_cond = return_cond ) #(T,C,K,A,A)
+                                        return_cond = return_cond ) #(T, C_tr, C_s, K, A, A)
         
         intermeds_dict = {}
         return logprobs, intermeds_dict
@@ -1392,189 +1598,3 @@ class F81Logprobs(ModuleBase):
 # alias
 F81LogprobsFromFile = F81Logprobs
 
-    
-###############################################################################
-### EQUILIBRIUM DISTRIBUTION MODELS   #########################################
-###############################################################################
-class EqulDistLogprobsPerClass(ModuleBase):
-    """
-    Equilibrium distribution of emissions
-    
-    
-    Initialize with
-    ----------------
-    config : dict
-        config['emission_alphabet_size'] : int
-            size of emission alphabet; 20 for proteins, 4 for DNA
-            
-        config['num_mixtures'] : int
-            number of emission site classes
-    
-    name : str
-        class name, for flax
-    
-    Methods here
-    ------------
-    setup
-    __call__
-    
-    Methods inherited from models.model_utils.BaseClasses.ModuleBase
-    ----------------------------------------------------------------
-    sow_histograms_scalars
-        for tensorboard logging
-    
-    """
-    config: dict
-    name: str
-    
-    def setup(self):
-        """
-        C = number of site classes
-        A = alphabet size
-        
-        
-        Flax Module Parameters
-        -----------------------
-        logits : ArrayLike (C,)
-            initialize logits from unit normal
-        
-        """
-        emission_alphabet_size = self.config['emission_alphabet_size']
-        num_mixtures = self.config['num_mixtures']
-        
-        self.logits = self.param('Equilibrium distr.',
-                                  nn.initializers.normal(),
-                                  (num_mixtures, emission_alphabet_size),
-                                  jnp.float32) #(C, A)
-        
-    def __call__(self,
-                 sow_intermediates: bool,
-                 *args,
-                 **kwargs):
-        """
-        C: number of site classes
-        
-        
-        Arguments
-        ----------
-        sow_intermediates : bool
-            switch for tensorboard logging
-          
-        Returns
-        -------
-        log_equl_dist : ArrayLike, (C, A)
-            log-transformed equilibrium distribution
-        """
-        log_equl_dist = nn.log_softmax( self.logits, axis = 1 ) #(C, A)
-
-        if sow_intermediates:
-            for c in range(log_equl_dist.shape[0]):
-                lab = f'{self.name}/equilibrium dist for class {c}'
-                self.sow_histograms_scalars(mat= jnp.exp(log_equl_dist[c,...]), 
-                                            label=lab, 
-                                            which='scalars')
-                del lab
-        
-        return log_equl_dist
-
-
-class EqulDistLogprobsFromFile(ModuleBase):
-    """
-    Load equilibrium distribution from file
-    
-    
-    Initialize with
-    ----------------
-    config : dict
-        config["filenames"]["equl_dist"]: str
-              file of equilibrium distributions to load
-            
-    name : str
-        class name, for flax
-    
-    Methods here
-    ------------
-    setup
-    __call__
-    
-    """
-    config: dict
-    name: str
-    
-    def setup(self):
-        """
-        
-        Flax Module Parameters
-        -----------------------
-        none
-        
-        """
-        equl_file = self.config['filenames']['equl_dist']
-        
-        with open(equl_file,'rb') as f:
-            prob_equilibr = jnp.load(f, allow_pickle=True)
-        
-        # if there's no dim for class, add it
-        if len(prob_equilibr.shape) == 1:
-            prob_equilibr = prob_equilibr[None,:] #(C, A)
-        
-        self.logprob_equilibr = safe_log(prob_equilibr)
-        
-        
-    def __call__(self,
-                 *args,
-                 **kwargs):
-        """
-        Returns log-transformed equilibrium distribution
-        """
-        return self.logprob_equilibr #(C, A)
-    
-
-class EqulDistLogprobsFromCounts(ModuleBase):
-    """
-    If there's only one class, construct an equilibrium distribution 
-        from observed frequencies
-    
-    A = alphabet size
-    
-    
-    Initialize with
-    ----------------
-    config : dict
-        config["training_dset_emit_counts"] : ArrayLike, (A,)
-            observed counts to turn into frequencies
-            
-    name : str
-        class name, for flax
-    
-    Methods here
-    ------------
-    setup
-    __call__
-    """
-    config: dict
-    name: str
-    
-    def setup(self):
-        """
-        
-        Flax Module Parameters
-        -----------------------
-        none
-        
-        """
-        training_dset_emit_counts = self.config['training_dset_emit_counts'] #(A,)
-        prob_equilibr = training_dset_emit_counts/training_dset_emit_counts.sum() #(A,)
-        logprob_equilibr = safe_log( prob_equilibr ) #(A,)
-        
-        # C=1
-        self.logprob_equilibr = logprob_equilibr[None,...] #(C, A)
-        
-        
-    def __call__(self,
-                 *args,
-                 **kwargs):
-        """
-        Returns log-transformed equilibrium distribution
-        """
-        return self.logprob_equilibr #(C, A)
