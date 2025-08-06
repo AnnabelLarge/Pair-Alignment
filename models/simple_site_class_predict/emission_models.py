@@ -24,7 +24,6 @@ originals:
 'HKY85Logprobs',
 'IndpRateMultipliers',
 'RateMultipliersPerClass',
-'SiteClassLogprobs',
 
 loading from files:
 --------------------
@@ -34,7 +33,6 @@ loading from files:
 'HKY85LogprobsFromFile',
 'IndpRateMultipliersFromFile',
 'RateMultipliersPerClassFromFile',
-'SiteClassLogprobsFromFile'
     
 
 """
@@ -51,14 +49,8 @@ from typing import Optional
 from models.BaseClasses import ModuleBase
 from models.simple_site_class_predict.model_functions import (bound_sigmoid,
                                                               bound_sigmoid_inverse,
-                                                              safe_log,
-                                                              rate_matrix_from_exch_equl,
-                                                              scale_rate_matrix,
-                                                              upper_tri_vector_to_sym_matrix,
-                                                              cond_logprob_emit_at_match_per_mixture,
-                                                              joint_logprob_emit_at_match_per_mixture,
-                                                              fill_f81_logprob_matrix)
-
+                                                              safe_log)
+                    
 def _load_params(in_file, target_ndim: int):
     with open(in_file, 'rb') as f:
         mat = jnp.load(f)
@@ -75,7 +67,7 @@ def _load_params(in_file, target_ndim: int):
 ###############################################################################
 class RateMultipliersPerClass(ModuleBase):
     """
-    C_trans: number of mixtures associated with transitions (variable)
+    C_trans (C_frag + C_dom): number of mixtures associated with transitions (variable)
     C_sites: number of latent site classes
     K: number of rate multipliers
     
@@ -87,10 +79,12 @@ class RateMultipliersPerClass(ModuleBase):
     Initialize with
     ----------------
     config : dict
-        config['num_transit_mixtures'] : int
-            number of mixtures associated with the TRANSITIONS 
-            (like fragments, domains, etc.)
+        config['num_domain_mixtures'] : int
+            number of larger TKF92 domain mixtures (>1 if nested TKF92)
     
+        config['num_fragment_mixtures'] : int
+            number of TKF92 fragment mixtures 
+        
         config['num_site_mixtures'] : int
             number of mixtures associated with the EMISSIONS
         
@@ -98,7 +92,8 @@ class RateMultipliersPerClass(ModuleBase):
             number of rate multipliers
             
         config['rate_mult_range'] : (float, float)
-            min and max rate multiplier; default is (0.01, 10)
+            min and max rate multiplier
+            DEFAULT: (0.01, 10)
 
         config['norm_rate_mults'] : bool
             if true, enforce constraint: 
@@ -128,7 +123,7 @@ class RateMultipliersPerClass(ModuleBase):
     
     def setup(self):
         """
-        C_trans: number of mixtures associated with transitions (variable)
+        C_trans (C_frag + C_dom): number of mixtures associated with transitions (variable)
         C_sites: number of latent site classes
         K: numer of rate multipliers
         
@@ -146,7 +141,8 @@ class RateMultipliersPerClass(ModuleBase):
         
         """
         ### read config file
-        self.num_transit_mixtures = self.config['num_transit_mixtures'] # C_tr
+        self.num_transit_mixtures = ( self.config['num_fragment_mixtures'] *
+                                      self.config['num_domain_mixtures'] )# C_tr
         self.num_site_mixtures = self.config['num_site_mixtures'] # C_s
         self.k_rate_mults = self.config['k_rate_mults'] #K
         
@@ -184,10 +180,9 @@ class RateMultipliersPerClass(ModuleBase):
                  log_site_class_probs: jnp.array,
                  log_transit_class_probs: jnp.array):
         """
-        C_trans: number of mixtures associated with transitions (variable)
+        C_trans (C_frag + C_dom): number of mixtures associated with transitions (variable)
         C_sites: number of latent site classes
         K: number of rate multipliers
-        
         
         Arguments
         ----------
@@ -215,8 +210,8 @@ class RateMultipliersPerClass(ModuleBase):
         """
         # all outputs must be this size
         out_size = ( self.num_transit_mixtures, 
-                     self.num_site_mixtures,
-                     self.k_rate_mults ) #(C_tr, C_s, K)
+                      self.num_site_mixtures,
+                      self.k_rate_mults ) #(C_tr, C_s, K)
             
         ### P(K|C_sites, C_trans)
         if not self.prob_rate_mult_is_one:
@@ -256,7 +251,6 @@ class RateMultipliersPerClass(ModuleBase):
             rate_multipliers = jnp.ones( out_size ) #(C_tr, C_s, K)
                 
         return (log_rate_mult_probs, rate_multipliers)
-        
     
     def _set_model_simplification_flags(self):
         """
@@ -297,7 +291,7 @@ class RateMultipliersPerClass(ModuleBase):
             
             # if there are NO mixtures, then just use unit rate multiplier
             # also NEVER normalize the rate multiplier (since its just one)
-            if (self.num_transit_mixtures + self.num_site_mixtures) == 1:
+            if (self.num_transit_mixtures * self.num_site_mixtures) == 1:
                 use_unit_rate_mult = True
                 norm_rate_mults = False
                 
@@ -389,7 +383,7 @@ class RateMultipliersPerClass(ModuleBase):
     
 class IndpRateMultipliers(RateMultipliersPerClass):
     """
-    C_trans: number of mixtures associated with transitions (variable)
+    C_trans (C_frag + C_dom): number of mixtures associated with transitions (variable)
     C_sites: number of latent site classes
     K: numer of rate multipliers
     
@@ -403,9 +397,11 @@ class IndpRateMultipliers(RateMultipliersPerClass):
     Initialize with
     ----------------
     config : dict
-        config['num_transit_mixtures'] : int
-            number of mixtures associated with the TRANSITIONS 
-            (like fragments, domains, etc.)
+        config['num_domain_mixtures'] : int
+            number of larger TKF92 domain mixtures (>1 if nested TKF92)
+    
+        config['num_fragment_mixtures'] : int
+            number of TKF92 fragment mixtures 
             
         config['num_site_mixtures'] : int
             number of mixtures associated with the EMISSIONS
@@ -414,7 +410,8 @@ class IndpRateMultipliers(RateMultipliersPerClass):
             number of rate multipliers
             
         config['rate_mult_range'] : (float, float)
-            min and max rate multiplier; default is (0.01, 10)
+            min and max rate multiplier
+            DEFAULT: (0.01, 10)
 
         config['norm_rate_mults'] : bool
             if true, enforce constraint: \sum_k P(k)*\rho_k = 1
@@ -541,7 +538,7 @@ class IndpRateMultipliers(RateMultipliersPerClass):
 
 class RateMultipliersPerClassFromFile(RateMultipliersPerClass):
     """
-    C_trans: number of mixtures associated with transitions (variable)
+    C_trans (C_frag + C_dom): number of mixtures associated with transitions (variable)
     C_sites: number of latent site classes
     K: number of rate multipliers
     
@@ -551,9 +548,11 @@ class RateMultipliersPerClassFromFile(RateMultipliersPerClass):
     Initialize with
     ----------------
     config : dict
-        config['num_transit_mixtures'] : int
-            number of mixtures associated with the TRANSITIONS 
-            (like fragments, domains, etc.)
+        config['num_domain_mixtures'] : int
+            number of larger TKF92 domain mixtures (>1 if nested TKF92)
+    
+        config['num_fragment_mixtures'] : int
+            number of TKF92 fragment mixtures 
     
         config['num_site_mixtures'] : int
             number of mixtures associated with the EMISSIONS
@@ -588,7 +587,8 @@ class RateMultipliersPerClassFromFile(RateMultipliersPerClass):
     """
     def setup(self):
         ### read config file
-        self.num_transit_mixtures = self.config['num_transit_mixtures'] #C_tr
+        self.num_transit_mixtures = ( self.config['num_fragment_mixtures'] *
+                                      self.config['num_domain_mixtures'] )# C_tr
         self.num_site_mixtures = self.config['num_site_mixtures'] #C_s
         self.k_rate_mults = self.config['k_rate_mults'] #K
         out_size = ( self.num_transit_mixtures,
@@ -624,7 +624,7 @@ class RateMultipliersPerClassFromFile(RateMultipliersPerClass):
                  log_site_class_probs: jnp.array,
                  log_transit_class_probs: jnp.array):
         """
-        C_trans: number of mixtures associated with transitions (variable)
+        C_trans (C_frag * C_dom): number of mixtures associated with transitions (variable)
         C_sites: number of latent site classes
         K: number of rate multipliers
         
@@ -670,7 +670,7 @@ class RateMultipliersPerClassFromFile(RateMultipliersPerClass):
 
 class IndpRateMultipliersFromFile(IndpRateMultipliers):
     """
-    C_trans: number of mixtures associated with transitions (variable)
+    C_trans (C_frag + C_dom): number of mixtures associated with transitions (variable)
     C_sites: number of latent site classes
     K: number of rate multipliers
     
@@ -679,9 +679,11 @@ class IndpRateMultipliersFromFile(IndpRateMultipliers):
     Initialize with
     ----------------
     config : dict
-        config['num_transit_mixtures'] : int
-            number of mixtures associated with the TRANSITIONS 
-            (like fragments, domains, etc.)
+        config['num_domain_mixtures'] : int
+            number of larger TKF92 domain mixtures (>1 if nested TKF92)
+    
+        config['num_fragment_mixtures'] : int
+            number of TKF92 fragment mixtures 
     
         config['num_site_mixtures'] : int
             number of mixtures associated with the EMISSIONS
@@ -714,7 +716,8 @@ class IndpRateMultipliersFromFile(IndpRateMultipliers):
     """
     def setup(self):
         ### read config file
-        self.num_transit_mixtures = self.config['num_transit_mixtures'] #C_tr
+        self.num_transit_mixtures = ( self.config['num_fragment_mixtures'] *
+                                      self.config['num_domain_mixtures'] )# C_tr
         self.num_site_mixtures = self.config['num_site_mixtures'] #C_s
         self.k_rate_mults = self.config['k_rate_mults'] #K
         
@@ -788,7 +791,7 @@ class IndpRateMultipliersFromFile(IndpRateMultipliers):
 ###############################################################################
 class EqulDistLogprobsPerClass(ModuleBase):
     """
-    C_trans: number of mixtures associated with transitions (variable)
+    C_trans (C_frag + C_dom): number of mixtures associated with transitions (variable)
     C_sites: number of latent site classes
     A: alphabet size
     
@@ -799,9 +802,11 @@ class EqulDistLogprobsPerClass(ModuleBase):
     Initialize with
     ----------------
     config : dict
-        config['num_transit_mixtures'] : int
-            number of mixtures associated with the TRANSITIONS 
-            (like fragments, domains, etc.)
+        config['num_domain_mixtures'] : int
+            number of larger TKF92 domain mixtures (>1 if nested TKF92)
+    
+        config['num_fragment_mixtures'] : int
+            number of TKF92 fragment mixtures 
     
         config['num_site_mixtures'] : int
             number of mixtures associated with the EMISSIONS
@@ -828,7 +833,7 @@ class EqulDistLogprobsPerClass(ModuleBase):
     
     def setup(self):
         """
-        C_trans: number of mixtures associated with transitions (variable)
+        C_trans (C_frag + C_dom): number of mixtures associated with transitions (variable)
         C_sites: number of latent site classes
         A: alphabet size
         
@@ -840,13 +845,14 @@ class EqulDistLogprobsPerClass(ModuleBase):
             one distribution for every site class c_site a,d transit class 
             c_trans
         
-        site_class_probs : ArrayLike (C_trans, C_sites)
+        site_class_prob_logits : ArrayLike (C_trans, C_sites)
             logits for probability of being in site class c_site
             
         
         """
         ### read config file
-        self.num_transit_mixtures = self.config['num_transit_mixtures'] #C_tr
+        self.num_transit_mixtures = ( self.config['num_fragment_mixtures'] *
+                                      self.config['num_domain_mixtures'] )# C_tr
         self.num_site_mixtures = self.config['num_site_mixtures'] #C_s
         emission_alphabet_size = self.config['emission_alphabet_size'] #A
         
@@ -872,11 +878,9 @@ class EqulDistLogprobsPerClass(ModuleBase):
         
         
     def __call__(self,
-                 sow_intermediates: bool,
-                 *args,
-                 **kwargs):
+                 sow_intermediates: bool ):
         """
-        C_trans: number of mixtures associated with transitions (variable)
+        C_trans (C_frag + C_dom): number of mixtures associated with transitions (variable)
         C_sites: number of latent site classes
         A: alphabet size
         
@@ -887,7 +891,7 @@ class EqulDistLogprobsPerClass(ModuleBase):
           
         Returns
         -------
-        log_site_class_probs : ArrayLike
+        log_site_class_probs : ArrayLike (C_trans, C_sites)
             log-probability of site classes; P(C_sites | C_trans)
 
         log_equl_dist : ArrayLike, (C_trans, C_sites, A)
@@ -928,9 +932,11 @@ class EqulDistLogprobsFromFile(ModuleBase):
     Initialize with
     ----------------
     config : dict
-        config['num_transit_mixtures'] : int
-            number of mixtures associated with the TRANSITIONS 
-            (like fragments, domains, etc.)
+        config['num_domain_mixtures'] : int
+            number of larger TKF92 domain mixtures (>1 if nested TKF92)
+    
+        config['num_fragment_mixtures'] : int
+            number of TKF92 fragment mixtures 
     
         config['num_site_mixtures'] : int
             number of mixtures associated with the EMISSIONS
@@ -962,7 +968,8 @@ class EqulDistLogprobsFromFile(ModuleBase):
         
         """
         ### read config file
-        self.num_transit_mixtures = self.config['num_transit_mixtures'] # C_tr
+        self.num_transit_mixtures = ( self.config['num_fragment_mixtures'] *
+                                      self.config['num_domain_mixtures'] )# C_tr
         self.num_site_mixtures = self.config['num_site_mixtures'] # C_s
         self.k_rate_mults = self.config['k_rate_mults'] #K
         
@@ -1143,7 +1150,7 @@ class GTRLogprobs(ModuleBase):
                                                     min_val = self.exchange_min_val,
                                                     max_val = self.exchange_max_val)
         
-            self.exchangeabilities_logits_vec = self.param("exchangeabilities", 
+            self.exchangeabilities_logits_vec = self.param("exchangeabilities_logits_vec", 
                                                            lambda rng, shape: transformed_vec,
                                                            transformed_vec.shape ) #(N,)
         
@@ -1151,7 +1158,7 @@ class GTRLogprobs(ModuleBase):
         elif self.random_init_exchanges:
             A = emission_alphabet_size
             num_exchange = int( (A * (A-1)) / 2 )
-            self.exchangeabilities_logits_vec = self.param("exchangeabilities", 
+            self.exchangeabilities_logits_vec = self.param("exchangeabilities_logits_vec", 
                                                            nn.initializers.normal(),
                                                            (num_exchange,),
                                                            jnp.float32 ) #(N,)
@@ -1167,7 +1174,7 @@ class GTRLogprobs(ModuleBase):
                  *args,
                  **kwargs):
         """
-        C_trans: number of mixtures associated with transitions (variable)
+        C_trans (C_frag + C_dom): number of mixtures associated with transitions (variable)
         C_sites: number of latent site classes
         K = number of site rates
         A: alphabet size
@@ -1388,7 +1395,7 @@ class HKY85Logprobs(GTRLogprobs):
         """
         Flax Module Parameters
         -----------------------
-        ti_tv_vec : ArrayLike, (2,)
+        exchangeabilities_logits_vec : ArrayLike, (2,)
             first value is transition rate, second value is transversion rate
             initialized from unit normal
         
@@ -1403,7 +1410,7 @@ class HKY85Logprobs(GTRLogprobs):
         ### of upper triangular values                           #
         ##########################################################
         # [ti, tv]; need to stack these values later
-        self.exchangeabilities_logits_vec = self.param('exchangeabilities',
+        self.exchangeabilities_logits_vec = self.param('exchangeabilities_logits_vec',
                                                        nn.initializers.normal(),
                                                        (2,),
                                                        jnp.float32) #(2)
@@ -1551,7 +1558,7 @@ class F81Logprobs(ModuleBase):
                  *args,
                  **kwargs):
         """
-        C_trans: number of mixtures associated with transitions (variable)
+        C_trans (C_frag + C_dom): number of mixtures associated with transitions (variable)
         C_sites: number of latent site classes
         K = number of site rates
         A: alphabet size

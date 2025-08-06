@@ -887,42 +887,45 @@ def get_tkf91_single_seq_marginal_transition_logprobs(offset,
 
 
 def get_tkf92_single_seq_marginal_transition_logprobs(offset,
-                                class_probs,
-                                r_ext_prob,
-                                **kwargs):
+                                                      frag_class_probs,
+                                                      r_ext_prob,
+                                                      **kwargs):
     """
     For scoring single-sequence marginals under TKF92 model
     
-    C = site classes
-        
+    C_dom: number of mixtures associated with nested TKF92 models (domain-level)
+    C_frag: number of mixtures associated with TKF92 fragments (fragment-level)
+        > for tkf91, there can NOT be mixtures over transitions (i.e. C_frag=1)
+       
     
     Arguments
     ----------
     offset : ArrayLike, ()
         1 - (lam/mu)
     
-    class_probs : ArrayLike, (C,)
-        probability of being in latent site classes
+    r_ext_prob : ArrayLike, (C_dom, C_frag)
+        fragment extension probabilities
     
-    r_ext_prob : ArrayLike, (C,)
-        TKF92 fragment extension probability per latent site class
-    
+    frag_class_probs : ArrayLike, (C_dom, C_frag)
+        support for the classes i.e. P(end at class c_frag)
+     
         
     Returns
     -------
-    log_arr : ArrayLike, (C,C,2,2)
+    log_arr : ArrayLike, (C_dom, C_{frag_from}, C_{frag_to}, 2, 2)
         
         emit -> emit   |  emit -> end
         -------------------------------
         start -> emit  |  start -> end
         
     """
-    C = class_probs.shape[-1]
+    C_dom = frag_class_probs.shape[0] #domain-level classes
+    C_frag = frag_class_probs.shape[1] #fragment-level classes
     
     ### move values to log space
-    log_class_prob = safe_log(class_probs) #(C,)
-    log_r_ext_prob = safe_log(r_ext_prob) #(C,)
-    log_one_minus_r = log_one_minus_x(log_r_ext_prob) #(C,)
+    log_frag_class_prob = safe_log(frag_class_probs) #(C_dom, C_{frag_to})
+    log_r_ext_prob = safe_log(r_ext_prob) #(C_dom, C_{frag_from})
+    log_one_minus_r = log_one_minus_x(log_r_ext_prob) #(C_dom, C_{frag_from})
     
     # lam / mu = 1 - offset
     # offset = 1 - (lam/mu)
@@ -932,69 +935,66 @@ def get_tkf92_single_seq_marginal_transition_logprobs(offset,
     
     ### build cells
     # cell 1: emit -> emit 
-    # (1-r) * (lam/mu) * P(c)
-    log_cell1 = (log_one_minus_r + log_lam_div_mu)[:, None] + log_class_prob[None, :] # (C,C)
+    # (1-r_c) * (lam/mu) * P(d)
+    # (log_one_minus_r + log_lam_div_mu)[..., None]: (C_dom, C_{frag_from},           1)
+    #               log_frag_class_prob[:, None, :]: (C_dom,             1, C_{frag_to})
+    #                                     log_cell1: (C_dom, C_{frag_from}, C_{frag_to})
+    log_cell1 = (log_one_minus_r + log_lam_div_mu)[..., None] + log_frag_class_prob[:, None, :] 
     
     # cell 2: emit -> end 
     # (1-r) * (1 - lam/mu)
-    log_cell2 = ( log_one_minus_r + log_one_minus_lam_div_mu )[:,None] #(1,C)
-    log_cell2 = jnp.broadcast_to( log_cell2, (C, C) ) # (C,C)
+    log_cell2 = ( log_one_minus_r + log_one_minus_lam_div_mu )[...,None] #(C_dom, C_{frag_from},1)
+    log_cell2 = jnp.broadcast_to( log_cell2, (C_dom, C_frag, C_frag) ) # (C_dom, C_{frag_from}, C_{frag_to})
     
     # cell 3: start -> emit
-    # (lam/mu) * P(c)
-    log_cell3 = ( log_lam_div_mu + log_class_prob )[None,:] # (1,C)
-    log_cell3 = jnp.broadcast_to( log_cell3, (C, C) )   # (C,C)
+    # (lam/mu) * P(d)
+    log_cell3 = ( log_lam_div_mu + log_frag_class_prob )[:,None,:] # (C_dom, 1, C_{frag_to})
+    log_cell3 = jnp.broadcast_to( log_cell3, (C_dom, C_frag, C_frag) ) # (C_dom, C_{frag_from}, C_{frag_to})
     
     # cell 4: start -> end
     # (1-lam/mu)
-    log_cell4 = jnp.broadcast_to( log_one_minus_lam_div_mu, (C,C) )  # (C,C)
+    log_cell4 = jnp.broadcast_to( log_one_minus_lam_div_mu, (C_dom, C_frag, C_frag) ) # (C_dom, C_{frag_from}, C_{frag_to})
     
 
     ### build matrix
     log_single_seq_tkf92 = jnp.stack( [jnp.stack( [log_cell1, log_cell2], axis=-1 ),
                                        jnp.stack( [log_cell3, log_cell4], axis=-1 )],
-                                     axis = -2 ) #(C,C,2,2)
+                                     axis = -2 ) #(C_dom, C_{frag_from}, C_{frag_to}, 2, 2)
     
     # add fragment extension probability to transitions between same class
     # at cell 1: emit -> emit 
     # r + (1-r) * (lam/mu) * P(c)
-    i_idx = jnp.arange(C)
-    prev_vals = log_single_seq_tkf92[i_idx, i_idx, 0, 0] #(C,C)
-    new_vals = logsumexp_with_arr_lst([log_r_ext_prob, prev_vals]) #(C,C)
-    log_single_seq_tkf92 = log_single_seq_tkf92.at[i_idx, i_idx, 0, 0].set(new_vals) #(C,C,2,2)
-    return log_single_seq_tkf92 #(C,C,2,2)
+    i_idx = jnp.arange(C_frag)
+    prev_vals = log_single_seq_tkf92[:, i_idx, i_idx, 0, 0] #(C_dom, C_frag)
+    new_vals = logsumexp_with_arr_lst([log_r_ext_prob, prev_vals]) #(C_dom, C_frag)
+    log_single_seq_tkf92 = log_single_seq_tkf92.at[:, i_idx, i_idx, 0, 0].set(new_vals) #(C_dom, C_{frag_from}, C_{frag_to}, 2, 2)
+    return log_single_seq_tkf92 #(C_dom, C_{frag_from}, C_{frag_to}, 2, 2)
 
 
 def get_cond_transition_logprobs(marg_matrix, 
-                           joint_matrix):
+                                 joint_matrix):
     """
     obtain the conditional log probability by composing the joint with the marginal
     
-    C = site classes
-    S = number of states; 4 for {Match, Ins, Del, Start/End}
-    T = number of branch lengths; this could be: 
-        > an array of times for all samples (T; marginalize over these later)
-        > an array of time per sample (T=B)
-        > a quantized array of times per sample (T = T', where T' <= T)
+    S = full number of states; 4 total: {Match, Ins, Del, Start/End}
     
     Arguments
     ----------
-    marg_matrix : ArrayLike, (C,C,2,2) or (2,2)
+    marg_matrix : ArrayLike, (...,2,2)
         scoring matrix for marginal transition probabilities
         P(seq)
     
-    joint_matrix : ArrayLike, (T,C,C,S,S) or (T,S,S)
+    joint_matrix : ArrayLike, (...,S,S) 
         scoring matrix for joint transition probabilities
         P(desc, anc, align | t)
         
     Returns
     -------
-    cond_matrix : ArrayLike, (T,C,C,S,S) or (T,S,S)
+    cond_matrix : ArrayLike, joint_matrix.shape
         scoring matrix for conditional transition probabilities
         P(desc, align | anc, t)
         
     """
-    # cond_matrix is always  #(T,C,C,S,S)
     cond_matrix = joint_matrix.at[...,[0,1,2], 0].add(-marg_matrix[..., 0,0][None,...,None])
     cond_matrix = cond_matrix.at[...,[0,1,2], 2].add(-marg_matrix[..., 0,0][None,...,None])
     cond_matrix = cond_matrix.at[...,3,0].add(-marg_matrix[..., 1,0][None,...])
@@ -1869,12 +1869,16 @@ def joint_only_forward(aligned_inputs,
                        unique_time_per_sample: bool, 
                        return_all_intermeds: bool = False):
     """
+    TODO: this should be ready for nested TKF92 model... but come back and 
+          check this out later
+    
     forward algo ONLY to find joint loglike
     
     L_align: length of pairwise alignment
     T: number of timepoints
     B: batch size
-    C: number of latent site clases
+    C_trans = C: number of latent site clases
+      > could be C_frag or C_dom * C_frag
     A: alphabet (20 for proteins, 4 for DNA)
     S: possible states; here, this is 4: M, I, D, start/end
     
@@ -2066,8 +2070,6 @@ def joint_only_forward(aligned_inputs,
         return stacked_outputs #(L_align, T, C, B) or or (L_align, C, B)
     
         
-    
-
 def _log_space_dot_prod_helper(alpha,
                               marginal_logprob_transit):
     """
@@ -2085,6 +2087,13 @@ def all_loglikes_forward(aligned_inputs,
                          all_transit_matrices,
                          unique_time_per_sample: bool):
     """
+    TODO: this should be ALMOST ready for nested TKF92 model... but come back  
+          and check this out later
+          > without domains: crude memory variables to remember if start -> emit
+            has been seen yet; this handles alignments that start with a 
+            start -> ins transitions
+          > with domains: ??? 
+    
     forward algo to find joint, conditional, and both single-sequence marginal 
         loglikeihoods
     
@@ -2094,7 +2103,8 @@ def all_loglikes_forward(aligned_inputs,
     L_align: length of pairwise alignment
     T: number of timepoints
     B: batch size
-    C: number of latent site clases
+    C_trans = C: number of latent site clases
+      > could be C_frag or C_dom * C_frag
     A: alphabet (20 for proteins, 4 for DNA)
     S: possible states; here, this is 4: M, I, D, start/end
     

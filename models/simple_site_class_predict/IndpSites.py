@@ -23,8 +23,6 @@ from models.simple_site_class_predict.emission_models import (EqulDistLogprobsFr
                                                               EqulDistLogprobsFromFile,
                                                               GTRLogprobs,
                                                               GTRLogprobsFromFile,
-                                                              SiteClassLogprobs,
-                                                              SiteClassLogprobsFromFile,
                                                               RateMultipliersPerClass,
                                                               IndpRateMultipliers,
                                                               RateMultipliersPerClassFromFile,
@@ -55,19 +53,38 @@ class IndpSites(ModuleBase):
     """
     pairHMM that finds joint loglikelihood of alignments, P(Anc, Desc, Align)
     
-    if using one time per sample, and wanting to QUANTIZE the time, need a 
-        different model
+    
+    C_dom: number of mixtures associated with nested TKF92 models (domain-level)
+        > here, C_dom = 1
+    C_frag: number of mixtures associated with TKF92 fragments (fragment-level)
+        > here, C_frag = 1
+    C_trans: C_dom * C_frag 1
+    B = batch size; number of samples
+    T = number of branch lengths; this could be: 
+        > an array of times for all samples (T; marginalize over these later)
+        > an array of time per sample (T=B)
+        > a quantized array of times per sample (T = T', where T' <= T)
+    S: number of transition states (4 here: M, I, D, start/end)
+    A: emission alphebet size (20 for proteins)
     
     
     Initialize with
     ----------------
     config : dict
-        config['num_mixtures'] :  int
-            number of emission site classes
+        config['num_domain_mixtures'] : int
+            number of larger TKF92 domain mixtures
+            (one domain type here)
+    
+        config['num_fragment_mixtures'] : int
+            number of TKF92 fragment mixtures 
+            (one fragment type here)
+        
+        config['num_site_mixtures'] : int
+            number of mixtures associated with the EMISSIONS
         
         config['indp_rate_mults'] :  bool
             if true, then rate multipliers are independent from latent
-            site classes; P(k|c) = P(k) and \rho_{c,k} = \rho{k}
+            site classes; P(k|c_tr, c_sites) = P(k) and \rho_{c_tr, c_sites, k} = \rho{k}
         
         config['subst_model_type'] : {gtr, hky85, f81}
             which substitution model
@@ -104,9 +121,6 @@ class IndpSites(ModuleBase):
     write_params
         write parameters to files
     
-    return_bound_sigmoid_limits
-        after initializing model, get the limits for bound_sigmoid activations
-    
     
     Methods inherited from models.model_utils.BaseClasses.ModuleBase
     -----------------------------------------------------------------
@@ -117,11 +131,17 @@ class IndpSites(ModuleBase):
     name: str
     
     def setup(self):
+        # not set up for domain or fragment level mixtures
+        assert self.config['num_fragment_mixtures'] == 1
+        assert self.config['num_domain_mixtures'] == 1
+        
         ###################
         ### read config   #
         ###################
         # required
-        num_mixtures = self.config['num_mixtures']
+        self.num_transit_mixtures = ( self.config['num_fragment_mixtures'] *
+                                 self.config['num_domain_mixtures'] )# C_tr
+        self.num_site_mixtures = self.config['num_site_mixtures']
         self.indp_rate_mults = self.config['indp_rate_mults']
         self.subst_model_type = self.config['subst_model_type'].lower()
         indel_model_type = self.config['indel_model_type']
@@ -132,57 +152,11 @@ class IndpSites(ModuleBase):
         self.norm_reported_loss_by = self.config.get('norm_reported_loss_by', 'desc_len')
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
         
-        ###############################################################
-        ### modules for probability of being in latent site classes,  #
-        ### probability of having a particular subsitution rate       #
-        ### rate multiplier, and the rate multipliers themselves      #
-        ###############################################################
-        # Latent site class probabilities
-        self.site_class_probability_module = SiteClassLogprobs(config = self.config,
-                                                  name = f'get site class probabilities')
         
-        # substitution rate multipliers
-        if not self.indp_rate_mults:
-            self.rate_mult_module = RateMultipliersPerClass(config = self.config,
-                                                      name = f'get rate multipliers')
-        
-        elif self.indp_rate_mults:
-            self.rate_mult_module = IndpRateMultipliers(config = self.config,
-                                                      name = f'get rate multipliers')
-        
-        
-        ###########################################
-        ### module for equilibrium distribution   #
-        ###########################################
-        if num_mixtures == 1:
-            self.equl_dist_module = EqulDistLogprobsFromCounts(config = self.config,
-                                                       name = f'get equilibrium')
-        elif num_mixtures > 1:
-            self.equl_dist_module = EqulDistLogprobsPerClass(config = self.config,
-                                                     name = f'get equilibrium')
-        
-        
-        ################################
-        ### module for logprob subst   #
-        ################################
-        if self.subst_model_type == 'gtr':
-            self.logprob_subst_module = GTRLogprobs( config = self.config,
-                                                  name = f'gtr subst. model' )
-            
-        elif self.subst_model_type == 'f81':
-            self.logprob_subst_module = F81Logprobs( config = self.config,
-                                                     name = f'f81 subst. model' )
-
-        elif self.subst_model_type == 'hky85':
-            self.logprob_subst_module = HKY85Logprobs( config = self.config,
-                                                    name = f'hky85 subst. model' )
-            # this only works with DNA
-            assert self.config['emission_alphabet_size'] == 4
-        
-        
-        ###########################################
-        ### module for transition probabilities   #
-        ###########################################        
+        ###################################################################
+        ### module for transition probabilities, and the fragment-level   #
+        ### mixture weights P(c_frag | c_dom)                             #
+        ###################################################################
         if self.indel_model_type is None:
             self.transitions_module = GeomLenTransitionLogprobs(config = self.config,
                                                      name = f'geom seq lengths model')
@@ -194,24 +168,82 @@ class IndpSites(ModuleBase):
         elif self.indel_model_type == 'tkf92':
             self.transitions_module = TKF92TransitionLogprobs(config = self.config,
                                                      name = f'tkf92 indel model')
+            
+            
+        ###############################################################
+        ### probability of having a particular subsitution rate       #
+        ### rate multiplier, and the rate multipliers themselves      #
+        ###############################################################
+        if not self.indp_rate_mults:
+            self.rate_mult_module = RateMultipliersPerClass(config = self.config,
+                                                      name = f'get rate multipliers')
         
+        elif self.indp_rate_mults:
+            self.rate_mult_module = IndpRateMultipliers(config = self.config,
+                                                      name = f'get rate multipliers')
+        
+        
+        ###############################################################
+        ### module for equilibrium distribution, and the site-level   # 
+        ### mixture weights P(c_sites | c_frag*c_dom)                 #
+        ###############################################################
+        if (self.num_transit_mixtures * self.num_site_mixtures) == 1:
+            self.equl_dist_module = EqulDistLogprobsFromCounts(config = self.config,
+                                                       name = f'get equilibrium')
+        elif (self.num_transit_mixtures * self.num_site_mixtures) > 1:
+            self.equl_dist_module = EqulDistLogprobsPerClass(config = self.config,
+                                                     name = f'get equilibrium')
+        
+        
+        ###########################################
+        ### module for substitution rate matrix   #
+        ###########################################
+        if self.subst_model_type == 'gtr':
+            self.logprob_subst_module = GTRLogprobs( config = self.config,
+                                                  name = f'gtr subst. model' )
+            
+        elif self.subst_model_type == 'f81':
+            self.logprob_subst_module = F81Logprobs( config = self.config,
+                                                     name = f'f81 subst. model' )
+
+        elif self.subst_model_type == 'hky85':
+            # this only works with DNA
+            assert self.config['emission_alphabet_size'] == 4
+
+            self.logprob_subst_module = HKY85Logprobs( config = self.config,
+                                                    name = f'hky85 subst. model' )
         
     def __call__(self,
                  batch,
                  t_array,
-                 sow_intermediates: bool,
-                 whole_dset_grad_desc: bool=False):
+                 sow_intermediates: bool):
         """
         Use this during active model training
         
-        returns:
-            - loss: average across the batch, based on joint log-likelihood
-                    
-            - aux_dict: has the following keys and values
-              1.) 'joint_neg_logP': sum down the length
-              2.) 'joint_neg_logP_length_normed': sum down the length,  
-                  normalized by desired length (set by self.norm_reported_loss_by)
-              3.) whether or not you used approximation formula for TKF indel model
+        
+        C_dom: number of mixtures associated with nested TKF92 models (domain-level)
+            > here, C_dom = 1
+        C_frag: number of mixtures associated with TKF92 fragments (fragment-level)
+            > here, C_frag = 1
+        C_trans: C_dom * C_frag 1
+        B = batch size; number of samples
+        T = number of branch lengths; this could be: 
+            > an array of times for all samples (T; marginalize over these later)
+            > an array of time per sample (T=B)
+            > a quantized array of times per sample (T = T', where T' <= T)
+        S: number of transition states (4 here: M, I, D, start/end)
+        A: emission alphebet size (20 for proteins)
+        
+        
+        Returns
+        -------
+        loss: average across the batch, based on joint log-likelihood
+                
+        aux_dict: has the following keys and values
+          1.) 'joint_neg_logP': sum down the length
+          2.) 'joint_neg_logP_length_normed': sum down the length,  
+              normalized by desired length (set by self.norm_reported_loss_by)
+          3.) whether or not you used approximation formula for TKF indel model
         """
         # which times to use for scoring matrices
         if self.times_from =='t_per_sample':
@@ -222,13 +254,15 @@ class IndpSites(ModuleBase):
 
         # get the scoring matrices needed
         # 
-        # scoring_matrices_dict has the following keys (when return_intermeds is False)
+        # scoring_matrices_dict has the following keys (when return_intermeds 
+        # is False and return_all_matrices is False):
         #   logprob_emit_at_indel, (A, )
         #   joint_logprob_emit_at_match, (T, A, A)
         #   all_transit_matrices, dict, with joint transit matrix being (T, S, S)
         #   used_approx, dict
         scoring_matrices_dict = self._get_scoring_matrices(t_array=times_for_matrices,
                                         sow_intermediates=sow_intermediates,
+                                        return_all_matrices = False,
                                         return_intermeds = False)
         
         # calculate loglikelihoods; provide both batch and t_array, just in case
@@ -248,10 +282,7 @@ class IndpSites(ModuleBase):
                                            return_intermeds = False )
         aux_dict['used_approx'] = scoring_matrices_dict['used_approx']
 
-        # if doing stochastic gradient descent, take the average over the batch
-        # if doing gradient descent with whole dataset, only use the sum
-        reduction = jnp.mean if not whole_dset_grad_desc else jnp.sum
-        loss = reduction( aux_dict['joint_neg_logP'] )
+        loss = jnp.mean( aux_dict['joint_neg_logP'] )
         
         return loss, aux_dict
     
@@ -262,6 +293,20 @@ class IndpSites(ModuleBase):
                                return_intermeds: bool=False):
         """
         Use this during final eval
+        
+        C_dom: number of mixtures associated with nested TKF92 models (domain-level)
+            > here, C_dom = 1
+        C_frag: number of mixtures associated with TKF92 fragments (fragment-level)
+            > here, C_frag = 1
+        C_trans: C_dom * C_frag 1
+        B = batch size; number of samples
+        T = number of branch lengths; this could be: 
+            > an array of times for all samples (T; marginalize over these later)
+            > an array of time per sample (T=B)
+            > a quantized array of times per sample (T = T', where T' <= T)
+        S: number of transition states (4 here: M, I, D, start/end)
+        A: emission alphebet size (20 for proteins)
+        
         
         returns all four loglikelihoods in a dictionary:
         
@@ -279,12 +324,7 @@ class IndpSites(ModuleBase):
             by desired length (set by self.norm_by)
         9.) whether or not you used approximation formula for TKF indel model
     
-        if returning intermediates, include extra things:
-            10.) rate matrix, (C, K)
-            11.) exchangeabilities, (A, A)
-            12.) cond_logprob_emit_at_match, (T, A, A) or (B, A, A)
-            12.) joint_transit_score, (B,)
-            12.) joint_emission_score, (B,)
+        if returning intermediates, include extra things
         """
         # which times to use for scoring matrices
         if self.times_from =='t_per_sample':
@@ -295,13 +335,16 @@ class IndpSites(ModuleBase):
 
         # get the scoring matrices needed
         # 
-        # scoring_matrices_dict has the following keys (when return_intermeds is False)
+        # scoring_matrices_dict has the following keys
+        # (when return_intermeds is False and return_all_matrices is True)
         #   logprob_emit_at_indel, (A, )
         #   joint_logprob_emit_at_match, (T, A, A)
-        #   all_transit_matrices, dict, with joint transit matrix being (T, S, S)
+        #   cond_logprob_emit_at_match, (T, A, A)
+        #   all_transit_matrices, dict
         #   used_approx, dict
         scoring_matrices_dict = self._get_scoring_matrices(t_array=times_for_matrices,
                                         sow_intermediates=False,
+                                        return_all_matrices = True,
                                         return_intermeds=True)
         
         #########################
@@ -379,102 +422,221 @@ class IndpSites(ModuleBase):
     def _get_scoring_matrices(self,
                              t_array,
                              sow_intermediates: bool,
-                             return_intermeds: bool):
-        # Probability of each site class; is one, if no site clases
-        log_class_probs = self.site_class_probability_module(sow_intermediates = sow_intermediates) #(C,)
+                             return_all_matrices: bool,
+                             return_intermeds: bool): 
+        """
+        C_dom: number of mixtures associated with nested TKF92 models (domain-level)
+            > here, this is one
+        C_frag: number of mixtures associated with TKF92 fragments (fragment-level)
+            > here, this is one
+        C_trans: C_dom * C_frag = 1
+        B = batch size; number of samples
+        T = number of branch lengths; this could be: 
+            > an array of times for all samples (T; marginalize over these later)
+            > an array of time per sample (T=B)
+            > a quantized array of times per sample (T = T', where T' <= T)
+        A: emission alphabet size (20 for proteins)
+        S: number of transition states (4 here: M, I, D, start/end)
+           
         
-        # Substitution rate multipliers
-        # both are (C, K)
-        log_rate_mult_probs, rate_multipliers = self.rate_mult_module(sow_intermediates = sow_intermediates,
-                                                                      log_class_probs = log_class_probs) 
+        Arguments
+        ----------
+        t_array : ArrayLike, (T,)
+            branch lengths, times for marginalizing over
         
+        return_all_matrices : bool
+            if false, only return the joint (used for model training)
+            if true, return joint, conditional, and marginal matrices
         
+        return_intermeds : bool
+            return other intermediates
+        
+        sow_intermediates : bool
+            switch for tensorboard logging
+          
+        Returns
+        -------
+        out_dict : dict
+        
+            always returns:
+                out_dict['logprob_emit_at_indel'] : (A,)
+                out_dict['joint_logprob_emit_at_match'] : (T, A, A)
+                out_dict['all_transit_matrices'] : dict
+                out_dict['used_approx'] : dict
+            
+            if return_all_matrices:
+                out_dict['cond_logprob_emit_at_match'] : (T, A, A)
+            
+            if return_intermeds:
+                out_dict['log_equl_dist_per_mixture'] : (C_sites, A)
+                out_dict['rate_multipliers'] : (C_sites, K)
+                out_dict['rate_matrix'] : (C_sites, A, A)
+                out_dict['exchangeabilities'] : (A, A)
+                out_dict['cond_subst_logprobs_per_mixture'] : (T, C_sites, K, A, A)
+                out_dict['joint_subst_logprobs_per_mixture'] :  (T, C_sites, K, A, A)
+                out_dict['log_site_class_probs'] : (C_sites)
+                out_dict['log_rate_mult_probs'] : (C_sites, K)
+        """
         ######################################################
-        ### build log-transformed equilibrium distribution   #
-        ### use this to score emissions from indels sites    #
+        ### build transition log-probability matrix, get     #
+        ### fragment-level mixture probs P(c_frag | c_dom)   #
         ######################################################
-        log_equl_dist_per_mixture = self.equl_dist_module(sow_intermediates = sow_intermediates) # (C, A)
+        if self.indel_model_type == 'tkf91':
+            out = self.transitions_module( t_array = t_array,
+                                           return_all_matrices = return_all_matrices,
+                                           sow_intermediates = sow_intermediates ) 
+            # all_transit_matrices['joint']: (T, S_from, S_to) 
+            # 
+            # if return_all_matrices is True, also include:
+            # all_transit_matrices['conditional']: (T, S_from, S_to) 
+            # all_transit_matrices['marginal']: (2, 2)
+            # all_transit_matrices['log_corr']: (1, 1)
+            all_transit_matrices = out[1]
+
+            # used_approx is a dictionary of boolean arrays
+            approx_flags_dict = out[2]
+            del out
+        
+        elif self.indel_model_type == 'tkf92':
+            out = self.transitions_module( t_array = t_array,
+                                           return_all_matrices = return_all_matrices,
+                                           sow_intermediates = sow_intermediates ) 
+            # all_transit_matrices['joint']: (T, C_dom=1, C_{frag_from}=1, C_{frag_to}=1, S_from, S_to)
+            # 
+            # if return_all_matrices is True, also include:
+            # all_transit_matrices['conditional']: (T, C_dom=1, C_{frag_from}=1, C_{frag_to}=1, S_from, S_to)
+            # all_transit_matrices['marginal']: (C_dom=1, C_{frag_from}=1, C_{frag_to}=1, 2, 2)
+            # all_transit_matrices['log_corr']: (C_dom=1, C_frag=1)
+            all_transit_matrices = out[1]
+
+            # used_approx is a dictionary of boolean arrays
+            approx_flags_dict = out[2]
+            del out
+            
+        elif self.indel_model_type is None:
+            # all_transit_matrices['joint']: (2,)
+            # used_approx is None
+            # 
+            # if return_all_matrices is True, also include:
+            # all_transit_matrices['conditional']: (2,)
+            # all_transit_matrices['marginal']: (2,)
+            # all_transit_matrices['log_corr']: float
+            out = self.transitions_module( t_array = t_array,
+                                           return_all_matrices = return_all_matrices,
+                                           sow_intermediates = sow_intermediates )
+            _, all_transit_matrices, used_approx = out
+        
+        
+        ###########################################################
+        ### build log-transformed equilibrium distribution; get   #
+        ### site-level mixture probability P(c_site | c_tr)       #
+        ###########################################################
+        # log_site_class_probs is (C_tr=1, C_sites)
+        # log_equl_dist_per_mixture is (C_tr=1, C_sites, A)
+        out = self.equl_dist_module(sow_intermediates = sow_intermediates) 
+        log_site_class_probs, log_equl_dist_per_mixture = out
+        del out
         
         # P(x) = \sum_c P(c) * P(x|c)
-        logprob_emit_at_indel = lse_over_equl_logprobs_per_mixture( log_class_probs = log_class_probs,
-                                                                    log_equl_dist_per_mixture = log_equl_dist_per_mixture) #(A,)
+        logprob_emit_at_indel = lse_over_equl_logprobs_per_mixture( log_site_class_probs = log_site_class_probs,
+                                                                    log_equl_dist_per_mixture = log_equl_dist_per_mixture ) #(C_tr, A)
+        
+        
+        ####################################################
+        ### site rate multipliers, and probabilities for   #
+        ### selecting a rate multiplier from the mixture   #
+        ####################################################
+        # Substitution rate multipliers
+        # both are (C_tr=1, C_sites, K)
+        log_rate_mult_probs, rate_multipliers = self.rate_mult_module( sow_intermediates = sow_intermediates,
+                                                                       log_site_class_probs = log_site_class_probs,
+                                                                       log_transit_class_probs = jnp.zeros(1,) ) 
         
         
         ####################################################
         ### build substitution log-probability matrix      #
         ### use this to score emissions from match sites   #
         ####################################################
-        # cond_logprobs_per_mixture is (T, C, K, A, A) or (B, C, K, A, A)
+        # cond_logprobs_per_mixture is (T, C_tr=1, C_sites, K, A, A) 
         # subst_module_intermeds is a dictionary of intermediates
-        out = self.logprob_subst_module( logprob_equl = log_equl_dist_per_mixture,
+        out = self.logprob_subst_module( log_equl_dist = log_equl_dist_per_mixture,
                                          rate_multipliers = rate_multipliers,
                                          t_array = t_array,
                                          sow_intermediates = sow_intermediates,
                                          return_cond = True,
-                                         return_intermeds = True )        
+                                         return_intermeds = return_intermeds )        
         cond_subst_logprobs_per_mixture, subst_module_intermeds = out
         del out
         
         # get the joint probability
+        # joint_subst_logprobs_per_mixture is (T, C_tr=1, C_sites, K, A, A)
         joint_subst_logprobs_per_mixture = joint_logprob_emit_at_match_per_mixture( cond_logprob_emit_at_match_per_mixture = cond_subst_logprobs_per_mixture,
-                                                                              log_equl_dist_per_mixture = log_equl_dist_per_mixture ) # (T, C, K, A, A) or (B, C, K, A, A)
+                                                                              log_equl_dist_per_mixture = log_equl_dist_per_mixture ) 
+        
+        # marginalize over classes and possible rate multipliers
+        joint_logprob_emit_at_match = lse_over_match_logprobs_per_mixture(log_site_class_probs = log_site_class_probs,
+                                                            log_rate_mult_probs = log_rate_mult_probs,
+                                                            logprob_emit_at_match_per_mixture = joint_subst_logprobs_per_mixture) # (T, C_tr=1, A, A)
+        
+        if return_all_matrices:
+            cond_logprob_emit_at_match = lse_over_match_logprobs_per_mixture(log_site_class_probs = log_site_class_probs,
+                                                            log_rate_mult_probs = log_rate_mult_probs,
+                                                            logprob_emit_at_match_per_mixture = cond_subst_logprobs_per_mixture) # (T, C_tr=1, A, A)
+
+        
+        ################################
+        ### suppress all unused dims   #
+        ################################
+        # indel model outputs, if TKF92
+        if self.indel_model_type == 'tkf92':
+            all_transit_matrices['joint'] = all_transit_matrices['joint'][:,0,0,0,...] # (T, S, S)
+    
+            if return_all_matrices:
+                all_transit_matrices['conditional'] = all_transit_matrices['conditional'][:,0,0,0,...] # (T, S, S)
+                all_transit_matrices['marginal'] = all_transit_matrices['marginal'][0,0,0,...] # (S, S)
+                all_transit_matrices['log_corr'] = all_transit_matrices['log_corr'][0,0] # float
+        
+        # equilibrium distribution module outputs
+        log_site_class_probs = log_site_class_probs[0,...] #(C_sites)
+        log_equl_dist_per_mixture = log_equl_dist_per_mixture[0,...] #(C_sites, A)
+        logprob_emit_at_indel = logprob_emit_at_indel[0,...] #(A)
+        
+        # rate multipliers module outputs
+        log_rate_mult_probs = log_rate_mult_probs[0,...] #(C_sites, K)
+        rate_multipliers = rate_multipliers[0,...] #(C_sites, K)
+        
+        # substitutuion module outputs
+        cond_subst_logprobs_per_mixture = cond_subst_logprobs_per_mixture[:, 0, ...] #(T, C_sites, K, A, A)
+        joint_subst_logprobs_per_mixture = joint_subst_logprobs_per_mixture[:, 0, ...] #(T, C_sites, K, A, A)
+        joint_logprob_emit_at_match = joint_logprob_emit_at_match[:, 0, ...] #(T, A, A)
+        
+        if return_all_matrices:
+            cond_logprob_emit_at_match = cond_logprob_emit_at_match[:,0,...] #(T, A, A)
         
         
-        # marginalize over c classes and k possible rate multipliers
-        joint_logprob_emit_at_match = lse_over_match_logprobs_per_mixture(log_class_probs = log_class_probs,
-                                                                          log_rate_mult_probs = log_rate_mult_probs,
-                                                                          logprob_emit_at_match_per_mixture = joint_subst_logprobs_per_mixture) #(T, A, A) or (B, A, A)
-        cond_logprob_emit_at_match = lse_over_match_logprobs_per_mixture(log_class_probs = log_class_probs,
-                                                                         log_rate_mult_probs = log_rate_mult_probs,
-                                                                         logprob_emit_at_match_per_mixture = cond_subst_logprobs_per_mixture) #(T, A, A) or (B, A, A)
-        
-        
-        ####################################################
-        ### build transition log-probability matrix        #
-        ####################################################
-        if self.indel_model_type == 'tkf91':
-            # all_transit_matrices['joint']: (T, C, C, S, S) or (B, C, C, S, S)
-            # all_transit_matrices['conditional']: (T, C, C, S, S) or (B, C, C, S, S)
-            # all_transit_matrices['marginal']: (C, C, 2, 2)
-            # used_approx is a dictionary of boolean arrays
-            all_transit_matrices, used_approx = self.transitions_module(t_array = t_array,
-                                                           sow_intermediates = sow_intermediates) 
-        
-        elif self.indel_model_type == 'tkf92':
-            # all_transit_matrices['joint']: (T, C, C, S, S) or (B, C, C, S, S)
-            # all_transit_matrices['conditional']: (T, C, C, S, S) or (B, C, C, S, S)
-            # all_transit_matrices['marginal']: (C, C, 2, 2)
-            # used_approx is a dictionary of boolean arrays
-            all_transit_matrices, used_approx = self.transitions_module(t_array = t_array,
-                                                           log_class_probs = jnp.array([0.]),
-                                                           sow_intermediates = sow_intermediates)
-            
-            # C=1, so remove intermediate dims
-            all_transit_matrices['joint'] = all_transit_matrices['joint'][:,0,0,...] # (T, S, S)
-            all_transit_matrices['conditional'] = all_transit_matrices['conditional'][:,0,0,...] # (T, S, S)
-            all_transit_matrices['marginal'] = all_transit_matrices['marginal'][0,0,...] # (T, S, S)
-        
-        elif self.indel_model_type is None:
-            # all_transit_matrices['joint']: (2, 1)
-            # all_transit_matrices['conditional']: (2, 1)
-            # all_transit_matrices['marginal']: (2, 1)
-            # used_approx is None
-            all_transit_matrices, used_approx = self.transitions_module(sow_intermediates = sow_intermediates)
-            
+        #####################
+        ### decide output   #
+        #####################
+        # always returned (at training, at final eval, etc.)
         out_dict = {'logprob_emit_at_indel': logprob_emit_at_indel, #(A,)
                     'joint_logprob_emit_at_match': joint_logprob_emit_at_match, #(T,A,A)
                     'all_transit_matrices': all_transit_matrices, #dict
                     'used_approx': used_approx} #dict
         
+        # returned if you need conditional and marginal logprob matrices
+        if return_all_matrices:
+            out_dict['cond_logprob_emit_at_match'] = cond_logprob_emit_at_match #(T, A, A)
+        
+        # all intermediates
         if return_intermeds:
-            to_add = {'rate_matrix': subst_module_intermeds.get('rate_matrix',None), #(C,A,A) or None
+            to_add = {'log_equl_dist_per_mixture': log_equl_dist_per_mixture, #(C_sites, A)
+                      'rate_multipliers': rate_multipliers, #(C_sites, K)
+                      'rate_matrix': subst_module_intermeds.get('rate_matrix',None), #(C_sites,A,A) or None
                       'exchangeabilities': subst_module_intermeds.get('exchangeabilities',None), #(A,A) or None
-                      'cond_logprob_emit_at_match': cond_logprob_emit_at_match, #(T, A, A)
-                      'cond_subst_logprobs_per_mixture': cond_subst_logprobs_per_mixture, # (T, C, K, A, A)
-                      'joint_subst_logprobs_per_mixture': joint_subst_logprobs_per_mixture, # (T, C, K, A, A) 
-                      'log_equl_dist_per_mixture': log_equl_dist_per_mixture, #(C, A)
-                      'log_class_probs': log_class_probs, #(C,)
-                      'log_rate_mult_probs': log_rate_mult_probs } #(K,C)
+                      'cond_subst_logprobs_per_mixture': cond_subst_logprobs_per_mixture, # (T, C_sites, K, A, A)
+                      'joint_subst_logprobs_per_mixture': joint_subst_logprobs_per_mixture, # (T, C_sites, K, A, A) 
+                      'log_site_class_probs': log_site_class_probs, #(C_sites,)
+                      'log_rate_mult_probs': log_rate_mult_probs } #(C_sites, K)
             out_dict = {**out_dict, **to_add}
         
         return out_dict
@@ -509,6 +671,7 @@ class IndpSites(ModuleBase):
         ###################################
         out = self._get_scoring_matrices(t_array=t_array,
                                          sow_intermediates=False,
+                                         return_all_matrices=True,
                                          return_intermeds=True)
         
         # final conditional and joint prob of match (before and after LSE over classes)
@@ -545,7 +708,7 @@ class IndpSites(ModuleBase):
             ### these are always returned #
             ###############################
             ### substitution rate matrix
-            rate_matrix = out['rate_matrix'] #(C, A, A) or None
+            rate_matrix = out['rate_matrix'] #(C_sites, A, A) or None
             if rate_matrix is not None:
                 key = f'{prefix}_rate_matrix'
                 write_matrix_to_npy( out_folder, rate_matrix, key )
@@ -553,7 +716,7 @@ class IndpSites(ModuleBase):
                 
                 for c in range(rate_matrix.shape[0]):
                     mat_to_save = rate_matrix[c,...]
-                    key = f'{prefix}_class-{c}_rate_matrix'
+                    key = f'{prefix}_site-class-{c}_rate_matrix'
                     maybe_write_matrix_to_ascii( out_folder, mat_to_save, key )
                     del mat_to_save, key
                     
@@ -571,19 +734,19 @@ class IndpSites(ModuleBase):
                 del mat, new_key
                 
                 
-                ### site class probs (if num_mixtures > 1)
-                if self.config['num_mixtures'] > 1:
-                    class_probs = nn.softmax(self.site_class_probability_module.class_logits) #(C,)
-                    key = f'{prefix}_class_probs'
-                    write_matrix_to_npy( out_folder, class_probs, key )
-                    maybe_write_matrix_to_ascii( out_folder, class_probs, key )
-                    del key
+                ### site class probs (if num_site_mixtures > 1)
+                if self.num_site_mixtures > 1:
+                    site_class_probs = np.exp(out['log_site_class_probs']) #(C_sites,)
+                    key = f'{prefix}_site_class_probs'
+                    write_matrix_to_npy( out_folder, site_class_probs, key )
+                    maybe_write_matrix_to_ascii( out_folder, site_class_probs, key )
+                    del key, site_class_probs
                     
                     
                 ### rate multipliers 
                 # P(K|C) or P(K), if not 1
                 if not self.rate_mult_module.prob_rate_mult_is_one:
-                    rate_mult_probs = nn.softmax(self.rate_mult_module.rate_mult_prob_logits, axis=-1) #(C,K) or (K,)
+                    rate_mult_probs = np.exp(out['log_rate_mult_probs']) #(C_sites,K)
                     key = f'{prefix}_rate_mult_probs'
                     write_matrix_to_npy( out_folder, rate_mult_probs, key )
                     maybe_write_matrix_to_ascii( out_folder, rate_mult_probs, key )
@@ -591,43 +754,43 @@ class IndpSites(ModuleBase):
                 
                 # \rho_{c,k} or \rho_k
                 if not self.rate_mult_module.use_unit_rate_mult:
-                    rate_multipliers = self.rate_mult_module.rate_multiplier_activation( self.rate_mult_module.rate_mult_logits ) #(C,K) or (K,)
+                    rate_multipliers = out['rate_multipliers'] #(C_sites,K)
                     key = f'{prefix}_rate_multipliers'
                     write_matrix_to_npy( out_folder, rate_multipliers, key )
                     maybe_write_matrix_to_ascii( out_folder, rate_multipliers, key )
-                    del key
+                    del key, logits
                     
                     
                 ### exchangeabilities, if gtr or hky85
                 exchangeabilities = out['exchangeabilities'] #(A, A) or None
                 
-                if exchangeabilities is not None:
-                    if self.subst_model_type == 'gtr':
-                        key = f'{prefix}_gtr-exchangeabilities'
-                        write_matrix_to_npy( out_folder, exchangeabilities, key )
-                        maybe_write_matrix_to_ascii( out_folder, exchangeabilities, key )
-                        del key
-                        
-                    elif self.subst_model_type == 'hky85':
-                        ti = exchangeabilities[0, 2]
-                        tv = exchangeabilities[0, 1]
-                        arr = np.array( [ti, tv] )
-                        key = f'{prefix}_hky85_ti_tv'
-                        write_matrix_to_npy( out_folder, arr, key )
-                        
-                        with open(f'{out_folder}/ASCII_{prefix}_hky85_ti_tv.txt','w') as g:
-                            g.write(f'transition rate, ti: {ti}\n')
-                            g.write(f'transition rate, tv: {tv}')
-                        del key, arr
-                        
+                if self.subst_model_type == 'gtr':
+                    key = f'{prefix}_gtr-exchangeabilities'
+                    write_matrix_to_npy( out_folder, exchangeabilities, key )
+                    maybe_write_matrix_to_ascii( out_folder, exchangeabilities, key )
+                    del key
+                    
+                elif self.subst_model_type == 'hky85':
+                    ti = exchangeabilities[0, 2]
+                    tv = exchangeabilities[0, 1]
+                    arr = np.array( [ti, tv] )
+                    key = f'{prefix}_hky85_ti_tv'
+                    write_matrix_to_npy( out_folder, arr, key )
+                    
+                    with open(f'{out_folder}/ASCII_{prefix}_hky85_ti_tv.txt','w') as g:
+                        g.write(f'transition rate, ti: {ti}\n')
+                        g.write(f'transition rate, tv: {tv}')
+                    del key, arr
+                    
                         
                 ### equilibrium distribution (BEFORE marginalizing over site clases)
                 if 'logits' in dir(self.equl_dist_module):
-                    equl_dist = nn.softmax( self.equl_dist_module.logits, axis=1 ) #(C, A)
-                    key = f'{prefix}_equilibriums-per-class'
+                    equl_dist = np.exp(out['log_equl_dist_per_mixture']) #(C_sites, A)
+                    key = f'{prefix}_equilibriums-per-site-class'
                     write_matrix_to_npy( out_folder, equl_dist, key )
                     maybe_write_matrix_to_ascii( out_folder, equl_dist, key )
                     del key
+                    
                     
                 ####################################################
                 ### extract transition paramaters, intermediates   # 
@@ -647,7 +810,7 @@ class IndpSites(ModuleBase):
                         g.write(f'1-P(emit): {1 - geom_p_emit}\n')
                         
                         
-                ### for TKF models
+                ### for TKF models (not saved to intermediates)
                 elif self.indel_model_type in ['tkf91', 'tkf92']:
                     # always write lambda and mu
                     # also record if you used any tkf approximations
@@ -680,23 +843,23 @@ class IndpSites(ModuleBase):
                     if self.indel_model_type == 'tkf92':
                         r_extend_min_val = self.transitions_module.r_extend_min_val
                         r_extend_max_val = self.transitions_module.r_extend_max_val
-                        r_extend_logits = self.transitions_module.r_extend_logits #(C)
+                        r_extend_logits = self.transitions_module.r_extend_logits #(C_dom=1, C_frag=1)
                         
                         r_extend = bound_sigmoid(x = r_extend_logits,
                                                  min_val = r_extend_min_val,
-                                                 max_val = r_extend_max_val) #(C)
+                                                 max_val = r_extend_max_val) #(C_dom=1, C_frag=1)
                         
-                        mean_indel_lengths = 1 / (1 - r_extend) #(C)
+                        mean_indel_lengths = 1 / (1 - r_extend) #(C_dom=1, C_frag=1)
                         
                         with open(f'{out_folder}/ASCII_{prefix}_{self.indel_model_type}_indel_params.txt','a') as g:
                             g.write(f'extension prob, r: ')
-                            [g.write(f'{elem}\t') for elem in r_extend]
+                            [g.write(f'{elem}\t') for elem in r_extend.flatten()]
                             g.write('\n')
                             g.write(f'mean indel length: ')
                             [g.write(f'{elem}\t') for elem in mean_indel_lengths]
                             g.write('\n')
                         
-                        out_dict['r_extend'] = r_extend #(C,)
+                        out_dict['r_extend'] = r_extend #(C_dom=1, C_frag=1)
                     
                     with open(f'{out_folder}/PARAMS-DICT_{prefix}_{self.indel_model_type}_indel_params.pkl','wb') as g:
                         pickle.dump(out_dict, g)
@@ -753,11 +916,6 @@ class IndpSitesLoadAll(IndpSites):
         calculate logP(anc, desc, align), logP(anc), logP(desc), and
         logP(desc, align | anc)
     
-    
-    return_bound_sigmoid_limits
-        after initializing model, get the limits for bound_sigmoid activations
-    
-    
     Methods inherited from models.model_utils.BaseClasses.ModuleBase
     -----------------------------------------------------------------
     sow_histograms_scalars
@@ -767,11 +925,17 @@ class IndpSitesLoadAll(IndpSites):
     name: str
     
     def setup(self):
+        # not set up for domain or fragment level mixtures
+        assert self.config['num_fragment_mixtures'] == 1
+        assert self.config['num_domain_mixtures'] == 1
+        
         ###################
         ### read config   #
         ###################
         # required
-        num_mixtures = self.config['num_mixtures']
+        self.num_transit_mixtures = ( self.config['num_fragment_mixtures'] *
+                                 self.config['num_domain_mixtures'] )# C_tr
+        self.num_site_mixtures = self.config['num_site_mixtures']
         self.indp_rate_mults = self.config['indp_rate_mults']
         self.subst_model_type = self.config['subst_model_type'].lower()
         indel_model_type = self.config['indel_model_type']
@@ -782,46 +946,6 @@ class IndpSitesLoadAll(IndpSites):
         self.norm_reported_loss_by = self.config.get('norm_reported_loss_by', 'desc_len')
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1)
         
-        
-        ###############################################################
-        ### modules for probability of being in latent site classes,  #
-        ### probability of having a particular subsitution rate       #
-        ### rate multiplier, and the rate multipliers themselves      #
-        ###############################################################
-        # Latent site class probabilities
-        self.site_class_probability_module = SiteClassLogprobsFromFile(config = self.config,
-                                                  name = f'get site class probabilities')
-        
-        # substitution rate multipliers
-        if not self.indp_rate_mults:
-            self.rate_mult_module = RateMultipliersPerClassFromFile(config = self.config,
-                                                      name = f'get rate multipliers')
-        
-        elif self.indp_rate_mults:
-            self.rate_mult_module = IndpRateMultipliersFromFile(config = self.config,
-                                                      name = f'get rate multipliers')
-        
-        ###########################################
-        ### module for equilibrium distribution   #
-        ###########################################
-        self.equl_dist_module = EqulDistLogprobsFromFile(config = self.config,
-                                                          name = f'get equilibrium')
-        
-        ###########################################
-        ### module for substitution rate matrix   #
-        ###########################################
-        if self.subst_model_type == 'gtr':
-            self.logprob_subst_module = GTRLogprobsFromFile( config = self.config,
-                                                  name = f'gtr subst. model' )
-            
-        elif self.subst_model_type == 'f81':
-            self.logprob_subst_module = F81LogprobsFromFile( config = self.config,
-                                                     name = f'f81 subst. model' )
-
-        elif self.subst_model_type == 'hky85':
-            self.logprob_subst_module = HKY85LogprobsFromFile( config = self.config,
-                                                    name = f'hky85 subst. model' )
-            
         
         ###########################################
         ### module for transition probabilities   #
@@ -837,4 +961,47 @@ class IndpSitesLoadAll(IndpSites):
         elif self.indel_model_type == 'tkf92':
             self.transitions_module = TKF92TransitionLogprobsFromFile(config = self.config,
                                                      name = f'tkf92 indel model')
+        
+        
+        ###############################################################
+        ### probability of having a particular subsitution rate       #
+        ### rate multiplier, and the rate multipliers themselves      #
+        ###############################################################
+        if not self.indp_rate_mults:
+            self.rate_mult_module = RateMultipliersPerClassFromFile(config = self.config,
+                                                      name = f'get rate multipliers')
+        
+        elif self.indp_rate_mults:
+            self.rate_mult_module = IndpRateMultipliersFromFile(config = self.config,
+                                                      name = f'get rate multipliers')
+        
+        
+        ###############################################################
+        ### module for equilibrium distribution, and the site-level   # 
+        ### mixture weights P(c_sites | c_frag*c_dom)                 #
+        ###############################################################
+        self.equl_dist_module = EqulDistLogprobsFromFile(config = self.config,
+                                                          name = f'get equilibrium')
+        
+        
+        ###########################################
+        ### module for substitution rate matrix   #
+        ###########################################
+        if self.subst_model_type == 'gtr':
+            self.logprob_subst_module = GTRLogprobsFromFile( config = self.config,
+                                                  name = f'gtr subst. model' )
+            
+        elif self.subst_model_type == 'f81':
+            self.logprob_subst_module = F81LogprobsFromFile( config = self.config,
+                                                     name = f'f81 subst. model' )
+
+        elif self.subst_model_type == 'hky85':
+            # this only works with DNA
+            assert self.config['emission_alphabet_size'] == 4
+
+            self.logprob_subst_module = HKY85LogprobsFromFile( config = self.config,
+                                                    name = f'hky85 subst. model' )
+            
+        
+        
                    
