@@ -472,7 +472,7 @@ def lse_over_match_logprobs_per_mixture(log_site_class_probs: jnp.array,
 
     """
     # P(C_sites, K | C_trans) = P(C_sites | C_trans) * P(K | C_trans, C_sites)
-    log_mixture_weight = log_class_probs[:, None] + log_rate_mult_probs #(C_tr, C_s, K)
+    log_mixture_weight = log_site_class_probs[..., None] + log_rate_mult_probs #(C_tr, C_s, K)
     
     # apply per-class and per-mixture weighting
     weighted_logprobs = ( log_mixture_weight[None, :, :, :, None, None] + 
@@ -508,10 +508,8 @@ def lse_over_equl_logprobs_per_mixture(log_site_class_probs: ArrayLike,
     ArrayLike, (C_trans, A)
     
     """
-    weighted_logprobs = log_equl_dist_per_mixture + log_class_probs[..., None] #(C_tr, C_s, A)
+    weighted_logprobs = log_equl_dist_per_mixture + log_site_class_probs[..., None] #(C_tr, C_s, A)
     return logsumexp( weighted_logprobs, axis=1 ) #(C_trans, A)
-
-
 
 
 
@@ -1916,7 +1914,6 @@ def joint_only_forward(aligned_inputs,
         classes C. This leaves you with the joint probability of the observed 
         alignment, at all branch lengths in T
     """
-    
     ######################################################
     ### initialize with <start> -> any (curr pos is 1)   #
     ######################################################

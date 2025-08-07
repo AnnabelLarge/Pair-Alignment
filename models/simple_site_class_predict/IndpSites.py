@@ -524,7 +524,7 @@ class IndpSites(ModuleBase):
             out = self.transitions_module( t_array = t_array,
                                            return_all_matrices = return_all_matrices,
                                            sow_intermediates = sow_intermediates )
-            _, all_transit_matrices, used_approx = out
+            _, all_transit_matrices, approx_flags_dict = out
         
         
         ###########################################################
@@ -621,7 +621,7 @@ class IndpSites(ModuleBase):
         out_dict = {'logprob_emit_at_indel': logprob_emit_at_indel, #(A,)
                     'joint_logprob_emit_at_match': joint_logprob_emit_at_match, #(T,A,A)
                     'all_transit_matrices': all_transit_matrices, #dict
-                    'used_approx': used_approx} #dict
+                    'used_approx': approx_flags_dict} #dict
         
         # returned if you need conditional and marginal logprob matrices
         if return_all_matrices:

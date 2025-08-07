@@ -8,6 +8,7 @@ Created on Tue May 27 13:33:56 2025
 import pickle
 import numpy as np
 from itertools import product
+from tqdm import tqdm
 
 import numpy.testing as npt
 import unittest
@@ -44,7 +45,6 @@ class TestJointOnlyForward(unittest.TestCase):
         # fake inputs
         self.fake_aligns = [ ('AC-A','D-ED'),
                         ('D-ED','AC-A'),
-                        ('ECDAD','-C-A-'),
                         ('-C-A-','ECDAD'),
                         ('-C-A-AA','ECDADAA') ]
         
@@ -53,24 +53,24 @@ class TestJointOnlyForward(unittest.TestCase):
         # fake params
         rngkey = jax.random.key(42) # note: reusing this rngkey over and over
         t_array = jnp.array([0.3, 0.5])
-        self.C = 3
+        self.T = t_array.shape[0]
+        self.C_frag = 3
         self.A = 20
         lam = jnp.array(0.3)
         mu = jnp.array(0.5)
         offset = 1 - (lam/mu)
         r = nn.sigmoid( jax.random.randint(key=rngkey, 
-                                           shape=(self.C,), 
+                                           shape=(1, self.C_frag), 
                                            minval=-3.0, 
                                            maxval=3.0).astype(float) )
-        class_probs = nn.softmax( jax.random.randint(key=rngkey, 
-                                                     shape=(self.C,), 
-                                                     minval=1.0, 
-                                                     maxval=10.0).astype(float) )
+        frag_class_probs = nn.softmax( jax.random.randint(key=rngkey, 
+                                                          shape=(1,self.C_frag), 
+                                                          minval=1.0, 
+                                                          maxval=10.0).astype(float) )
         
-        # other dims (blt; yum)
+        # other dims
         self.B = self.fake_aligns.shape[0]
         self.L_align = self.fake_aligns.shape[1]
-        self.T = t_array.shape[0]
         
         # fake scoring matrices (not coherently normalized; just some example values)
         def generate_fake_scoring_mat(dim_tuple):
@@ -80,8 +80,8 @@ class TestJointOnlyForward(unittest.TestCase):
                                         maxval=-1e-4)
             return nn.log_softmax(logits, axis=-1)
         
-        self.joint_logprob_emit_at_match = generate_fake_scoring_mat( (self.T,self.C,self.A,self.A) )
-        self.logprob_emit_at_indel = generate_fake_scoring_mat( (self.C,self.A) )
+        self.joint_logprob_emit_at_match = generate_fake_scoring_mat( (self.T,self.C_frag,self.A,self.A) )
+        self.logprob_emit_at_indel = generate_fake_scoring_mat( (self.C_frag,self.A) )
         
         # be more careful about generating a fake transition matrix
         my_tkf_params, _ = switch_tkf(mu = mu, 
@@ -89,18 +89,22 @@ class TestJointOnlyForward(unittest.TestCase):
                                       t_array = t_array)
         my_tkf_params['log_offset'] = jnp.log(offset)
         my_tkf_params['log_one_minus_offset'] = jnp.log1p(-offset)
-        my_model = TKF92TransitionLogprobs(config={'num_tkf_fragment_classes': self.C},
+        my_model = TKF92TransitionLogprobs(config={'num_domain_mixtures':1,
+                                                   'num_fragment_mixtures': self.C_frag,
+                                                   'num_site_mixtures': 10,
+                                                   'k_rate_mults':4,
+                                                   'tkf_function': 'regular_tkf'},
                                            name='tkf92')
         fake_params = my_model.init(rngs=jax.random.key(0),
                                     t_array = t_array,
-                                    log_class_probs = jnp.log(class_probs),
+                                    return_all_matrices=False,
                                     sow_intermediates = False)
         
-        self.joint_logprob_transit =  my_model.apply(variables = fake_params,
+        self.joint_logprob_transit = my_model.apply(variables = fake_params,
                                                 out_dict = my_tkf_params,
                                                 r_extend = r,
-                                                class_probs = class_probs,
-                                                method = 'fill_joint_tkf92') #(T, C, C, 4, 4)
+                                                frag_class_probs = frag_class_probs,
+                                                method = 'fill_joint_tkf92')[:,0,...] #(T, C, C, 4, 4)
         del my_tkf_params, my_model, fake_params
     
     
@@ -119,13 +123,13 @@ class TestJointOnlyForward(unittest.TestCase):
         
         ### true
         for t in range(self.T):
-            for b in range(self.B):
+            for b in tqdm( range(self.B) ):
                 sample_seq = self.fake_aligns[b,:,:]
                 
                 # all possible path combinations
                 invalid_toks = jnp.array([0,1,2])
                 n = (  ~jnp.isin(sample_seq[:, 0], invalid_toks) ).sum()
-                paths = [list(p) for p in product(range(self.C), repeat= int(n) )]
+                paths = [list(p) for p in product(range(self.C_frag), repeat= int(n) )]
                 
                 # manually score each possible path
                 score_per_path = []

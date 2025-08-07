@@ -64,7 +64,7 @@ class TestJointCondMargWithScoringFuncs(unittest.TestCase):
         self.t_array = jnp.array([0.1, 0.2, 0.3])
         tkf_params = {'lambda': np.array(0.1),
                       'mu': np.array(0.11),
-                      'r_extend': np.array([0.9])}
+                      'r_extend': np.array([[0.9]])}
         
         # save params to files to load
         with open(f'{self.req_files_path}/equl_dist.npy','wb') as g:
@@ -84,39 +84,41 @@ class TestJointCondMargWithScoringFuncs(unittest.TestCase):
         ### use IndpSitesLoadAll to generate the scoring matrices   #
         #############################################################
         # init object
-        pairhmm_config = {'num_mixtures':1,
-                         'num_tkf_fragment_classes': 1,
-                         'k_rate_mults':1,
-                         'subst_model_type': subst_model_type,
-                         'indel_model_type': indel_model_type,
-                         'indp_rate_mults': False,
-                         'times_from': 't_array_from_file',
-                         'exponential_dist_param': 1.1,
-                         'training_dset_emit_counts': self.training_dset_emit_counts,
-                         'emission_alphabet_size': self.A,
-                         'tkf_function_name': 'regular',
-                         'filenames': {'exch': f'{self.req_files_path}/LG08_exchangeability_vec.npy',
-                                       'equl_dist': f'{self.req_files_path}/equl_dist.npy',
-                                       'tkf_params_file': f'{self.req_files_path}/tkf_params_file.pkl'}}
+        pairhmm_config = {'num_domain_mixtures': 1,
+                          'num_fragment_mixtures': 1,
+                          'num_site_mixtures': 1,
+                          'k_rate_mults':1,
+                          'subst_model_type': subst_model_type,
+                          'indel_model_type': indel_model_type,
+                          'indp_rate_mults': False,
+                          'times_from': 't_array_from_file',
+                          'exponential_dist_param': 1.1,
+                          'training_dset_emit_counts': self.training_dset_emit_counts,
+                          'emission_alphabet_size': self.A,
+                          'tkf_function': 'regular_tkf',
+                          'filenames': {'exch': f'{self.req_files_path}/LG08_exchangeability_vec.npy',
+                                        'equl_dist': f'{self.req_files_path}/equl_dist.npy',
+                                        'tkf_params_file': f'{self.req_files_path}/tkf_params_file.pkl'}}
         pairhmm = IndpSitesLoadAll(config=pairhmm_config,
                             name='pairhmm')
         
         scoring_mat_dict = pairhmm.apply( variables={},
                                           t_array=self.t_array,
                                           return_intermeds=True,
+                                          return_all_matrices=True,
                                           sow_intermediates=False,
                                           method = '_get_scoring_matrices')
         
         
         ### joint, anc, cond
         scores = joint_prob_from_counts( batch = self.pairhmm_batch,
-                                           times_from = pairhmm_config['times_from'],
-                                           score_indels = True,
-                                           scoring_matrices_dict = scoring_mat_dict,
-                                           t_array = self.t_array,
-                                           exponential_dist_param = pairhmm_config['exponential_dist_param'],
-                                           norm_reported_loss_by = 'desc_len',
-                                           return_intermeds= True )
+                                            times_from = pairhmm_config['times_from'],
+                                            score_indels = True,
+                                            scoring_matrices_dict = scoring_mat_dict,
+                                            t_array = self.t_array,
+                                            exponential_dist_param = pairhmm_config['exponential_dist_param'],
+                                            norm_reported_loss_by = 'desc_len',
+                                            return_intermeds= True )
         
         to_add = anc_marginal_probs_from_counts( batch = self.pairhmm_batch,
                                             score_indels = True,
@@ -140,17 +142,17 @@ class TestJointCondMargWithScoringFuncs(unittest.TestCase):
         del to_add
         
         
-        #############################
+        ##########################
         ### check for validity   #
-        #############################
+        ##########################
         npt.assert_allclose( scores['cond_emission_score'], 
-                             scores['joint_emission_score'] - scores['anc_marg_emit_score'] )
+                              scores['joint_emission_score'] - scores['anc_marg_emit_score'] )
         
         npt.assert_allclose( scores['cond_transit_score'], 
-                             scores['joint_transit_score'] - scores['anc_marg_transit_score'] )
+                              scores['joint_transit_score'] - scores['anc_marg_transit_score'] )
         
         npt.assert_allclose( -scores['cond_neg_logP'], 
-                             -scores['joint_neg_logP'] - -scores['anc_neg_logP'] )
+                              -scores['joint_neg_logP'] - -scores['anc_neg_logP'] )
         
     
     def test_tkf91_f81_validity(self):

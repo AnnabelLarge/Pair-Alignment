@@ -40,6 +40,8 @@ from models.simple_site_class_predict.model_functions import (bound_sigmoid,
                                                               safe_log,
                                                               cond_logprob_emit_at_match_per_mixture,
                                                               joint_logprob_emit_at_match_per_mixture,
+                                                              lse_over_equl_logprobs_per_mixture,
+                                                              lse_over_match_logprobs_per_mixture,
                                                               joint_only_forward,
                                                               all_loglikes_forward,
                                                               marginalize_over_times,
@@ -131,8 +133,8 @@ class FragAndSiteClasses(ModuleBase):
     name: str
     
     def setup(self):
-        # not set up for domain level mixtures
         assert self.config['num_domain_mixtures'] == 1
+        
         
         ###################
         ### read config   #
@@ -254,6 +256,7 @@ class FragAndSiteClasses(ModuleBase):
         #   used_approx, dict
         scoring_matrices_dict = self._get_scoring_matrices(t_array=times_for_matrices,
                                                            sow_intermediates=sow_intermediates,
+                                                           return_all_matrices = False,
                                                            return_intermeds=False)
         
         
@@ -375,6 +378,7 @@ class FragAndSiteClasses(ModuleBase):
         #   used_approx, dict
         scoring_matrices_dict = self._get_scoring_matrices( t_array=times_for_matrices,
                                                             sow_intermediates=False,
+                                                            return_all_matrices = True,
                                                             return_intermeds=False )
         
         
@@ -575,10 +579,10 @@ class FragAndSiteClasses(ModuleBase):
         ### decide output   #
         #####################
         # always returned (at training, at final eval, etc.)
-        out_dict = {'logprob_emit_at_indel': log_equl_dist_per_mixture, #(C_frag, A)
+        out_dict = {'logprob_emit_at_indel': logprob_emit_at_indel, #(C_frag, A)
                     'joint_logprob_emit_at_match': joint_logprob_emit_at_match, #(T, C_frag, A, A)
                     'all_transit_matrices': all_transit_matrices, #dict
-                    'used_approx': used_approx} #dict
+                    'used_approx': approx_flags_dict} #dict
         
         # returned if you need conditional and marginal logprob matrices
         if return_all_matrices:

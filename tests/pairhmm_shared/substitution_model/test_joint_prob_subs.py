@@ -134,7 +134,7 @@ class TestJointProbSubs(unittest.TestCase):
                                                'num_site_mixtures': self.C,
                                                'k_rate_mults': self.K,
                                                'emission_alphabet_size': self.A,
-                                                'exchangeabilities_mat': self.exchangeabilities})
+                                               'exchangeabilities_mat': self.exchangeabilities})
         
         init_params = my_model.init(rngs = jax.random.key(0),
                                     log_equl_dist = np.log(self.equilibrium_distributions),

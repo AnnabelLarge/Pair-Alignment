@@ -1,6 +1,6 @@
 Status:
 =======
-7/21/25: all pass
+8/6/25: all pass
 
 
 Summary: 
@@ -19,11 +19,11 @@ All flax modules tested:
 
 All tests:
 ===========
-test_marg_over_k_rate_mults
+test_marg_over_site_mixes
 ---------------------------
 CALCULATION TESTED: \sum_k P(k|c) P(x,y|k,c,t)
 
-ABOUT: have to marginalize over k rate multipliers when generating emission probability matrices; make sure this is happening correclty
+ABOUT: have to marginalize over k rate multipliers when generating emission probability matrices; make sure this is happening correctly. Technically, this is already tested in tests/pairhmm_site_class_mixtures/test_indp_site_classes_loglikes.py. This just makes sure the same calculation works when done with FragAndSiteClasses model.
 
 functions tested:
 - FragAndSiteClasses._get_scoring_matrices (particularly the marginalization over k classes)
@@ -53,4 +53,3 @@ functions tested:
 TODO:
 =====
 - INPROGRESS.py: unit test for full forward-backwards
-- for completeness, should also have some version of "compare against hand-done calculations" using full model (but full model is basically a wrapper for all these function calls, so it probably works)

@@ -57,18 +57,19 @@ class TestAllLoglikesForward(unittest.TestCase):
         
         # fake params
         rngkey = jax.random.key(42) # note: reusing this rngkey over and over
-        self.t_array = jnp.array([0.3, 0.5, 0.7, 0.9])
-        self.C = 3
+        t_array = jnp.array([0.3, 0.5])
+        self.t_array = t_array
+        self.C_frag = 3
         self.A = 20
         lam = jnp.array(0.3)
         mu = jnp.array(0.5)
         offset = 1 - (lam/mu)
         r = nn.sigmoid( jax.random.randint(key=rngkey, 
-                                           shape=(self.C,), 
+                                           shape=(1,self.C_frag), 
                                            minval=-3.0, 
                                            maxval=3.0).astype(float) )
-        class_probs = nn.softmax( jax.random.randint(key=rngkey, 
-                                                     shape=(self.C,), 
+        frag_class_probs = nn.softmax( jax.random.randint(key=rngkey, 
+                                                     shape=(1,self.C_frag), 
                                                      minval=1.0, 
                                                      maxval=10.0).astype(float) )
         
@@ -85,8 +86,8 @@ class TestAllLoglikesForward(unittest.TestCase):
                                         maxval=-1e-4)
             return nn.log_softmax(logits, axis=-1)
         
-        self.joint_logprob_emit_at_match = generate_fake_scoring_mat( (self.T,self.C,self.A,self.A) )
-        self.logprob_emit_at_indel = generate_fake_scoring_mat( (self.C,self.A) )
+        self.joint_logprob_emit_at_match = generate_fake_scoring_mat( (self.T,self.C_frag,self.A,self.A) )
+        self.logprob_emit_at_indel = generate_fake_scoring_mat( (self.C_frag,self.A) )
         
         # be more careful about generating a fake transition matrix
         my_tkf_params, _ = switch_tkf(mu = mu, 
@@ -94,22 +95,26 @@ class TestAllLoglikesForward(unittest.TestCase):
                                       t_array = self.t_array)
         my_tkf_params['log_offset'] = jnp.log(offset)
         my_tkf_params['log_one_minus_offset'] = jnp.log1p(-offset)
-        my_model = TKF92TransitionLogprobs(config={'num_tkf_fragment_classes': self.C},
+        my_model = TKF92TransitionLogprobs(config={'num_domain_mixtures':1,
+                                                   'num_fragment_mixtures': self.C_frag,
+                                                   'num_site_mixtures': 10,
+                                                   'k_rate_mults':4,
+                                                   'tkf_function': 'regular_tkf'},
                                            name='tkf92')
         fake_params = my_model.init(rngs=jax.random.key(0),
                                     t_array = self.t_array,
-                                    log_class_probs = jnp.log(class_probs),
+                                    return_all_matrices=True,
                                     sow_intermediates = False)
         
         self.joint_logprob_transit =  my_model.apply(variables = fake_params,
                                                 out_dict = my_tkf_params,
                                                 r_extend = r,
-                                                class_probs = class_probs,
-                                                method = 'fill_joint_tkf92') #(T, C, C, 4, 4)
+                                                frag_class_probs = frag_class_probs,
+                                                method = 'fill_joint_tkf92')[:,0,...] #(T, C, C, 4, 4)
         
         self.marg_logprob_transit = get_tkf92_single_seq_marginal_transition_logprobs( offset = offset,
-                                                            class_probs = class_probs,
-                                                            r_ext_prob = r )
+                                                            frag_class_probs = frag_class_probs,
+                                                            r_ext_prob = r )[0,...]
         
         
         ### run function
@@ -142,7 +147,7 @@ class TestAllLoglikesForward(unittest.TestCase):
             sample_gapped_seq = batch[b,:]
             sample_seq = sample_gapped_seq[~jnp.isin(sample_gapped_seq, invalid_toks)]
             n = (  ~jnp.isin(sample_gapped_seq, invalid_toks) ).sum()
-            paths = [list(p) for p in product(range(self.C), repeat= int(n) )]
+            paths = [list(p) for p in product(range(self.C_frag), repeat= int(n) )]
             del sample_gapped_seq
         
             # manually score each possible path

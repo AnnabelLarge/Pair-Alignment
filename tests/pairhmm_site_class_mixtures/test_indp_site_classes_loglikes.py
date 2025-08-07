@@ -25,6 +25,11 @@ THRESHOLD = 1e-6
 class TestIndpSiteClassesLoglikes(unittest.TestCase):
     """
     make sure that likelihood calculation is the same as hand-done calculations
+    
+    for this test, C refers to C_sites
+    
+    C_frag = 1
+    C_dom = 1
     """
     def setUp(self):
         self.path = f'./tests/simple_site_class_predict/full_model_tests/req_files'
@@ -64,7 +69,9 @@ class TestIndpSiteClassesLoglikes(unittest.TestCase):
         training_dset_emit_counts = counts['emit_counts'].sum(axis=0)
         
         # template config
-        self.pairhmm_config_template = {'num_mixtures': self.C,
+        self.pairhmm_config_template = {'num_domain_mixtures': 1,
+                                        'num_fragment_mixtures': 1,
+                                        'num_site_mixtures': self.C,
                                         'k_rate_mults': self.K,
                                         'num_tkf_fragment_classes': 1,
                                         'indp_rate_mults': False,
@@ -72,7 +79,7 @@ class TestIndpSiteClassesLoglikes(unittest.TestCase):
                                         'exponential_dist_param': 1.1,
                                         'training_dset_emit_counts': training_dset_emit_counts,
                                         'emission_alphabet_size': self.A,
-                                        'tkf_function_name': 'regular',
+                                        'tkf_function': 'regular_tkf',
                                         'norm_reported_loss_by': 'desc_len'}
         
     
@@ -93,13 +100,13 @@ class TestIndpSiteClassesLoglikes(unittest.TestCase):
         init_params = pairhmm.init( rngs = jax.random.key(42),
                                     batch = self.pairhmm_batch,
                                     t_array = self.t_array,
-                                    sow_intermediates = False,
-                                    whole_dset_grad_desc = False )
+                                    sow_intermediates = False )
         
         scoring_mat_dict = pairhmm.apply( variables=init_params,
                                           t_array=self.t_array,
                                           sow_intermediates=False,
                                           return_intermeds=True,
+                                          return_all_matrices=True,
                                           method = '_get_scoring_matrices')
         
         
@@ -119,7 +126,7 @@ class TestIndpSiteClassesLoglikes(unittest.TestCase):
         transit_counts = self.pairhmm_batch[3]
         
         # mixture params
-        log_class_probs = scoring_mat_dict['log_class_probs'] #(C)
+        log_class_probs = scoring_mat_dict['log_site_class_probs'] #(C)
         log_rate_mult_probs = scoring_mat_dict['log_rate_mult_probs'] #(C,K)
         
         # emission scoring matrices
@@ -285,19 +292,19 @@ class TestIndpSiteClassesLoglikes(unittest.TestCase):
 
     def test_tkf91_f81(self):
         self._run_test(indel_model_type = 'tkf91',
-                       subst_model_type = 'f81')
+                        subst_model_type = 'f81')
     
     def test_tkf91_gtr(self):
         self._run_test(indel_model_type = 'tkf91',
-                       subst_model_type = 'gtr')
+                        subst_model_type = 'gtr')
         
     def test_tkf92_f81(self):
         self._run_test(indel_model_type = 'tkf92',
-                       subst_model_type = 'f81')
+                        subst_model_type = 'f81')
     
     def test_tkf92_gtr(self):
         self._run_test(indel_model_type = 'tkf92',
-                       subst_model_type = 'gtr')
+                        subst_model_type = 'gtr')
         
    
 if __name__ == '__main__':

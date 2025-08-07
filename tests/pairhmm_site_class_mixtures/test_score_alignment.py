@@ -125,12 +125,12 @@ class TestScoreAlignment(unittest.TestCase):
         
         row1 = np.concatenate([joint_c1_k1, joint_c2_k1], axis=1) 
         row2 = np.concatenate([joint_c1_k2, joint_c2_k2], axis=1) 
-        joint = np.concatenate( [row1, row2], axis=2 ) #(T, C, K, A, A)
+        joint = np.concatenate( [row1, row2], axis=2 ) #(T, C_sites, K, A, A)
         del joint_c1_k1, joint_c2_k1, joint_c1_k2, joint_c2_k2, row1, row2
         
-        class_probs = np.array([0.4, 0.6]) #(C,)
+        class_probs = np.array([0.4, 0.6]) #(C_sites,)
         rate_mix_probs = np.array([[0.2, 0.8],
-                                   [0.3, 0.7]]) #(C,K)
+                                    [0.3, 0.7]]) #(C_sites,K)
         P_emit = 0.995
         
         B = 1
@@ -142,23 +142,28 @@ class TestScoreAlignment(unittest.TestCase):
         # calculate this by hand
         len_score = (0.995)**5 * 0.005
         emit_score = ( (1*0.4*0.2 + 5*0.6*0.3 +  9*0.4*0.8 + 13*0.6*0.7 ) *
-                       (2*0.4*0.2 + 6*0.6*0.3 + 10*0.4*0.8 + 14*0.6*0.7) *
-                       (3*0.4*0.2 + 7*0.6*0.3 + 11*0.4*0.8 + 15*0.6*0.7) *
-                       (4*0.4*0.2 + 8*0.6*0.3 + 12*0.4*0.8 + 16*0.6*0.7)**2 )
+                        (2*0.4*0.2 + 6*0.6*0.3 + 10*0.4*0.8 + 14*0.6*0.7) *
+                        (3*0.4*0.2 + 7*0.6*0.3 + 11*0.4*0.8 + 15*0.6*0.7) *
+                        (4*0.4*0.2 + 8*0.6*0.3 + 12*0.4*0.8 + 16*0.6*0.7)**2 )
         true_scores = emit_score * len_score
         true_log_scores = np.log(true_scores) #(T,B)
         
         # score
-        pred_scoring_matrix = lse_over_match_logprobs_per_mixture(log_class_probs = np.log(class_probs),
-                                                                  log_rate_mult_probs = np.log(rate_mix_probs),
-                                                                  logprob_emit_at_match_per_mixture = np.log(joint)) #(T,A,A)
+        class_probs_exp = class_probs[None,...] #(C_fr=1, C_sites)
+        rate_mix_probs_exp = rate_mix_probs[None,...] #(C_fr=1, C_sites, K)
+        joint_exp = joint[:, None, ...] #(T, C_fr=1, C_sites, K, A, A)
+        
+        pred_scoring_matrix = lse_over_match_logprobs_per_mixture(log_site_class_probs = np.log(class_probs_exp),
+                                                                  log_rate_mult_probs = np.log(rate_mix_probs_exp),
+                                                                  logprob_emit_at_match_per_mixture = np.log(joint_exp)) #(T,C_frag,A,A)
+        assert np.allclose( pred_scoring_matrix.shape, (T,1,A,A) )
         
         fake_batch = (match_counts, 
                       np.zeros((B,A)),
                       np.zeros((B,A)),
                       np.zeros((B, 4, 4)))
         
-        scoring_matrices_dict = {'joint_logprob_emit_at_match': pred_scoring_matrix,
+        scoring_matrices_dict = {'joint_logprob_emit_at_match': pred_scoring_matrix[:,0,...],
                                   'all_transit_matrices': 
                                       {'joint': np.log(np.array([P_emit, 1 - P_emit]))
                                       } 

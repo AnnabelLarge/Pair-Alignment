@@ -992,6 +992,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
                                          offs_min_val = self.offs_min_val,
                                          offs_max_val = self.offs_max_val) #(2,)
         mu, offset = out # floats
+        lam = mu * (1-offset)
         del out
         
         # r_extend
@@ -1030,11 +1031,9 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
                                         label=f'{self.name}/lam', 
                                         which='scalars')
             
-            lam = mu * (1-offset)
             self.sow_histograms_scalars(mat= mu, 
                                         label=f'{self.name}/mu', 
                                         which='scalars')
-            del lam
             
             self.sow_histograms_scalars(mat= jnp.exp(out_dict['log_alpha']), 
                                         label=f'{self.name}/tkf_alpha', 
@@ -1058,15 +1057,12 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
                                               r_extend=r_extend,
                                               frag_class_probs=frag_class_probs)
         
-        # since num_domain_mixtures=1, index away intermediates
-        joint_matrix = joint_matrix[:,0,...] # (T, C_{frag_from}, C_{frag_to}, S_from=4, S_to=4)
-        
         if not return_all_matrices:
             matrix_dict = {'joint': joint_matrix}
         
         elif return_all_matrices:
             matrix_dict = self.return_all_matrices(offset=offset,
-                                                   class_probs=frag_class_probs,
+                                                   frag_class_probs=frag_class_probs,
                                                    r_ext_prob = r_extend,
                                                    joint_matrix=joint_matrix)
             
@@ -1300,14 +1296,18 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
         
         """
         ### unpack config
+        self.num_domain_mixtures = self.config['num_domain_mixtures']
+        self.num_fragment_mixtures = self.config['num_fragment_mixtures']
         tkf_params_file = self.config['filenames']['tkf_params_file']
-        frag_class_probs_file = self.config['filenames']['frag_class_probs']
         tkf_function_name = self.config['tkf_function']
+        
+        if (self.num_domain_mixtures * self.num_fragment_mixtures) > 1:
+            frag_class_probs_file = self.config['filenames']['frag_class_probs']
         
         
         ### read files
         # tkf parameters
-        with open(in_file,'rb') as f:
+        with open(tkf_params_file,'rb') as f:
             self.param_dict = pickle.load(f)
     
         err = f'KEYS SEEN: {self.param_dict.keys()}'
@@ -1316,17 +1316,18 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
         assert 'r_extend' in self.param_dict.keys(), err
         
         # mixture probability of fragment classes
-        with open(frag_class_probs_file,'rb') as f:
-            frag_class_probs = jnp.load(f) #(C_dom, C_frag) or (C_frag,)
+        if (self.num_domain_mixtures * self.num_fragment_mixtures) > 1:
+            with open(frag_class_probs_file,'rb') as f:
+                frag_class_probs = jnp.load(f) #(C_dom, C_frag) or (C_frag,)
+            
+            if len(frag_class_probs.shape)==1:
+                frag_class_probs = frag_class_probs[None, :] #(C_dom=1, C_frag)
+            
+            self.log_frag_class_probs = safe_log(frag_class_probs) #(C_dom, C_frag)
         
-        if len(frag_class_probs.shape)==1:
-            frag_class_probs = frag_class_probs[None, :] #(C_dom=1, C_frag)
+        elif (self.num_domain_mixtures * self.num_fragment_mixtures) == 1:
+            self.log_frag_class_probs = jnp.zeros( (1,1) )
         
-        self.log_frag_class_probs = safe_log(frag_class_probs) #(C_dom, C_frag)
-        
-        # for now, don't allow domain mixtures
-        assert self.param_dict.shape[0] == 1
-        assert self.log_frag_class_probs.shape[0] == 1
         
         ### pick tkf function
         if tkf_function_name == 'regular_tkf':
@@ -1421,23 +1422,20 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
         out_dict['log_one_minus_offset'] = jnp.log1p(-offset)
         
         # (T, C_dom, C_{frag_from}, C_{frag_to}, S_from=4, S_to=4)
-        joint_matrix =  self.fill_joint_tkf92(out_dict, 
-                                              r_extend,
-                                              class_probs)
-        
-        # since num_domain_mixtures=1, index away intermediates
-        joint_matrix = joint_matrix[:,0,...] # (T, C_{frag_from}, C_{frag_to}, S_from=4, S_to=4)
+        joint_matrix =  self.fill_joint_tkf92(out_dict = out_dict, 
+                                              r_extend = r_extend,
+                                              frag_class_probs = frag_class_probs)
         
         if not return_all_matrices:
             matrix_dict = {'joint': joint_matrix}
         
         elif return_all_matrices:
             matrix_dict = self.return_all_matrices(offset=offset,
-                                                   class_probs=frag_class_probs,
+                                                   frag_class_probs=frag_class_probs,
                                                    r_ext_prob = r_extend,
                                                    joint_matrix=joint_matrix)
             
             # correction factors for S->I transition
             matrix_dict['log_corr'] = jnp.log(lam/mu) - jnp.log( r_extend + (1-r_extend)*(lam/mu) ) #(C_dom, C_fr)
         
-        return (log_frag_class_probs, matrix_dict, approx_flags_dict)
+        return (log_frag_class_probs, matrix_dict, None)
