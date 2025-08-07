@@ -17,10 +17,16 @@ from utils.train_eval_utils import ( timers,
                                      write_timing_file,
                                      metrics_for_epoch,
                                      write_approx_dict,
+                                     jit_compile_determine_seqlen_bin,
+                                     jit_compile_determine_alignlen_bin,
                                      jit_compilation_tracker )
+
 from utils.tensorboard_recording_utils import (write_optional_outputs_during_training)
 
 
+###############################################################################
+### Base class  ###############################################################
+###############################################################################
 class TrainingWrapper:
     def __init__(self,
                  args,
@@ -62,7 +68,7 @@ class TrainingWrapper:
         self.eval_jit_compilation_tracker = jit_compilation_tracker( num_epochs = len(self.epoch_arr) )
         
         
-        ### model-specific initializations (maybe move to model-specific wrappers?)
+        ### model-specific initializations
         self._model_specific_inits(args)
 
 
@@ -443,39 +449,65 @@ class TrainingWrapper:
     
     def _model_specific_inits(self):
         raise NotImplementedError('depends on model!')
+
+
+
+###############################################################################
+### Model-specific subclasses  ################################################
+###############################################################################
+class NeuralTKFTrainingWrapper(TrainingWrapper):
+    def _model_specific_inits(self):
+        # check model type again
+        assert self.args.pred_model_type == 'feedforward'
         
-        # self._seqlen_bin_fn = ...
-        # self._alignlen_bin_fn = ...
-        # self.have_acc = ...
-        # self.use_tkf_funcs = ...
+        # continue init
+        self.seqlen_bin_fn = jit_compile_determine_seqlen_bin(args)
+        self.alignlen_bin_fn = jit_compile_determine_alignlen_bin(args)
+        self.have_acc = False
+        self.use_tkf_funcs = True
+        self.write_approx_dict_fn = parted( write_approx_dict,
+                                            calc_sum = True,
+                                            out_arrs_dir = self.args.out_arrs_dir,
+                                            out_file = 'TRAIN_tkf_approx.tsv' )
+
+class FeedforwardTrainingWrapper(TrainingWrapper):
+    def _model_specific_inits(self):
+        # check model type again
+        assert self.args.pred_model_type == 'neural_hmm'
         
-        # # functions to control jit-compilation: unaligned sequence length
-        # if model_type in ['feedforward',
-        #                   'neural_hmm']:
-        #     self.seqlen_bin_fn = jit_compile_determine_seqlen_bin(args)
-            
-        # elif model_type in ['pairhmm_indp_sites',
-        #                     'pairhmm_frag_and_site_classes']:
-        #     self.seqlen_bin_fn = lambda *args, **kwargs: None
+        # continue init
+        self.seqlen_bin_fn = jit_compile_determine_seqlen_bin(args)
+        self.alignlen_bin_fn = jit_compile_determine_alignlen_bin(args)
+        self.have_acc = True
+        self.use_tkf_funcs = False
+        self.write_approx_dict_fn = lambda *args, **kwargs: None
+
+class FragAndSiteClassesTrainingWrapper(TrainingWrapper):
+    def _model_specific_inits(self):
+        # check model type again
+        assert self.args.pred_model_type == 'pairhmm_frag_and_site_classes'
         
-        # # functions to control jit-compilation: alignment length
-        # if model_type in ['pairhmm_frag_and_site_classes',
-        #                   'feedforward',
-        #                   'neural_hmm']:
-        #     self.alignlen_bin_fn = jit_compile_determine_alignlen_bin(args)
-            
-        # elif model_type == 'pairhmm_indp_sites':
-        #     self.alignlen_bin_fn = lambda *args, **kwargs: None
+        # continue init
+        self.seqlen_bin_fn = lambda *args, **kwargs: None
+        self.alignlen_bin_fn = jit_compile_determine_alignlen_bin(args)
+        self.have_acc = False
+        self.use_tkf_funcs = True
+        self.write_approx_dict_fn = parted( write_approx_dict,
+                                            calc_sum = False,
+                                            out_arrs_dir = self.args.out_arrs_dir,
+                                            out_file = 'TRAIN_tkf_approx.tsv' )
+
+class IndpSitesTrainingWrapper(TrainingWrapper):
+    def _model_specific_inits(self):
+        # check model type again
+        assert self.args.pred_model_type == 'pairhmm_indp_sites'
         
-        # # only feedforward models have concept of prediction accuracy
-        # self.have_acc = ( model_type == 'feedforward')
-        
-        # # only these models use tkf transition function
-        # self.use_tkf_funcs = model_type in ['pairhmm_indp_sites',
-        #                                     'pairhmm_frag_and_site_classes',
-        #                                     'neural_hmm']
-        # if self.use_tkf_funcs:
-        #     self.write_approx_dict_fn = parted( write_approx_dict,
-        #                                         calc_sum = (model_type == 'neural_hmm'),
-        #                                         out_arrs_dir = self.args.out_arrs_dir,
-        #                                         out_file = 'TRAIN_tkf_approx.tsv' )
+        # continue init
+        self.seqlen_bin_fn = lambda *args, **kwargs: None
+        self.alignlen_bin_fn = lambda *args, **kwargs: None
+        self.have_acc = False
+        self.use_tkf_funcs = True
+        self.write_approx_dict_fn = parted( write_approx_dict,
+                                            calc_sum = False,
+                                            out_arrs_dir = self.args.out_arrs_dir,
+                                            out_file = 'TRAIN_tkf_approx.tsv' )

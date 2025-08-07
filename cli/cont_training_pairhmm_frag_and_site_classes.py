@@ -58,7 +58,7 @@ def _save_trainstate(out_file, tstate_obj):
     _save_to_pickle(out_file, model_state_dict)
     
     
-def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
+def cont_training_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
     ###########################################################################
     ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES   #########################
     ###########################################################################
@@ -66,6 +66,17 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
            f"using the wrong training script")
     assert args.pred_model_type == 'pairhmm_frag_and_site_classes', err
     del err
+    
+    
+    # vvv___DIFFERENT FROM ORIGINAL TRAINING CODE___vvv
+    
+    prev_pairhmm_savemodel_filename = prev_model_ckpts_dir + '/'+ tstate_to_load
+    prev_argparse_obj = prev_model_ckpts_dir + '/' + f'FINAL_PRED_{tstate_to_load}.pkl'
+    with open(prev_argparse_obj,'rb') as f:
+        epoch_ended = pickle.load(f).epoch_idx
+    del prev_argparse_obj, f
+    
+    # ^^^___DIFFERENT FROM ORIGINAL TRAINING CODE___^^^
     
     
     ### edit the argparse object in-place
@@ -80,6 +91,15 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
     ###########################################################################
     ### 1: SETUP   ############################################################
     ###########################################################################
+    
+    # vvv___DIFFERENT FROM ORIGINAL TRAINING CODE___vvv
+    
+    assert args.training_wkdir != new_training_wkdir, 'pick a new training directory'
+    args.training_wkdir = new_training_wkdir
+    
+    # ^^^___DIFFERENT FROM ORIGINAL TRAINING CODE___^^^
+
+    
     ### initial setup of misc things
     # setup the working directory (if not done yet) and this run's sub-directory
     setup_training_dir(args)
@@ -116,7 +136,10 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
                     )
                     
         elif not args.pred_config['indp_rate_mults']:
-            possible_rates = args.pred_config['num_mixtures'] * args.pred_config['k_rate_mults']
+            possible_rates = (args.pred_config['num_domain_mixutres'] *
+                              args.pred_config['num_fragment_mixutres'] *
+                              args.pred_config['num_site_mixutres'] *
+                              args.pred_config['k_rate_mults'] )
             g.write( ( f'  - Rates depend on class labels ( P(k | c) ); '+
                        f'{possible_rates} possible rate multipliers\n' )
                     )
@@ -195,9 +218,21 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
                         model_init_rngkey = model_init_rngkey,
                         pred_config = args.pred_config,
                         tabulate_file_loc = args.model_ckpts_dir)
-    pairhmm_trainstate, pairhmm_instance = out
-    del out, dummy_t_array_for_all_samples, dummy_t_for_each_sample
-    del seq_shapes
+    blank_tstate, pairhmm_instance = out
+    del out
+    
+    
+    # vvv___DIFFERENT FROM ORIGINAL TRAINING CODE___vvv
+    # load values
+    with open(prev_pairhmm_savemodel_filename, 'rb') as f:
+        state_dict = pickle.load(f)
+        
+    pairhmm_trainstate = flax.serialization.from_state_dict( blank_tstate, 
+                                                             state_dict )
+    
+    del blank_tstate, state_dict, prev_pairhmm_savemodel_filename
+    
+    # ^^^___DIFFERENT FROM ORIGINAL TRAINING CODE___^^^
     
     
     ### part+jit training function
@@ -234,13 +269,14 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
     
     ### initialize training wrapper
     training_wrapper = TrainingWrapper( args = args,
-                                        epoch_arr = range(args.num_epochs),
+                                        epoch_arr = range(args.num_epochs - epoch_ended),
                                         initial_training_rngkey = rngkey,
                                         dataloader_dict = dataloader_dict,
                                         train_fn_jitted = train_fn_jitted,
                                         eval_fn_jitted = eval_fn_jitted,
                                         all_save_model_filenames = [finalpred_save_model_filename],
                                         writer = writer )
+    del epoch_ended
     
     
     ### train
@@ -388,3 +424,4 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
     #   compress the output file
     writer.close()
     pigz_compress_tensorboard_file( args )
+    

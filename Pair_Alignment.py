@@ -53,45 +53,44 @@ def main():
                    'validate_neuraltkf_config',
                    'batched_validate_neuraltkf_config']
     
-    # parser.add_argument('-task',
-    #                     type=str,
-    #                     required=True,
-    #                     choices = valid_tasks,
-    #                     help=f'What do you want to do? Pick from: {valid_tasks}')
+    parser.add_argument('-task',
+                        type=str,
+                        required=True,
+                        choices = valid_tasks,
+                        help=f'What do you want to do? Pick from: {valid_tasks}')
     
-    # parser.add_argument('-configs',
-    #                     type = str,
-    #                     required=True,
-    #                     help='Load configs from file or folder of files, in json format.')
+    parser.add_argument('-configs',
+                        type = str,
+                        required=True,
+                        help='Load configs from file or folder of files, in json format.')
     
-    # # optional: might have pre-processed some dataloaders
-    # parser.add_argument('-load_dset_pkl',
-    #                     type = str,
-    #                     default=None,
-    #                     help='name of the pre-computed pytorch dataset pickle object')
+    # optional: might have pre-processed some dataloaders
+    parser.add_argument('-load_dset_pkl',
+                        type = str,
+                        default=None,
+                        help='name of the pre-computed pytorch dataset pickle object')
     
-    # # only needed when continuing training
-    # parser.add_argument('-new_training_wkdir',
-    #                     type = str,
-    #                     help='FOR CONTINUE_TRAIN OPTION; Name for a new training working dir')
+    # only needed when continuing training
+    parser.add_argument('-new_training_wkdir',
+                        type = str,
+                        help='FOR CONTINUE_TRAIN OPTION; Name for a new training working dir')
     
-    # parser.add_argument('-prev_model_ckpts_dir',
-    #                     type = str,
-    #                     help='FOR CONTINUE_TRAIN OPTION; Path to previous trainstate, argparse object')
+    parser.add_argument('-prev_model_ckpts_dir',
+                        type = str,
+                        help='FOR CONTINUE_TRAIN OPTION; Path to previous trainstate, argparse object')
     
-    # parser.add_argument('-tstate_to_load',
-    #                     type = str,
-    #                     help='FOR CONTINUE_TRAIN OPTION; The name of the tstate object to load')
+    parser.add_argument('-tstate_to_load',
+                        type = str,
+                        help='FOR CONTINUE_TRAIN OPTION; The suffix (not including file extension) of the tstate object to load')
     
     # parse the arguments
     top_level_args = parser.parse_args()
     
     
-    ## UNCOMMENT TO RUN IN SPYDER IDE
-    top_level_args.task = 'train'
-    # top_level_args.configs = 'example_config_indp_sites_model.json'
-    top_level_args.configs = 'example_config_fragment_site_class_model.json'
-    top_level_args.load_dset_pkl = None
+    # ## UNCOMMENT TO RUN IN SPYDER IDE
+    # top_level_args.task = 'train'
+    # top_level_args.configs = 'example_config_fragment_site_class_model.json'
+    # top_level_args.load_dset_pkl = None
     
     
     ### helper functions 
@@ -128,7 +127,7 @@ def main():
 
 
     ###########################################################################
-    ### TRAINING   ############################################################
+    ### TRAINING: basic function   ############################################
     ###########################################################################
     if top_level_args.task == 'train':
         # read argparse
@@ -173,6 +172,10 @@ def main():
         train_fn( args, dload_dict )
 
 
+    
+    ###########################################################################
+    ### TRAINING: in batches, with same dataloader obj   ######################
+    ###########################################################################
     elif top_level_args.task == 'batched_train':
         # read argparse from first config file
         file_lst = [file for file in os.listdir(top_level_args.configs) if not file.startswith('.')
@@ -205,7 +208,7 @@ def main():
                 from cli.train_neural_hmm import train_neural_hmm as train_fn
     
             elif pred_model_type == 'feedforward':
-                raise NotImplementedError('not ready')
+                from cli.train_feedforward import train_feedforward as train_fn
 
         # load data
         if top_level_args.load_dset_pkl is None:
@@ -231,6 +234,10 @@ def main():
             del this_run_args
     
     
+    
+    ###########################################################################
+    ### TRAINING: continue one training experiment   ##########################
+    ###########################################################################
     elif top_level_args.task == 'continue_train':
         # read argparse
         assert top_level_args.configs.endswith('.json'), "input is one JSON file"
@@ -244,8 +251,20 @@ def main():
             from dloaders.init_counts_dset import init_counts_dset as init_datasets
             from dloaders.CountsDset import jax_collator as collate_fn
         
-        else:
-            raise NotImplementedError('Cannot continue training yet!')
+        elif pred_model_type in ['pairhmm_frag_and_site_classes',
+                                      'neural_hmm',
+                                      'feedforward']:
+            from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
+            from dloaders.FullLenDset import jax_collator as collate_fn
+            
+            if pred_model_type == 'pairhmm_frag_and_site_classes':
+                from cli.cont_training_pairhmm_frag_and_site_classes import cont_training_pairhmm_frag_and_site_classes as cont_train_fn
+                
+            elif pred_model_type == 'neural_hmm':
+                from cli.cont_training_neural_hmm import cont_training_neural_hmm as cont_train_fn
+    
+            elif pred_model_type == 'feedforward':
+                from cli.cont_training_feedforward import cont_training_feedforward as cont_train_fn
 
         # make dataloader objects
         if top_level_args.load_dset_pkl is None:
@@ -268,7 +287,7 @@ def main():
     
     
     ###########################################################################
-    ### EVAL   ################################################################
+    ### EVAL: basic function   ################################################
     ###########################################################################
     elif top_level_args.task == 'eval':
         # read argparse
@@ -304,7 +323,7 @@ def main():
                 from cli.eval_neural_hmm import eval_neural_hmm as eval_fn
             
             elif pred_model_type == 'feedforward':
-                raise NotImplementedError('not ready')
+                from cli.eval_feedforward import eval_feedforward as eval_fn
 
         # load data; saved under trianing_wkdir name
         if top_level_args.load_dset_pkl is None:
@@ -323,6 +342,10 @@ def main():
                   training_argparse )
     
     
+    
+    ###########################################################################
+    ### EVAL: in batches, with same dataloader obj   ##########################
+    ###########################################################################
     elif top_level_args.task == 'batched_eval':
         # read argparse from first config file
         file_lst = [file for file in os.listdir(top_level_args.configs) if not file.startswith('.')
@@ -365,7 +388,7 @@ def main():
                 from cli.eval_neural_hmm import eval_neural_hmm as eval_fn
             
             elif pred_model_type == 'feedforward':
-                raise NotImplementedError('not ready')
+                from cli.eval_feedforward import eval_feedforward as eval_fn
             
         # load data
         if top_level_args.load_dset_pkl is None:
@@ -499,30 +522,6 @@ def main():
             del this_run_args, checklist, train_flag, dload_dict, new_file_name
         
         print('done')
-    
-    
-    ###########################################################################
-    ### CONFIG CHECK: Validate Neural TKF config file   #######################
-    ###########################################################################
-    # 'validate_neuraltkf_config',
-    # 'batched_validate_neuraltkf_config'
-    elif top_level_args.task == 'validate_neuraltkf_config':
-        from cli.test_neural_tkf_model_is_causal import test_neural_tkf_model_is_causal 
-        assert top_level_args.configs.endswith('.json'), "input is one JSON file"
-        
-        test_neural_tkf_model_is_causal(top_level_args.configs)
-        
-    
-    elif top_level_args.task == 'batched_validate_neuraltkf_config':
-        from cli.test_neural_tkf_model_is_causal import test_neural_tkf_model_is_causal 
-        
-        file_lst = [file for file in os.listdir(top_level_args.configs) if not file.startswith('.')
-                    and file.endswith('.json')]
-        assert len(file_lst) > 0, f'{top_level_args.configs} is empty!'
-        
-        for file in file_lst:
-            path = f'{top_level_args.configs}/{file}'
-            test_neural_tkf_model_is_causal(path)
         
 if __name__ == '__main__':
     main()

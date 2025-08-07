@@ -29,7 +29,8 @@ from torch.utils.data import DataLoader
 # custom function/classes imports (in order of appearance)
 from utils.edit_argparse import enforce_valid_defaults
 from train_eval_fns.build_optimizer import build_optimizer
-from utils.train_eval_utils import determine_alignlen_bin
+from utils.train_eval_utils import (jit_compile_determine_alignlen_bin,
+                                    write_final_eval_results)
 
 # specific to this model
 from utils.edit_argparse import pairhmm_frag_and_site_classes_fill_with_default_values as fill_with_default_values
@@ -58,6 +59,7 @@ def eval_pairhmm_frag_and_site_classes( args,
     enforce_valid_defaults(training_argparse)
     share_top_level_args(training_argparse)
 
+
     ###########################################################################
     ### 1: SETUP   ############################################################
     ###########################################################################
@@ -77,29 +79,32 @@ def eval_pairhmm_frag_and_site_classes( args,
     
     # create a new logfile
     with open(args.logfile_name,'w') as g:
-        g.write( f'Loading from {args.training_wkdir} to eval new data\n' )
+        g.write( f'Loading from {training_argparse.training_wkdir} to eval new data\n' )
         
         # standard header
         g.write(f'PairHMM TKF92 with latent site and fragment classes\n')
-        g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )
-        g.write( f'Indel model: {args.pred_config["indel_model_type"]}\n' )
+        g.write( f'Substitution model: {training_argparse.pred_config["subst_model_type"]}\n' )
+        g.write( f'Indel model: {training_argparse.pred_config["indel_model_type"]}\n' )
                 
         g.write( (f'  - Number of latent site and fragment classes: '+
-                  f'{args.pred_config["num_mixtures"]}\n' +
+                  f'{training_argparse.pred_config["num_mixtures"]}\n' +
                   f'  - Possible substitution rate multipliers: ' +
-                  f'{args.pred_config["k_rate_mults"]}\n')
+                  f'{training_argparse.pred_config["k_rate_mults"]}\n')
                 )
         
         # note if rates are independent
-        if args.pred_config['indp_rate_mults']:
-            possible_rates =  args.pred_config['k_rate_mults']
+        if training_argparse.pred_config['indp_rate_mults']:
+            possible_rates =  training_argparse.pred_config['k_rate_mults']
             g.write( (f'  - Rates are independent of site class label: '+
                       f'( P(k | c) = P(k) ); {possible_rates} possible '+
                       f'rate multipliers\n' )
                     )
                     
-        elif not args.pred_config['indp_rate_mults']:
-            possible_rates = args.pred_config['num_mixtures'] * args.pred_config['k_rate_mults']
+        elif not training_argparse.pred_config['indp_rate_mults']:
+            possible_rates = (training_argparse.pred_config['num_domain_mixutres'] *
+                              training_argparse.pred_config['num_fragment_mixutres'] *
+                              training_argparse.pred_config['num_site_mixutres'] *
+                              training_argparse.pred_config['k_rate_mults'] )
             g.write( ( f'  - Rates depend on class labels ( P(k | c) ); '+
                        f'{possible_rates} possible rate multipliers\n' )
                     )
@@ -108,7 +113,7 @@ def eval_pairhmm_frag_and_site_classes( args,
         g.write(f'  - When reporting, normalizing losses by: {args.norm_reported_loss_by}\n')
         
         # write source of times
-        g.write( f'Times from: {args.pred_config["times_from"]}\n' )
+        g.write( f'Times from: {training_argparse.pred_config["times_from"]}\n' )
     
     
     # extra files to record if you use tkf approximations
@@ -153,13 +158,6 @@ def eval_pairhmm_frag_and_site_classes( args,
     largest_aligns = jnp.empty( (args.batch_size, max_dim1, 3), dtype=int )
     del max_dim1
     
-    ### fn to handle jit-compiling according to alignment length
-    parted_determine_alignlen_bin = partial(determine_alignlen_bin,  
-                                            chunk_length = args.chunk_length,
-                                            seq_padding_idx = training_argparse.seq_padding_idx)
-    jitted_determine_alignlen_bin = jax.jit(parted_determine_alignlen_bin)
-    del parted_determine_alignlen_bin
-    
     
     ### initialize functions
     seq_shapes = [largest_aligns,
@@ -183,7 +181,10 @@ def eval_pairhmm_frag_and_site_classes( args,
     del blank_tstate, state_dict
     
     
-    ### part+jit eval function
+    ### part+jit functions
+    # manage sequence lengths
+    jitted_determine_alignlen_bin = jit_compile_determine_alignlen_bin(args)
+    
     no_outputs = {k: False for k in training_argparse.interms_for_tboard.keys()}
     parted_eval_fn = partial( eval_one_batch,
                               t_array = t_array_for_all_samples,
@@ -249,10 +250,7 @@ def eval_pairhmm_frag_and_site_classes( args,
         model_state_dict = flax.serialization.to_state_dict(best_pairhmm_trainstate)
         pickle.dump(model_state_dict, g)
         
-    to_write = {'RUN': args.training_wkdir}
-    to_write = {**to_write, **test_summary_stats}
-    
-    with open(f'{args.logfile_dir}/AVE-LOSSES.tsv','w') as g:
-        for k, v in to_write.items():
-            g.write(f'{k}\t{v}\n')
+    write_final_eval_results(args = args, 
+                             summary_stats = test_summary_stats,
+                             filename = 'AVE-LOSSES.tsv')
     

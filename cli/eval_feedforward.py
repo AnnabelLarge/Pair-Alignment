@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Fri Jul  4 14:24:59 2025
+Created on Tue Feb 11 20:45:05 2025
 
 @author: annabel
 """
@@ -28,6 +28,7 @@ from flax import linen as nn
 import optax
 
 # pytorch imports
+from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
 
 # custom function/classes imports
@@ -39,22 +40,21 @@ from utils.train_eval_utils import (jit_compile_determine_seqlen_bin,
 
 # specific to training this model
 from models.neural_shared.neural_initializer import create_all_tstates 
-from utils.edit_argparse import neural_hmm_fill_with_default_values as fill_with_default_values
-from utils.edit_argparse import neural_hmm_share_top_level_args as share_top_level_args
-from train_eval_fns.neural_hmm_predict_train_eval_one_batch import eval_one_batch
+from utils.edit_argparse import feedforward_fill_with_default_values as fill_with_default_values
+from utils.edit_argparse import feedforward_share_top_level_args as share_top_level_args
+from train_eval_fns.feedforward_predict_train_eval_one_batch import eval_one_batch
 from train_eval_fns.neural_final_eval_wrapper import final_eval_wrapper
 
 
-
-def eval_neural_hmm( args, 
-                     dataloader_dict: dict,
-                     training_argparse ):
+def eval_feedforward( args, 
+                      dataloader_dict: dict,
+                      training_argparse ):
     ###########################################################################
     ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES   #########################
     ###########################################################################
-    err = (f"{training_argparse.pred_model_type} is not neural_hmm; "+
-           f"using the wrong eval script")
-    assert training_argparse.pred_model_type == 'neural_hmm', err
+    err = (f"{args.pred_model_type} is not feedforward; "+
+           f"using the wrong training script")
+    assert args.pred_model_type == 'feedforward', err
     del err
     
     # model param filenames
@@ -65,9 +65,10 @@ def eval_neural_hmm( args,
                                 decoder_save_model_filename,
                                 finalpred_save_model_filename]
     
-    fill_with_default_values(training_argparse)
-    enforce_valid_defaults(training_argparse)
-    share_top_level_args(training_argparse)
+    fill_with_default_values(args)
+    enforce_valid_defaults(args)
+    share_top_level_args(args)
+    
     
     
     ###########################################################################
@@ -83,40 +84,30 @@ def eval_neural_hmm( args,
         os.mkdir(args.logfile_dir)
         os.mkdir(args.out_arrs_dir)
         os.mkdir(args.model_ckpts_dir)
-        
+    
     # create a new logfile
     with open(args.logfile_name,'w') as g:
         g.write( f'Loading from {args.training_wkdir} to eval new data\n\n' )
-            
-        g.write(f'Neural sequence embedders with Markovian alignment assumption\n')
-        g.write( f'Substitution model: {training_argparse.pred_config["subst_model_type"]}\n' )
-        g.write( f'Indel model: {training_argparse.pred_config["indel_model_type"]}\n' )
+        
+        g.write( f'Feedforward network to predict alignment-augmented descendant\n' )
+        g.write( f'Ancestor sequence embedder (FULL-CONTEXT): {training_argparse.anc_model_type}\n' )
+        g.write( f'Descendant sequence embedder (CAUSAL): {training_argparse.desc_model_type}\n' )
+        g.write( f'Combine embeddings with: {training_argparse.pred_config["postproc_model_type"]}\n' )
         g.write( f'when reporting, normalizing losses by: {training_argparse.norm_reported_loss_by}\n\n' )
-        
-        g.write( f'Evolutionary model parameters (global vs local):\n' )
-        
-        if not training_argparse.pred_config['load_all']:
-            for key, val in training_argparse.pred_config["global_or_local"].items():
-                g.write(f'{key}: {val}\n')
-                
-        g.write('\n')
-        g.write(f'Ancestor sequence embedder (FULL-CONTEXT): {training_argparse.anc_model_type}\n')
-        g.write(f'Descendant sequence embedder (CAUSAL): {training_argparse.desc_model_type}\n\n')
-        
-        
+    
+    
     ### extract data from dataloader_dict
     test_dset = dataloader_dict['test_dset']
     test_dl = dataloader_dict['test_dl']
-    t_array_for_all_samples = dataloader_dict['t_array_for_all_samples']
     
     
     ###########################################################################
     ### 2: INITIALIZE MODEL PARTS, OPTIMIZER  #################################
     ###########################################################################
-    print('MODEL INIT')
+    print('2: model init')
     with open(args.logfile_name,'a') as g:
         g.write('\n')
-        g.write(f'1: model init\n')
+        g.write(f'2: model init\n')
     
     # need to intialize an optimizer for compatibility when restoring the state, 
     #   but we're not training so this doesn't really matter?
@@ -138,36 +129,37 @@ def eval_neural_hmm( args,
     largest_aligns = (args.batch_size, max_dim1)
     del max_dim1
     
-    # time
-    if t_array_for_all_samples is not None:
-        dummy_t_array_for_all_samples = jnp.empty( (t_array_for_all_samples.shape[0], ) )
-        dummy_t_for_each_sample = None
+    seq_shapes = [largest_seqs, largest_aligns]
     
-    else:
-        dummy_t_array_for_all_samples = None
+    # time
+    t_per_sample = training_argparse.pred_config['t_per_sample']
+    
+    if t_per_sample:
         dummy_t_for_each_sample = jnp.empty( (args.batch_size,) )
+    
+    elif not t_per_sample:
+        dummy_t_for_each_sample = None
     
     # batch provided to train/eval functions consist of:
     # 1.) unaligned sequences (B, L_seq, 2)
-    # 2.) aligned data matrices (B, L_align, 5)
-    # 3.) time per sample (if applicable) (B,)
+    # 2.) aligned data matrices (B, L_align, 4)
+    # 3.) time per sample; (B,) if present, None otherwise
     # 4, not used.) sample index (B,)
     seq_shapes = [largest_seqs, largest_aligns, dummy_t_for_each_sample]
     
     
-    ### initialize trainstate objects, concat_fn
+    ### initialize functions, determine concat_fn
     out = create_all_tstates( seq_shapes = seq_shapes, 
                               tx = tx, 
                               model_init_rngkey = jax.random.key(0),
-                              tabulate_file_loc = args.model_ckpts_dir,
+                              tabulate_file_loc = training_argparse.model_ckpts_dir,
                               anc_model_type = training_argparse.anc_model_type, 
                               desc_model_type = training_argparse.desc_model_type, 
                               pred_model_type = training_argparse.pred_model_type, 
                               anc_enc_config = training_argparse.anc_enc_config, 
                               desc_dec_config = training_argparse.desc_dec_config, 
                               pred_config = training_argparse.pred_config,
-                              t_array_for_all_samples = dummy_t_array_for_all_samples,
-                              )  
+                              t_array_for_all_samples = None )  
     blank_trainstates, all_model_instances, concat_fn = out
     del out
     
@@ -210,22 +202,20 @@ def eval_neural_hmm( args,
         flag = (args.anc_enc_config.get('output_attn_weights',False) or 
                 args.desc_dec_config.get('output_attn_weights',False))
         extra_args_for_eval['output_attn_weights'] = flag
-        
+
     parted_eval_fn = partial( eval_one_batch,
                               all_model_instances = all_model_instances,
                               interms_for_tboard = no_returns,
-                              t_array_for_all_samples = t_array_for_all_samples,  
                               concat_fn = concat_fn,
-                              norm_loss_by_for_reporting = args.norm_reported_loss_by,                  
+                              norm_loss_by_for_reporting = args.norm_reported_loss_by,  
                               extra_args_for_eval = extra_args_for_eval )
     del extra_args_for_eval
-    
+
     # jit compile this eval function
     eval_fn_jitted = jax.jit( parted_eval_fn, 
                               static_argnames = ['max_seq_len', 'max_align_len'])
     del parted_eval_fn
 
-    
     ###########################################################################
     ### 3: EVAL   #############################################################
     ###########################################################################
@@ -247,9 +237,9 @@ def eval_neural_hmm( args,
                                              interms_for_tboard = no_returns, 
                                              logfile_dir = args.logfile_dir,
                                              out_arrs_dir = args.out_arrs_dir,
-                                             outfile_prefix = f'test-dset',
+                                             outfile_prefix = f'test-set',
                                              tboard_writer = None)
-    
+
     # save the trainstate again
     for i in range(len(best_trainstates)):
         new_outfile = f'{args.model_ckpts_dir}/{all_save_model_filenames[i]}'

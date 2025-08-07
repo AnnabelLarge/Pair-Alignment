@@ -42,22 +42,41 @@ from utils.train_eval_utils import (setup_training_dir,
 
 # specific to training this model
 from models.neural_shared.neural_initializer import create_all_tstates 
-from utils.edit_argparse import feedforward_fill_with_default_values as fill_with_default_values
-from utils.edit_argparse import feedforward_share_top_level_args as share_top_level_args
-from train_eval_fns.feedforward_predict_train_eval_one_batch import ( train_one_batch,
-                                                                      eval_one_batch )
+from utils.edit_argparse import neural_hmm_fill_with_default_values as fill_with_default_values
+from utils.edit_argparse import neural_hmm_share_top_level_args as share_top_level_args
+from train_eval_fns.neural_hmm_predict_train_eval_one_batch import ( train_one_batch,
+                                                                     eval_one_batch )
 from train_eval_fns.neural_final_eval_wrapper import final_eval_wrapper
-from train_eval_fns.TrainingWrapper import FeedforwardTrainingWrapper as TrainingWrapper
+from train_eval_fns.TrainingWrapper import NeuralTKFTrainingWrapper as TrainingWrapper
 
 
-def train_feedforward(args, dataloader_dict: dict):
+
+
+def cont_training_neural_hmm(args, dataloader_dict: dict):
     ###########################################################################
     ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES   #########################
     ###########################################################################
-    err = (f"{args.pred_model_type} is not feedforward; "+
+    err = (f"{args.pred_model_type} is not neural_hmm; "+
            f"using the wrong training script")
-    assert args.pred_model_type == 'feedforward', err
+    assert args.pred_model_type == 'neural_hmm', err
     del err
+    
+    
+    # vvv___DIFFERENT FROM ORIGINAL TRAINING CODE___vvv
+    
+    prev_encoder_savemodel_filename = prev_model_ckpts_dir + '/'+ f'ANC_ENC_{tstate_to_load}.pkl'
+    prev_decoder_savemodel_filename = prev_model_ckpts_dir + '/'+ f'DESC_DEC_{tstate_to_load}.pkl'
+    prev_finalpred_savemodel_filename = prev_model_ckpts_dir + '/'+ f'FINAL_PRED_{tstate_to_load}.pkl'
+    all_prev_savemodel_filenames = [prev_encoder_savemodel_filename, 
+                                    prev_decoder_savemodel_filename,
+                                    prev_finalpred_savemodel_filename]
+    
+    with open(prev_argparse_obj,'rb') as f:
+        epoch_ended = pickle.load(f).epoch_idx
+    del prev_argparse_obj, f
+    
+    # ^^^___DIFFERENT FROM ORIGINAL TRAINING CODE___^^^
+    
     
     ### edit the argparse object in-place
     fill_with_default_values(args)
@@ -71,6 +90,15 @@ def train_feedforward(args, dataloader_dict: dict):
     ###########################################################################
     ### 1: SETUP   ############################################################
     ###########################################################################
+    
+    # vvv___DIFFERENT FROM ORIGINAL TRAINING CODE___vvv
+    
+    assert args.training_wkdir != new_training_wkdir, 'pick a new training directory'
+    args.training_wkdir = new_training_wkdir
+    
+    # ^^^___DIFFERENT FROM ORIGINAL TRAINING CODE___^^^
+
+
     ### initial setup of misc things
     # setup the working directory (if not done yet) and this run's sub-directory
     setup_training_dir(args)
@@ -85,14 +113,24 @@ def train_feedforward(args, dataloader_dict: dict):
     with open(args.logfile_name,'w') as g:
         if not args.update_grads:
             g.write('DEBUG MODE: DISABLING GRAD UPDATES\n\n')
-        
-        g.write( f'Feedforward network to predict alignment-augmented descendant\n' )
-        g.write( f'Ancestor sequence embedder (FULL-CONTEXT): {args.anc_model_type}\n' )
-        g.write( f'Descendant sequence embedder (CAUSAL): {args.desc_model_type}\n' )
-        g.write( f'Combine embeddings with: {args.pred_config["postproc_model_type"]}\n' )
+            
+        g.write( f'Neural sequence embedders with Markovian alignment assumption\n' )
+        g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )
+        g.write( f'Indel model: {args.pred_config["indel_model_type"]}\n' )
         g.write( f'when reporting, normalizing losses by: {args.norm_reported_loss_by}\n\n' )
-       
-    
+        
+        g.write( f'Evolutionary model parameters (global vs local):\n' )
+        
+        if not args.pred_config['load_all']:
+            for key, val in args.pred_config["global_or_local"].items():
+                g.write(f'{key}: {val}\n')
+                
+        g.write('\n')
+        
+        g.write(f'Ancestor sequence embedder (FULL-CONTEXT): {args.anc_model_type}\n')
+        g.write(f'Descendant sequence embedder (CAUSAL): {args.desc_model_type}\n\n')
+        
+        
     ### save updated config, provide filename for saving model parameters
     encoder_save_model_filename = args.model_ckpts_dir + '/'+ f'ANC_ENC.pkl'
     decoder_save_model_filename = args.model_ckpts_dir + '/'+ f'DESC_DEC.pkl'
@@ -107,6 +145,11 @@ def train_feedforward(args, dataloader_dict: dict):
     training_dl = dataloader_dict['training_dl']
     test_dset = dataloader_dict['test_dset']
     test_dl = dataloader_dict['test_dl']
+    t_array_for_all_samples = dataloader_dict['t_array_for_all_samples']
+    
+    args.pred_config['training_dset_emit_counts'] = training_dset.emit_counts
+    args.pred_config['emissions_postproc_config']['training_dset_emit_counts'] = training_dset.emit_counts
+    
     
     
     ###########################################################################
@@ -117,7 +160,7 @@ def train_feedforward(args, dataloader_dict: dict):
         g.write('\n')
         g.write(f'2: model init\n')
     
-    # init the optimizer
+    # init the optimizer, split a new rng key
     tx = build_optimizer(args)
     rngkey, model_init_rngkey = jax.random.split(rngkey, num=2)
     
@@ -139,26 +182,24 @@ def train_feedforward(args, dataloader_dict: dict):
     largest_aligns = (args.batch_size, max_dim1)
     del max_dim1
     
-    seq_shapes = [largest_seqs, largest_aligns]
-    
     # time
-    t_per_sample = args.pred_config['t_per_sample']
-    
-    if t_per_sample:
-        dummy_t_for_each_sample = jnp.empty( (args.batch_size,) )
-    
-    elif not t_per_sample:
+    if t_array_for_all_samples is not None:
+        dummy_t_array_for_all_samples = jnp.empty( (t_array_for_all_samples.shape[0], ) )
         dummy_t_for_each_sample = None
+    
+    else:
+        dummy_t_array_for_all_samples = None
+        dummy_t_for_each_sample = jnp.empty( (args.batch_size,) )
     
     # batch provided to train/eval functions consist of:
     # 1.) unaligned sequences (B, L_seq, 2)
-    # 2.) aligned data matrices (B, L_align, 4)
-    # 3.) time per sample; (B,) if present, None otherwise
+    # 2.) aligned data matrices (B, L_align, 5)
+    # 3.) time per sample (if applicable) (B,)
     # 4, not used.) sample index (B,)
     seq_shapes = [largest_seqs, largest_aligns, dummy_t_for_each_sample]
     
     
-    ### initialize functions, determine concat_fn
+    ### initialize trainstate objects, concat_fn
     out = create_all_tstates( seq_shapes = seq_shapes, 
                               tx = tx, 
                               model_init_rngkey = model_init_rngkey,
@@ -169,19 +210,38 @@ def train_feedforward(args, dataloader_dict: dict):
                               anc_enc_config = args.anc_enc_config, 
                               desc_dec_config = args.desc_dec_config, 
                               pred_config = args.pred_config,
-                              t_array_for_all_samples = None )  
-    all_trainstates, all_model_instances, concat_fn = out
+                              t_array_for_all_samples = dummy_t_array_for_all_samples,
+                              )  
+    blank_tstate_lst, all_model_instances, concat_fn = out
     del out
+    
+    
+    # vvv___DIFFERENT FROM ORIGINAL TRAINING CODE___vvv
+    # load values
+    
+    all_trainstates = []
+    for i in range(3):
+        with open(all_prev_savemodel_filenames[i], 'rb') as f:
+            state_dict = pickle.load(f)
+            
+        tstate = flax.serialization.from_state_dict( blank_tstate_lst[i], 
+                                                     state_dict )
+        all_trainstates.append(tstate)
+        
+    del blank_tstate_lst, i, state_dict, all_prev_savemodel_filenames
+    
+    # ^^^___DIFFERENT FROM ORIGINAL TRAINING CODE___^^^
     
     
     ### jit-compilations
     # training function
     parted_train_fn = partial( train_one_batch,
-                                all_model_instances = all_model_instances,
-                                interms_for_tboard = args.interms_for_tboard,
-                                concat_fn = concat_fn,
-                                norm_loss_by_for_reporting = args.norm_reported_loss_by,
-                                update_grads = args.update_grads )
+                               all_model_instances = all_model_instances,
+                               interms_for_tboard = args.interms_for_tboard,
+                               t_array_for_all_samples = t_array_for_all_samples,
+                               concat_fn = concat_fn,
+                               norm_loss_by_for_reporting = args.norm_reported_loss_by,
+                               update_grads = args.update_grads )
     
     train_fn_jitted = jax.jit(parted_train_fn, 
                               static_argnames = ['max_seq_len', 'max_align_len'])
@@ -199,8 +259,7 @@ def train_feedforward(args, dataloader_dict: dict):
                   'optimizer': False,
                   'ancestor_embeddings': False,
                   'descendant_embeddings': False,
-                  'forward_pass_outputs': False,
-                  'final_logprobs': False}
+                  'forward_pass_outputs': False}
     extra_args_for_eval = dict()
     
     # if this is a transformer model, will have extra arguments for eval funciton
@@ -210,25 +269,28 @@ def train_feedforward(args, dataloader_dict: dict):
     parted_eval_fn = partial( eval_one_batch,
                               all_model_instances = all_model_instances,
                               interms_for_tboard = no_returns,
+                              t_array_for_all_samples = t_array_for_all_samples,  
                               concat_fn = concat_fn,
-                              norm_loss_by_for_reporting = args.norm_reported_loss_by,
+                              norm_loss_by_for_reporting = args.norm_reported_loss_by,                  
                               extra_args_for_eval = extra_args_for_eval )
+    del no_returns, extra_args_for_eval
     
     # jit compile this eval function
-    eval_fn_jitted = jax.jit(parted_eval_fn, 
-                              static_argnames = ['max_seq_len', 'max_align_len'])
+    eval_fn_jitted = jax.jit( parted_eval_fn, 
+                              static_argnames = ['max_seq_len','max_align_len'])
     del parted_eval_fn
     
     
     ### initialize training wrapper
     training_wrapper = TrainingWrapper( args = args,
-                                        epoch_arr = range(args.num_epochs),
+                                        epoch_arr = range(args.num_epochs - epoch_ended),
                                         initial_training_rngkey = rngkey,
                                         dataloader_dict = dataloader_dict,
                                         train_fn_jitted = train_fn_jitted,
                                         eval_fn_jitted = eval_fn_jitted,
                                         all_save_model_filenames = all_save_model_filenames,
                                         writer = writer )
+    del epoch_ended
     
     
     ### train
@@ -240,7 +302,6 @@ def train_feedforward(args, dataloader_dict: dict):
     out = training_wrapper.run_train_loop( all_trainstates = all_trainstates )
     early_stop, best_epoch, best_trainstates = out
     del out
-    
     
     
     ###########################################################################
@@ -255,7 +316,7 @@ def train_feedforward(args, dataloader_dict: dict):
     # don't accidentally use old trainstates or eval fn
     del all_trainstates, eval_fn_jitted
     
-    # new timer
+    # new timer for these steps
     postproc_timer_class = timers( num_epochs = 1 )
     postproc_timer_class.start_timer()
 
@@ -269,12 +330,14 @@ def train_feedforward(args, dataloader_dict: dict):
         # finish up logfile, regardless of early stopping or not
         g.write(f'Epoch with lowest average test loss ("best epoch"): {best_epoch}\n')
         g.write(f'RE-EVALUATING ALL DATA WITH BEST PARAMS\n\n')
-
+    
 
     ### save the argparse object by itself
     args.epoch_idx = best_epoch
     with open(f'{args.model_ckpts_dir}/TRAINING_ARGPARSE.pkl', 'wb') as g:
         pickle.dump(args, g)
+        
+    del best_epoch, early_stop
 
 
     ### jit compile new eval function
@@ -288,6 +351,7 @@ def train_feedforward(args, dataloader_dict: dict):
     parted_eval_fn = partial( eval_one_batch,
                               all_model_instances = all_model_instances,
                               interms_for_tboard = args.interms_for_tboard,
+                              t_array_for_all_samples = t_array_for_all_samples,  
                               concat_fn = concat_fn,
                               norm_loss_by_for_reporting = args.norm_reported_loss_by,  
                               extra_args_for_eval = extra_args_for_eval )
@@ -365,3 +429,4 @@ def train_feedforward(args, dataloader_dict: dict):
     #   compress the output file
     writer.close()
     pigz_compress_tensorboard_file( args )
+    

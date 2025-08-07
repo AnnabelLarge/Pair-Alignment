@@ -82,39 +82,42 @@ def eval_pairhmm_indp_sites(args,
         
         # standard header
         g.write( f'PairHMM with independent site classes over emissions\n' )
-        g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )
-        g.write( f'Indel model: {args.pred_config.get("indel_model_type","None")}\n' )
+        g.write( f'Substitution model: {training_argparse.pred_config["subst_model_type"]}\n' )
+        g.write( f'Indel model: {training_argparse.pred_config.get("indel_model_type","None")}\n' )
         g.write( (f'  - Number of site classes for emissions: '+
-                  f'{args.pred_config["num_mixtures"]}\n' +
+                  f'{training_argparse.pred_config["num_mixtures"]}\n' +
                   f'  - Possible substitution rate multipliers: ' +
-                  f'{args.pred_config["k_rate_mults"]}\n')
+                  f'{training_argparse.pred_config["k_rate_mults"]}\n')
                 )
         
         # note if rates are independent
-        if args.pred_config['indp_rate_mults']:
-            possible_rates =  args.pred_config['k_rate_mults']
-            g.write( (f'  - Rates are independent of site class label: '+
+        if training_argparse.pred_config['indp_rate_mults']:
+            possible_rates =  training_argparse.pred_config['k_rate_mults']
+            g.write( (f'  - Rates are INDEPENDENT FROM other mixtures: '+
                       f'( P(k | c) = P(k) ); {possible_rates} possible '+
                       f'rate multipliers\n' )
                     )
                     
-        elif not args.pred_config['indp_rate_mults']:
-            possible_rates = args.pred_config['num_mixtures'] * args.pred_config['k_rate_mults']
-            g.write( ( f'  - Rates depend on class labels ( P(k | c) ); '+
+        elif not training_argparse.pred_config['indp_rate_mults']:
+            possible_rates = (training_argparse.pred_config['num_domain_mixutres'] *
+                              training_argparse.pred_config['num_fragment_mixutres'] *
+                              training_argparse.pred_config['num_site_mixutres'] *
+                              training_argparse.pred_config['k_rate_mults'] )
+            g.write( ( f'  - Rates depend on other mixtures ( P(k | c) ); '+
                        f'{possible_rates} possible rate multipliers\n' )
                     )
         
         # how to normalize reported metrics (usually by descendant length)
-        if args.pred_config["indel_model_type"] is not None:
+        if training_argparse.pred_config["indel_model_type"] is not None:
             g.write( f'  - When reporting, normalizing losses by: {args.norm_reported_loss_by}\n' )
         
-        elif args.pred_config["indel_model_type"] is None:
+        elif training_argparse.pred_config["indel_model_type"] is None:
             g.write( f'  - When reporting, normalizing losses by: align length '+
                      f'(same as desc length, because we remove gap '+
                      f'positions) \n' )
         
         # write source of times
-        g.write( f'Times from: {args.pred_config["times_from"]}\n' )
+        g.write( f'Times from: {training_argparse.pred_config["times_from"]}\n' )
     
     with open(f'{args.out_arrs_dir}/FINAL-EVAL_tkf_approx.tsv','w') as g:
         g.write('Used tkf approximations in the following locations:\n')
@@ -251,10 +254,8 @@ def eval_pairhmm_indp_sites(args,
         model_state_dict = flax.serialization.to_state_dict(best_pairhmm_trainstate)
         pickle.dump(model_state_dict, g)
     
-    to_write = {'RUN': args.training_wkdir}
-    to_write = {**to_write, **test_summary_stats}
     
-    with open(f'{args.logfile_dir}/AVE-LOSSES.tsv','w') as g:
-        for k, v in to_write.items():
-            g.write(f'{k}\t{v}\n')
+    write_final_eval_results(args = args, 
+                             summary_stats = test_summary_stats,
+                             filename = 'AVE-LOSSES.tsv')
     

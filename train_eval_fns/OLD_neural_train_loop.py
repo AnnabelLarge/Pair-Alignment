@@ -12,12 +12,6 @@ import pickle
 import sys
 from tqdm import tqdm
 
-
-
-
-
-
-
 from utils.train_eval_utils import ( timers,
                                      metrics_for_epoch,
                                      write_timing_file,

@@ -50,7 +50,11 @@ from train_eval_fns.neural_final_eval_wrapper import final_eval_wrapper
 from train_eval_fns.TrainingWrapper import FeedforwardTrainingWrapper as TrainingWrapper
 
 
-def train_feedforward(args, dataloader_dict: dict):
+def cont_training_feedforward(args, 
+                              dataloader_dict,
+                              new_training_wkdir,
+                              prev_model_ckpts_dir,
+                              tstate_to_load):
     ###########################################################################
     ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES   #########################
     ###########################################################################
@@ -58,6 +62,23 @@ def train_feedforward(args, dataloader_dict: dict):
            f"using the wrong training script")
     assert args.pred_model_type == 'feedforward', err
     del err
+    
+    
+    # vvv___DIFFERENT FROM ORIGINAL TRAINING CODE___vvv
+    
+    prev_encoder_savemodel_filename = prev_model_ckpts_dir + '/'+ f'ANC_ENC_{tstate_to_load}.pkl'
+    prev_decoder_savemodel_filename = prev_model_ckpts_dir + '/'+ f'DESC_DEC_{tstate_to_load}.pkl'
+    prev_finalpred_savemodel_filename = prev_model_ckpts_dir + '/'+ f'FINAL_PRED_{tstate_to_load}.pkl'
+    all_prev_savemodel_filenames = [prev_encoder_savemodel_filename, 
+                                    prev_decoder_savemodel_filename,
+                                    prev_finalpred_savemodel_filename]
+    
+    with open(prev_argparse_obj,'rb') as f:
+        epoch_ended = pickle.load(f).epoch_idx
+    del prev_argparse_obj, f
+    
+    # ^^^___DIFFERENT FROM ORIGINAL TRAINING CODE___^^^
+    
     
     ### edit the argparse object in-place
     fill_with_default_values(args)
@@ -71,6 +92,15 @@ def train_feedforward(args, dataloader_dict: dict):
     ###########################################################################
     ### 1: SETUP   ############################################################
     ###########################################################################
+    
+    # vvv___DIFFERENT FROM ORIGINAL TRAINING CODE___vvv
+    
+    assert args.training_wkdir != new_training_wkdir, 'pick a new training directory'
+    args.training_wkdir = new_training_wkdir
+    
+    # ^^^___DIFFERENT FROM ORIGINAL TRAINING CODE___^^^
+
+
     ### initial setup of misc things
     # setup the working directory (if not done yet) and this run's sub-directory
     setup_training_dir(args)
@@ -170,8 +200,24 @@ def train_feedforward(args, dataloader_dict: dict):
                               desc_dec_config = args.desc_dec_config, 
                               pred_config = args.pred_config,
                               t_array_for_all_samples = None )  
-    all_trainstates, all_model_instances, concat_fn = out
+    blank_tstate_lst, all_model_instances, concat_fn = out
     del out
+    
+    # vvv___DIFFERENT FROM ORIGINAL TRAINING CODE___vvv
+    # load values
+    
+    all_trainstates = []
+    for i in range(3):
+        with open(all_prev_savemodel_filenames[i], 'rb') as f:
+            state_dict = pickle.load(f)
+            
+        tstate = flax.serialization.from_state_dict( blank_tstate_lst[i], 
+                                                     state_dict )
+        all_trainstates.append(tstate)
+        
+    del blank_tstate_lst, i, state_dict, all_prev_savemodel_filenames
+    
+    # ^^^___DIFFERENT FROM ORIGINAL TRAINING CODE___^^^
     
     
     ### jit-compilations
@@ -222,13 +268,14 @@ def train_feedforward(args, dataloader_dict: dict):
     
     ### initialize training wrapper
     training_wrapper = TrainingWrapper( args = args,
-                                        epoch_arr = range(args.num_epochs),
+                                        epoch_arr = range(args.num_epochs - epoch_ended),
                                         initial_training_rngkey = rngkey,
                                         dataloader_dict = dataloader_dict,
                                         train_fn_jitted = train_fn_jitted,
                                         eval_fn_jitted = eval_fn_jitted,
                                         all_save_model_filenames = all_save_model_filenames,
                                         writer = writer )
+    del epoch_ended
     
     
     ### train
