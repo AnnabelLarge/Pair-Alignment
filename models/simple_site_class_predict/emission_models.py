@@ -49,7 +49,13 @@ from typing import Optional
 from models.BaseClasses import ModuleBase
 from models.simple_site_class_predict.model_functions import (bound_sigmoid,
                                                               bound_sigmoid_inverse,
-                                                              safe_log)
+                                                              safe_log,
+                                                              rate_matrix_from_exch_equl,
+                                                              scale_rate_matrix,
+                                                              upper_tri_vector_to_sym_matrix,
+                                                              cond_logprob_emit_at_match_per_mixture,
+                                                              joint_logprob_emit_at_match_per_mixture,
+                                                              fill_f81_logprob_matrix)
                     
 def _load_params(in_file, target_ndim: int):
     with open(in_file, 'rb') as f:
@@ -974,7 +980,9 @@ class EqulDistLogprobsFromFile(ModuleBase):
         self.k_rate_mults = self.config['k_rate_mults'] #K
         
         equl_file = self.config['filenames']['equl_dist']
-        site_class_probs_file = self.config['filenames']['site_class_probs']
+        
+        if (self.num_transit_mixtures * self.num_site_mixtures) > 1:
+            site_class_probs_file = self.config['filenames']['site_class_probs']
         
         
         ### load params
@@ -983,8 +991,12 @@ class EqulDistLogprobsFromFile(ModuleBase):
         self.log_equl_dist = safe_log(equl_dist) #(C_tr, C_s, A)
         
         # probability of site classes
-        site_class_probs = _load_params(equl_file, target_ndim=2) #(C_tr, C_s)
-        self.log_site_class_probs = safe_log(site_class_probs) #(C_tr, C_s)
+        if (self.num_transit_mixtures * self.num_site_mixtures) > 1:
+            site_class_probs = _load_params(equl_file, target_ndim=2) #(C_tr, C_s)
+            self.log_site_class_probs = safe_log(site_class_probs) #(C_tr, C_s)
+            
+        elif self.num_site_mixtures == 1:
+            self.log_site_class_probs = jnp.zeros( (1,1) ) #(C_tr=1, C_s=1)
         
     def __call__(self,
                  *args,

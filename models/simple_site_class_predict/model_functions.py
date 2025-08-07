@@ -260,9 +260,9 @@ def scale_rate_matrix(subst_rate_mat: ArrayLike,
     scaled rate matrix : ArrayLike, (C_trans, C_sites, K, A, A)
 
     """
-    subs_rate_mat = subs_rate_mat[:,:,None,...] #(C_tr, C_s, 1, A, A)
+    subst_rate_mat = subst_rate_mat[:,:,None,...] #(C_tr, C_s, 1, A, A)
     rate_multipliers = rate_multipliers[...,None,None] #(C_tr, C_s, K, 1, 1)
-    return jnp.multiply( subs_rate_mat, rate_multipliers )#(C_tr, C_s, K, A, A)
+    return jnp.multiply( subst_rate_mat, rate_multipliers )#(C_tr, C_s, K, A, A)
 
 
 ###############################################################################
@@ -298,7 +298,7 @@ def cond_logprob_emit_at_match_per_mixture( t_array: ArrayLike,
 
     """
     operand = jnp.multiply( scaled_rate_mat_per_mixture[None,...],
-                            t_array[:, None, None, None, None] ) #(T, C_tr, C_s, K, A, A)
+                            t_array[:, None, None, None, None, None] ) #(T, C_tr, C_s, K, A, A)
     
     cond_prob_emit_at_match_per_mixture = expm(operand) #(T, C_tr, C_s, K, A, A)
     cond_logprob_emit_at_match_per_mixture = safe_log( cond_prob_emit_at_match_per_mixture ) #(T, C_tr, C_s, K, A, A)
@@ -375,10 +375,10 @@ def fill_f81_logprob_matrix(equl: jnp.array,
     
     """
     T = t_array.shape[0]
-    C_tr = equilibrium_distributions.shape[0] # f
-    C_s = equilibrium_distributions.shape[1] # g
-    K = rate_multipliers.shape[1]
-    A = equl.shape[-1]
+    C_tr = equl.shape[0] 
+    C_s = equl.shape[1] 
+    A = equl.shape[2]
+    K = rate_multipliers.shape[2]
     
     # possibly normalize to one substitution per time t
     if norm_rate_matrix:

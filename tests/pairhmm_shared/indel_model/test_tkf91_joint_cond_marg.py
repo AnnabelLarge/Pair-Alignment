@@ -82,10 +82,11 @@ class TestTKF91JointCondMarg(unittest.TestCase):
         my_tkf_params['log_offset'] = jnp.log(self.offset)
         my_tkf_params['log_one_minus_offset'] = jnp.log1p(-self.offset)
         
-        my_model = TKF91TransitionLogprobs(config={}, 
+        my_model = TKF91TransitionLogprobs(config={'tkf_function': 'regular_tkf'}, 
                                             name='tkf91')
         fake_params = my_model.init(rngs=jax.random.key(0),
                                     t_array = t_array,
+                                    return_all_matrices = False,
                                     sow_intermediates = False)
         
         log_pred =  my_model.apply(variables = fake_params,
@@ -141,10 +142,15 @@ class TestTKF91JointCondMarg(unittest.TestCase):
         my_tkf_params['log_offset'] = jnp.log(self.offset)
         my_tkf_params['log_one_minus_offset'] = jnp.log1p(-self.offset)
         
-        my_model = TKF91TransitionLogprobs(config={}, 
+        my_model = TKF91TransitionLogprobs(config={'num_domain_mixtures': 1,
+                                                   'num_fragment_mixtures': 1,
+                                                   'num_site_mixtures': 1,
+                                                   'k_rate_mults': 1,
+                                                   'tkf_function': 'regular_tkf'}, 
                                             name='tkf91')
         fake_params = my_model.init(rngs=jax.random.key(0),
                                     t_array = t_array,
+                                    return_all_matrices = False,
                                     sow_intermediates = False)
         
         log_joint_tkf91 =  my_model.apply(variables = fake_params,

@@ -1,6 +1,6 @@
 Status:
 =======
-all tests pass on 7/18/25
+PASS on 8/6/25
 
 
 Summary: 
@@ -66,11 +66,16 @@ functions tested:
 
 flax modules tested:
   - transition_models.TKF91TransitionLogprobs.fill_joint_tkf92
+  
+  
+test_tkf92_domain_mix_joint_cond_marg
+---------------------------------------
+(repeat test_tkf92_joint_cond_marg, but now repeated C_domain different times)
 
 
 test_tkf92_frag_mix_joint_cond_marg
 -------------------------------------
-CALCULATION TESTED: TKF92 solution, but with different fragment mixtures
+CALCULATION TESTED: TKF92 solution, but with different domain and fragment mixtures
 
 ABOUT: compare my implementation of mixture of TKF92 fragments against hand-done calculations
 
@@ -84,7 +89,7 @@ flax modules tested:
 
 test_tkf92_reduction_to_tkf91
 ---------------------------------
-CALCULATION TESTED: TKF92 model reduction (with different fragment mixtures, but all mixtures should be TKF91)
+CALCULATION TESTED: TKF92 model reduction (with different domain and fragment mixtures, but all mixtures should be TKF91)
 
 ABOUT: make sure that TKF92 model reduces to TKF91 solution when r=0
 

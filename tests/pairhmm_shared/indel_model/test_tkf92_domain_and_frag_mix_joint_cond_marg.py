@@ -10,6 +10,7 @@ jax.config.update("jax_enable_x64", True)
 from jax import numpy as jnp
 
 import numpy as np
+from scipy.special import softmax
 
 import numpy.testing as npt
 import unittest
@@ -198,7 +199,7 @@ def true_marg_tkf92_scaled (lam, mu, r_c, c, d, prob_d):
 
 
 
-class TestTKF92FragMixJointCondMarg(unittest.TestCase):
+class TestTKF92DomainAndFragMixJointCondMarg(unittest.TestCase):
     """
     About
     ------
@@ -209,9 +210,22 @@ class TestTKF92FragMixJointCondMarg(unittest.TestCase):
         self.lam = jnp.array(0.3)
         self.mu = jnp.array(0.5)
         self.offset = 1 - (self.lam/self.mu)
-        self.r_mix = jnp.array([0.1, 0.5, 0.9])
-        self.log_class_probs = jnp.log( jnp.array([0.2, 0.3, 0.5]) )
-        self.C = self.r_mix.shape[0]
+        
+        C_dom = 5
+        C_frag = 2
+        
+        logits = np.random.rand( C_dom, C_frag )
+        self.r_mix = np.abs(logits)
+        del logits
+        
+        self.domain_class_probs = softmax( np.random.rand( (C_dom) ) )
+        
+        logits = np.random.rand( C_dom, C_frag )
+        self.fragment_class_probs = softmax( logits, axis=-1 )
+        del logits
+        
+        self.C_dom = C_dom
+        self.C_frag = C_frag
         
         
     ##################################
@@ -220,45 +234,67 @@ class TestTKF92FragMixJointCondMarg(unittest.TestCase):
     def _check_joint_tkf92_calc(self,
                                 tkf_function,
                                 t_array):
-        # by my function (in a flax module)
+        T = t_array.shape[0]
+        C_dom = self.C_dom
+        C_frag = self.C_frag
+        S = 4
+        
+        ### get true values
+        true = np.zeros( (T, C_dom, C_frag, C_frag, S, S) )
+        for c_dom in range(C_dom):
+            for c in range(C_frag):                
+                r_c = self.r_mix[c_dom, c].item()
+                
+                for d in range(C_frag):
+                    prob_d = self.fragment_class_probs[c_dom, d].item()
+                    
+                    for t_idx, t in enumerate(t_array):
+                        out = true_joint_tkf92_scaled (lam = self.lam, 
+                                                       mu = self.mu, 
+                                                       r_c = r_c, 
+                                                       t = t, 
+                                                       c = c, 
+                                                       d = d, 
+                                                       prob_d = prob_d) #(S, S)
+                        
+                        true[t_idx, c_dom, c, d, :, :] = out
+        
+        # check shape
+        npt.assert_allclose( true.shape, (T, C_dom, C_frag, C_frag, S, S) )
+        
+        
+        ### by my function (in a flax module)
         my_tkf_params, _ = tkf_function(mu = self.mu, 
                                         offset = self.offset,
                                         t_array = t_array)
         my_tkf_params['log_offset'] = jnp.log(self.offset)
         my_tkf_params['log_one_minus_offset'] = jnp.log1p(-self.offset)
         
-        my_model = TKF92TransitionLogprobs(config={'num_tkf_fragment_classes': self.C}, 
+        #init params with regular_tkf, but don't use it
+        my_model = TKF92TransitionLogprobs(config={'num_domain_mixtures': C_dom,
+                                                   'num_fragment_mixtures': C_frag,
+                                                   'num_site_mixtures': 1,
+                                                   'k_rate_mults': 1,
+                                                   'tkf_function': 'regular_tkf'}, 
                                             name='tkf92')
         fake_params = my_model.init(rngs=jax.random.key(0),
                                     t_array = t_array,
-                                    log_class_probs = self.log_class_probs,
+                                    return_all_matrices = False,
                                     sow_intermediates = False)
         
         log_pred =  my_model.apply(variables = fake_params,
                                     out_dict = my_tkf_params,
                                     r_extend = self.r_mix,
-                                    class_probs = jnp.exp( self.log_class_probs ),
-                                    method = 'fill_joint_tkf92') #(T, C, C, 4, 4)
+                                    frag_class_probs = self.fragment_class_probs,
+                                    method = 'fill_joint_tkf92') #(T, C_dom, C_frag, C_frag, 4, 4)
         
-        # get true values
-        true_tkf92 = np.zeros( log_pred.shape )
-        for c in range(self.C):
-            r_c = self.r_mix[c].item()
-            
-            for d in range(self.C):
-                prob_d = np.exp( self.log_class_probs[d].item() )
-                
-                for t_idx, t in enumerate(t_array):
-                    out = true_joint_tkf92_scaled (lam = self.lam, 
-                                                   mu = self.mu, 
-                                                   r_c = r_c, 
-                                                   t = t, 
-                                                   c = c, 
-                                                   d = d, 
-                                                   prob_d = prob_d) #(S, S)
-                    true_tkf92[t_idx, c, d, :, :] = out
-                    
-        npt.assert_allclose(true_tkf92, jnp.exp(log_pred), atol=THRESHOLD)
+        # check shape
+        npt.assert_allclose( log_pred.shape, (T, C_dom, C_frag, C_frag, S, S) )
+        
+        
+        ### check values
+        true = np.reshape(true, log_pred.shape)
+        npt.assert_allclose(true, jnp.exp(log_pred), atol=THRESHOLD)
     
     def test_joint_tkf92_with_switch_tkf(self):
         times = jnp.array([0.3, 0.5, 0.9, 0.0003, 0.0005, 0.0009])
@@ -282,27 +318,43 @@ class TestTKF92FragMixJointCondMarg(unittest.TestCase):
     ### single-sequence marginal: mix of TKF92 models   #
     #####################################################
     def test_marg_tkf92_calc(self):
-        # by my function
-        log_pred = get_tkf92_single_seq_marginal_transition_logprobs(offset = self.offset,
-                                                                      class_probs = jnp.exp( self.log_class_probs ),
-                                                                      r_ext_prob = self.r_mix ) #(C, C, 2, 2)
+        C_dom = self.C_dom
+        C_frag = self.C_frag
+        S = 2
         
-        # get true values
-        true = np.zeros( log_pred.shape )
-        for c in range(self.C):
-            r_c = self.r_mix[c].item()
-            
-            for d in range(self.C):
-                prob_d = np.exp( self.log_class_probs[d].item() )
+        ### get true values
+        true = np.zeros( (C_dom, C_frag, C_frag, S, S) )
+        
+        for c_dom in range(C_dom):
+            for c in range(C_frag):                
+                r_c = self.r_mix[c_dom, c].item()
                 
-                out = true_marg_tkf92_scaled (lam = self.lam, 
-                                       mu = self.mu, 
-                                       r_c = r_c, 
-                                       c = c, 
-                                       d = d, 
-                                       prob_d = prob_d) #(S, S)
-                true[c, d, :, :] = out
+                for d in range(C_frag):
+                    prob_d = self.fragment_class_probs[c_dom, d].item()
+                    
+                    out = true_marg_tkf92_scaled (lam = self.lam, 
+                                            mu = self.mu, 
+                                            r_c = r_c, 
+                                            c = c, 
+                                            d = d, 
+                                            prob_d = prob_d) #(S, S)
+                    true[c_dom,c, d, :, :] = out
+                
+        # check shape
+        npt.assert_allclose( true.shape, (C_dom, C_frag, C_frag, S, S) )
+                
         
+        ### by my function
+        log_pred = get_tkf92_single_seq_marginal_transition_logprobs(offset = self.offset,
+                                                        frag_class_probs = self.fragment_class_probs,
+                                                        r_ext_prob = self.r_mix ) #(C_dom, C_frag, C_frag, 2, 2)
+        
+        # check shape
+        npt.assert_allclose( log_pred.shape, (C_dom, C_frag, C_frag, S, S) )
+        
+        
+        ### check values
+        true = np.reshape(true, log_pred.shape)
         npt.assert_allclose(true, jnp.exp(log_pred), atol=THRESHOLD)
     
     
@@ -312,54 +364,73 @@ class TestTKF92FragMixJointCondMarg(unittest.TestCase):
     def _check_cond_tkf92_calc(self,
                                 tkf_function,
                                 t_array):
-        # by my function (in a flax module)
+        ### True
+        T = t_array.shape[0]
+        C_dom = self.C_dom
+        C_frag = self.C_frag
+        S = 4
+        
+        ### get true values
+        true = np.zeros( (T, C_dom, C_frag, C_frag, S, S) )
+        for c_dom in range(C_dom):
+            for c in range(C_frag):                
+                r_c = self.r_mix[c_dom, c].item()
+                
+                for d in range(C_frag):
+                    prob_d = self.fragment_class_probs[c_dom, d].item()
+                    
+                    for t_idx, t in enumerate(t_array):
+                        out = true_cond_tkf92_scaled (lam = self.lam, 
+                                                       mu = self.mu, 
+                                                       r_c = r_c, 
+                                                       t = t, 
+                                                       c = c, 
+                                                       d = d, 
+                                                       prob_d = prob_d) #(S, S)
+                        true[t_idx, c_dom, c, d, :, :] = out
+        
+        # check shape
+        npt.assert_allclose( true.shape, (T, C_dom, C_frag, C_frag, S, S) )
+        
+        
+        ### by my function (in a flax module)
         my_tkf_params, _ = tkf_function(mu = self.mu, 
                                         offset = self.offset,
                                         t_array = t_array)
         my_tkf_params['log_offset'] = jnp.log(self.offset)
         my_tkf_params['log_one_minus_offset'] = jnp.log1p(-self.offset)
         
-        my_model = TKF92TransitionLogprobs(config={'num_tkf_fragment_classes': self.C}, 
+        # init with regular_tkf, but don't actually use it
+        my_model = TKF92TransitionLogprobs(config={'num_domain_mixtures': C_dom,
+                                                   'num_fragment_mixtures': C_frag,
+                                                   'num_site_mixtures': 1,
+                                                   'k_rate_mults': 1,
+                                                   'tkf_function': 'regular_tkf'}, 
                                             name='tkf92')
         fake_params = my_model.init(rngs=jax.random.key(0),
                                     t_array = t_array,
-                                    log_class_probs = self.log_class_probs,
+                                    return_all_matrices = False,
                                     sow_intermediates = False)
         
         log_joint_tkf92 =  my_model.apply(variables = fake_params,
                                     out_dict = my_tkf_params,
                                     r_extend = self.r_mix,
-                                    class_probs = jnp.exp( self.log_class_probs ),
-                                    method = 'fill_joint_tkf92') #(T, C, C, 4, 4)
+                                    frag_class_probs = self.fragment_class_probs,
+                                    method = 'fill_joint_tkf92') #(T, C_dom, C_frag, C_frag, 4, 4)
         
         log_marg_tkf92 = get_tkf92_single_seq_marginal_transition_logprobs(offset = self.offset,
-                                                                          class_probs = jnp.exp( self.log_class_probs ),
-                                                                          r_ext_prob = self.r_mix ) #(C, C, 2, 2)
+                                                        frag_class_probs = self.fragment_class_probs,
+                                                        r_ext_prob = self.r_mix ) #(C_dom, C_frag, C_frag, 2, 2)
         
-        log_cond_tkf92 = get_cond_transition_logprobs( log_marg_tkf92, 
-                                                        log_joint_tkf92 ) #(T, C, C, 4, 4)
+        log_cond_tkf92 = get_cond_transition_logprobs( log_marg_tkf92, log_joint_tkf92 ) #(T, C_dom, C_frag, C_frag, 4, 4)
+        
+        # check shape
+        npt.assert_allclose( log_cond_tkf92.shape, (T, C_dom, C_frag, C_frag, S, S) )
         
         
-        # get true values
-        true_tkf92 = np.zeros( log_cond_tkf92.shape )
-        for c in range(self.C):
-            r_c = self.r_mix[c].item()
-            
-            for d in range(self.C):
-                prob_d = np.exp( self.log_class_probs[d].item() )
-                
-                for t_idx, t in enumerate(t_array):
-                    out = true_cond_tkf92_scaled (lam = self.lam, 
-                                           mu = self.mu, 
-                                           r_c = r_c, 
-                                           t = t, 
-                                           c = c, 
-                                           d = d, 
-                                           prob_d = prob_d) #(S, S)
-                    
-                    true_tkf92[t_idx, c, d, :, :] = out
-                    
-        npt.assert_allclose(true_tkf92, jnp.exp(log_cond_tkf92), atol=THRESHOLD)
+        ### check values
+        true = np.reshape(true, log_cond_tkf92.shape)
+        npt.assert_allclose(true, jnp.exp(log_cond_tkf92), atol=THRESHOLD)
     
     def test_cond_tkf92_with_switch_tkf(self):
         times = jnp.array([0.3, 0.5, 0.9, 0.0003, 0.0005, 0.0009])

@@ -886,9 +886,6 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         self.num_fragment_mixtures = self.config['num_fragment_mixtures']
         tkf_function_name = self.config['tkf_function']
         
-        # for now, don't allow domain mixtures
-        assert self.num_domain_mixtures == 1
-        
         # optional inputs
         self.mu_min_val, self.mu_max_val = self.config.get( 'mu_range', [1e-4, 2] )
         self.offs_min_val, self.offs_max_val = self.config.get( 'offset_range', [1e-4, 0.333] )
@@ -1170,6 +1167,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         j_idx = j_idx.flatten()
 
         # add r to specific locations
+        # log_tkf92_rate_mat[:, :, i_idx, i_idx, j_idx, j_idx] (T, C_dom, S-1)
         prev_vals = log_tkf92_rate_mat[:, :, i_idx, i_idx, j_idx, j_idx].reshape( (T, C_dom, C_frag, S-1) ) #(T, C_dom, C_frag, S-1)
         r_to_add = jnp.broadcast_to( log_r_ext_prob[None,...,None], prev_vals.shape) #(T, C_dom, C_frag, S-1)
         new_vals = logsumexp_with_arr_lst([r_to_add, prev_vals]).reshape(T, C_dom, -1) #(T, C_dom, C_frag * S-1)
@@ -1222,7 +1220,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         """
         # output is: (C_dom, C_{frag_from}, C_{frag_to}, 2, 2)
         marginal_matrix = get_tkf92_single_seq_marginal_transition_logprobs(offset=offset,
-                                                      class_probs=class_probs,
+                                                      frag_class_probs=frag_class_probs,
                                                       r_ext_prob=r_ext_prob)
         
         # output is: (T, C_dom, C_{frag_from}, C_{frag_to}, S_from=4, S_to=4)

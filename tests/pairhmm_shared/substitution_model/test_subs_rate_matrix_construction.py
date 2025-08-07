@@ -86,7 +86,9 @@ def construct_fake_rate_matrix():
     return {'exchangeabilities': exchangeabilities, #(A,A)
             'equilibrium_distributions': equilibrium_distributions, #(C,A)
             'true': true, #(C,A,A)
-            'true_normed': true_normed} #(C,A,A)
+            'true_normed': true_normed,
+            'C': equilibrium_distributions.shape[0],
+            'A': equilibrium_distributions.shape[1]} #(C,A,A)
 
 def construct_lg_rate_matrix(req_files_path):
     """
@@ -148,7 +150,7 @@ class TestSubsRateMatrixConstruction(unittest.TestCase):
         
     """
     def setUp(self):
-        self.path = './tests/pairhmm_shared_functions/substitution_model'
+        self.path = './tests/pairhmm_shared/substitution_model'
         self.req_files_path = f'{self.path}/req_files'
     
     def test_upper_tri_vector_to_sym_matrix(self):
@@ -162,7 +164,11 @@ class TestSubsRateMatrixConstruction(unittest.TestCase):
                                     [2, 4, 0, 6],
                                     [3, 5, 6, 0]])
         pred_sym_matrix = upper_tri_vector_to_sym_matrix(vec)
-    
+        
+        # check shape
+        npt.assert_allclose( true_sym_matrix.shape, pred_sym_matrix.shape )
+        
+        # check value
         npt.assert_allclose(true_sym_matrix, pred_sym_matrix, atol=THRESHOLD)
     
     def test_rate_matrix_from_exch_equl(self):
@@ -173,13 +179,20 @@ class TestSubsRateMatrixConstruction(unittest.TestCase):
         out = construct_fake_rate_matrix()
         
         exchangeabilities = out['exchangeabilities'] #(A,A)
-        equilibrium_distributions = out['equilibrium_distributions'] #(C,A)
+        equilibrium_distributions = out['equilibrium_distributions'][None,...] #(1,C,A)
         true = out['true'] #(C,A,A)
         
         pred = rate_matrix_from_exch_equl(exchangeabilities,
                                             equilibrium_distributions,
-                                            norm=False) #(C,A,A)
+                                            norm=False) #(1,C,A,A)
         
+        # check shape
+        C = out['C']
+        A = out['A']
+        npt.assert_allclose( pred.shape, (1,C,A,A) )
+        
+        # check value
+        true = np.reshape(true, pred.shape)
         npt.assert_allclose(true, pred, atol=THRESHOLD)
     
     def test_rate_matrix_from_exch_equl_normalized_matrix(self):
@@ -191,13 +204,20 @@ class TestSubsRateMatrixConstruction(unittest.TestCase):
         out = construct_fake_rate_matrix()
         
         exchangeabilities = out['exchangeabilities'] #(A,A)
-        equilibrium_distributions = out['equilibrium_distributions'] #(C,A)
+        equilibrium_distributions = out['equilibrium_distributions'][None,...] #(1,C,A)
         true_normed = out['true_normed'] #(C,A,A)
         
         pred_normed = rate_matrix_from_exch_equl(exchangeabilities,
                                                   equilibrium_distributions,
-                                                  norm=True) #(C,A,A)
+                                                  norm=True) #(1,C,A,A)
         
+        # check shape
+        C = out['C']
+        A = out['A']
+        npt.assert_allclose( pred_normed.shape, (1,C,A,A) )
+        
+        # check value
+        true_normed = np.reshape(true_normed, pred_normed.shape)
         npt.assert_allclose(true_normed, pred_normed, atol=THRESHOLD)
     
     def test_rate_matrix_row_sums(self):
@@ -207,17 +227,23 @@ class TestSubsRateMatrixConstruction(unittest.TestCase):
         out = construct_fake_rate_matrix()
         
         exchangeabilities = out['exchangeabilities'] #(A,A)
-        equilibrium_distributions = out['equilibrium_distributions'] #(C,A)
+        equilibrium_distributions = out['equilibrium_distributions'][None,...] #(1,C,A)
         
         pred = rate_matrix_from_exch_equl(exchangeabilities,
                                             equilibrium_distributions,
-                                            norm=False) #(C,A,A)
+                                            norm=False) #(1,C,A,A)
         
+        # check shape
+        C = out['C']
+        A = out['A']
+        npt.assert_allclose( pred.shape, (1,C,A,A) )
+        
+        # check value
+        pred = pred[0,...] #(C, A, A)
         for c in range(pred.shape[0]):
             v = pred[c, ...].sum(axis=-1) #(A,)
-            npt.assert_allclose(v, 0, atol=THRESHOLD, 
-                                err_msg=f"matrix {c}: Rowsum is {v}"
-                                )
+            npt.assert_allclose( v, 0, atol=THRESHOLD, 
+                                 err_msg=f"matrix {c}: Rowsum is {v}" )
     
     def test_rate_matrix_row_sums_normalized_matrix(self):
         """
@@ -227,17 +253,23 @@ class TestSubsRateMatrixConstruction(unittest.TestCase):
         out = construct_fake_rate_matrix()
         
         exchangeabilities = out['exchangeabilities'] #(A,A)
-        equilibrium_distributions = out['equilibrium_distributions'] #(C,A)
+        equilibrium_distributions = out['equilibrium_distributions'][None,...] #(1,C,A)
         
         pred_normed = rate_matrix_from_exch_equl(exchangeabilities,
                                                   equilibrium_distributions,
-                                                  norm=True) #(C,A,A)
+                                                  norm=True) #(1,C,A,A)
         
+        # check shape
+        C = out['C']
+        A = out['A']
+        npt.assert_allclose( pred_normed.shape, (1,C,A,A) )
+        
+        # check value
+        pred_normed = pred_normed[0,...] #(C, A, A)
         for c in range(pred_normed.shape[0]):
             v = pred_normed[c, ...].sum(axis=-1) #(A,)
-            npt.assert_allclose(v, 0, atol=THRESHOLD, 
-                                err_msg=f"matrix {c}: Rowsum is {v}"
-                                )
+            npt.assert_allclose( v, 0, atol=THRESHOLD, 
+                                err_msg=f"matrix {c}: Rowsum is {v}" )
     
     def test_rate_matrix_normalization(self):
         """
@@ -247,23 +279,34 @@ class TestSubsRateMatrixConstruction(unittest.TestCase):
         out = construct_fake_rate_matrix()
         
         exchangeabilities = out['exchangeabilities'] #(A,A)
-        equilibrium_distributions = out['equilibrium_distributions'] #(C,A)
+        equilibrium_distributions = out['equilibrium_distributions'][None,...] #(1,C,A)
         
         pred_normed = rate_matrix_from_exch_equl(exchangeabilities,
                                                   equilibrium_distributions,
-                                                  norm=True) #(C,A,A)
+                                                  norm=True) #(1,C,A,A)
         
+        # check shape
+        C = out['C']
+        A = out['A']
+        npt.assert_allclose( pred_normed.shape, (1,C,A,A) )
+        
+        # make sure rows sum to zero
+        npt.assert_allclose( pred_normed.sum(axis=-1),
+                             np.zeros( pred_normed.sum(axis=-1).shape ), 
+                             atol=THRESHOLD )
+        
+        # check value
+        pred_normed = pred_normed[0,...] #(C, A, A)
         for c in range(pred_normed.shape[0]):
             v = pred_normed[c, ...] #(A,A)
             checksum = 0
             for i in range(v.shape[0]):
-                checksum += v[i,i] * equilibrium_distributions[c,i]
+                checksum += v[i,i] * equilibrium_distributions[0,c,i]
             
             err = f'matrix {c}: matrix normalized to {-checksum}'
             with self.subTest(value=checksum):
                 npt.assert_allclose(-checksum, 1, atol=THRESHOLD, 
-                                    err_msg=f"matrix {c}: Checksum is {-checksum}"
-                                    )
+                                    err_msg=f"matrix {c}: Checksum is {-checksum}" )
     
     def test_GTRRateMatFromFile_with_upper_triag_values(self):
         """
@@ -274,14 +317,26 @@ class TestSubsRateMatrixConstruction(unittest.TestCase):
         true = construct_lg_rate_matrix(req_files_path = self.req_files_path) #(A,A)
         
         # equlibrium distribution
-        # self.req_files_path
-        config = {'filenames': {'equl_dist': f'{self.req_files_path}/LG08_equl_dist.npy'}}
+        config = {'num_domain_mixtures': 1,
+                  'num_fragment_mixtures': 1,
+                  'num_site_mixtures': 1,
+                  'k_rate_mults': 1,
+                  'filenames': {'equl_dist': f'{self.req_files_path}/LG08_equl_dist.npy'}}
         my_equl_fn = EqulDistLogprobsFromFile(config=config,
                                               name = 'equl_fn')
-        logprob_equl = my_equl_fn.apply(variables = {}) #(A,)
+        _, logprob_equl = my_equl_fn.apply(variables = {}) #(1, 1, A,)
+        
+        npt.assert_allclose( logprob_equl.ndim, 3 )
+        C_tr = logprob_equl.shape[0]
+        C_sites = logprob_equl.shape[1]
+        A = logprob_equl.shape[2]
+        del config
     
         # LG exchangeabilities
-        config = {'num_mixtures': 1,
+        config = {'num_domain_mixtures': 1,
+                  'num_fragment_mixtures': 1,
+                  'num_site_mixtures': 1,
+                  'k_rate_mults': 1,
                   'norm_rate_matrix': True,
                   'filenames': {'rate_mult': None,
                                 'exch': f'{self.req_files_path}/LG08_exchangeability_vec.npy'}}
@@ -289,14 +344,24 @@ class TestSubsRateMatrixConstruction(unittest.TestCase):
                                     name='my_mod')
 
         _, out_dict = my_mod.apply(variables = {},
-                            logprob_equl = logprob_equl,
-                            t_array = np.ones( (5,) ),
+                            log_equl_dist = logprob_equl,
                             rate_multipliers = np.ones( (5,) ),
+                            t_array = np.ones( (5,) ),
                             sow_intermediates = False,
                             return_cond = False,
                             return_intermeds = True)
         
-        pred = out_dict['rate_matrix'][0,...]
+        # check shape
+        pred = out_dict['rate_matrix']
+        npt.assert_allclose( pred.shape, (C_tr,C_sites,A,A) )
+        
+        # make sure rows sum to zero
+        npt.assert_allclose( pred.sum(axis=-1),
+                             np.zeros( pred.sum(axis=-1).shape ), 
+                             atol=THRESHOLD )
+        
+        # check value
+        true = np.reshape(true, pred.shape)
         npt.assert_allclose(true, pred, atol=THRESHOLD)
     
     def test_GTRRateMatFromFile_with_full_rate_mat(self):
@@ -308,30 +373,53 @@ class TestSubsRateMatrixConstruction(unittest.TestCase):
         true = construct_lg_rate_matrix(req_files_path = self.req_files_path) #(A,A)
         
         # equlibrium distribution
-        config = {'filenames': {'equl_dist': f'{self.req_files_path}/LG08_equl_dist.npy'}}
+        config = {'num_domain_mixtures': 1,
+                  'num_fragment_mixtures': 1,
+                  'num_site_mixtures': 1,
+                  'k_rate_mults': 1,
+                  'filenames': {'equl_dist': f'{self.req_files_path}/LG08_equl_dist.npy'}}
         my_equl_fn = EqulDistLogprobsFromFile(config=config,
                                               name = 'equl_fn')
-        logprob_equl = my_equl_fn.apply(variables = {}) #(A,)
+        _, logprob_equl = my_equl_fn.apply(variables = {}) #(1, 1, A)
+        
+        npt.assert_allclose( logprob_equl.ndim, 3 )
+        C_tr = logprob_equl.shape[0]
+        C_sites = logprob_equl.shape[1]
+        A = logprob_equl.shape[2]
+        del config
     
         # LG exchangeabilities
-        config = {'num_mixtures': 1,
+        config = {'num_domain_mixtures': 1,
+                  'num_fragment_mixtures': 1,
+                  'num_site_mixtures': 1,
+                  'k_rate_mults': 1,
                   'norm_rate_matrix': True,
                   'filenames': {'rate_mult': None,
                                 'exch': f'{self.req_files_path}/LG08_exchangeability_R.npy'}}
         my_mod = GTRLogprobsFromFile(config=config,
                                     name='my_mod')
-
+        
         _, out_dict = my_mod.apply(variables = {},
-                            logprob_equl = logprob_equl,
-                            t_array = np.ones( (5,) ),
+                            log_equl_dist = logprob_equl,
                             rate_multipliers = np.ones( (5,) ),
+                            t_array = np.ones( (5,) ),
                             sow_intermediates = False,
                             return_cond = False,
                             return_intermeds = True)
         
-        pred = out_dict['rate_matrix'][0,...]
+        # check shape
+        pred = out_dict['rate_matrix']
+        npt.assert_allclose( pred.shape, (C_tr,C_sites,A,A) )
+        
+        # make sure rows sum to zero
+        npt.assert_allclose( pred.sum(axis=-1),
+                             np.zeros( pred.sum(axis=-1).shape ), 
+                             atol=THRESHOLD )
+        
+        # check value
+        true = np.reshape(true, pred.shape)
         npt.assert_allclose(true, pred, atol=THRESHOLD)
         
 if __name__ == '__main__':
-    unittest.main( verbosity=2 )
+    unittest.main( )
                
