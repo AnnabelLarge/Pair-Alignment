@@ -2413,11 +2413,10 @@ def all_loglikes_forward(aligned_inputs,
 
     ### scan over remaining length
     idx_arr = jnp.array( [i for i in range(2, L_align)] )
-    out_dict,_ = jax.lax.scan( f = scan_fn,
-                               init = init_dict,
-                               xs = idx_arr,
-                               length = idx_arr.shape[0] )
-    
+    out_dict, _ = jax.lax.scan( f = scan_fn,
+                                               init = init_dict,
+                                               xs = idx_arr,
+                                               length = idx_arr.shape[0] )
     final_joint_alpha = out_dict['joint_alpha'] #(T, C, B) or #(C, B)
     joint_neg_logP = -logsumexp(final_joint_alpha, 
                                 axis = 1 if not unique_time_per_sample else 0) #(T, B) or (B,)

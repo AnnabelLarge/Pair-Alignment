@@ -14,7 +14,9 @@ All functions tested:
 
 All flax modules tested:
 -------------------------
-- FragAndSiteClasses._get_scoring_matrices (particularly the marginalization over k classes)
+- FragAndSiteClasses._get_scoring_matrices (particularly the marginalization over site mixtures and rate mixtures)
+- FragAndSiteClasses.__call__
+- FragAndSiteClasses.calculate_all_loglikes
 
 
 All tests:
@@ -46,6 +48,14 @@ ABOUT: same as above, but also test conditional and single-sequence marginals
 functions tested:
 - joint_only_forward
 - all_loglikes_forward
+
+
+frag_mix_reduction_test
+------------------------
+ABOUT: with one fragment mixture, FragAndSiteClasses strictly reduces to IndpSites
+
+functions tested:
+  - FragAndSiteClasses.calculate_all_loglikes
 
 
 

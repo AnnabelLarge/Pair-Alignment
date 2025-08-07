@@ -73,7 +73,6 @@ class TestIndpSiteClassesLoglikes(unittest.TestCase):
                                         'num_fragment_mixtures': 1,
                                         'num_site_mixtures': self.C,
                                         'k_rate_mults': self.K,
-                                        'num_tkf_fragment_classes': 1,
                                         'indp_rate_mults': False,
                                         'times_from': 't_array_from_file',
                                         'exponential_dist_param': 1.1,

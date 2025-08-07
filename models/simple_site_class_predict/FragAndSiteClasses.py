@@ -257,7 +257,7 @@ class FragAndSiteClasses(ModuleBase):
         scoring_matrices_dict = self._get_scoring_matrices(t_array=times_for_matrices,
                                                            sow_intermediates=sow_intermediates,
                                                            return_all_matrices = False,
-                                                           return_intermeds=False)
+                                                           return_intermeds = False)
         
         
         ### calculate joint loglike using 1D forward algorithm over latent site 
@@ -379,7 +379,7 @@ class FragAndSiteClasses(ModuleBase):
         scoring_matrices_dict = self._get_scoring_matrices( t_array=times_for_matrices,
                                                             sow_intermediates=False,
                                                             return_all_matrices = True,
-                                                            return_intermeds=False )
+                                                            return_intermeds = False)
         
         
         ### get all log-likelihoods
@@ -390,7 +390,7 @@ class FragAndSiteClasses(ModuleBase):
                                     joint_logprob_emit_at_match = joint_logprob_emit_at_match,
                                     logprob_emit_at_indel = logprob_emit_at_indel,
                                     all_transit_matrices = all_transit_matrices,
-                                    unique_time_per_sample = unique_time_per_sample)
+                                    unique_time_per_sample = unique_time_per_sample )
         
         # for joint loglike: marginalize over times where needed
         if (not unique_time_per_sample) and (t_array.shape[0] > 1):
