@@ -1,0 +1,61 @@
+{
+    "training_wkdir": "RESULTS",
+    "rng_seednum": 0,
+
+    "data_dir": "PF07734",
+    "train_dset_splits": ["PF07734"],
+    "test_dset_splits": ["PF07734"],
+    "toss_alignments_longer_than": null,
+    "bos_eos_as_match": false,
+    "batch_size": 100,
+    "emission_alphabet_size": 20,
+    "gap_idx": 43,
+
+    "num_epochs": 1,
+    "optimizer_config": {
+        "init_value": 1e-10,
+        "peak_value": 1e-10,
+        "end_value": 1e-10,
+        "warmup_steps": 0,
+        "weight_decay": 0,
+        "every_k_schedule": 1
+    },
+    "early_stop_cond1_atol": 1e-7,
+    "early_stop_cond2_gap": 1,
+    "patience": 1,
+    "checkpoint_freq_during_training": 0,
+    "update_grads": false,
+
+    "interms_for_tboard": {
+        "finalpred_sow_outputs": false,
+        "forward_pass_outputs": false,
+        "gradients": false,
+        "optimizer": false
+    },
+    "save_arrs": true,
+    "save_per_sample_losses": true,
+    "norm_reported_loss_by": "desc_len",
+
+    "pred_model_type": "pairhmm_indp_sites",
+    "pred_config": {
+        "load_all": true,
+        "num_domain_mixtures": 1,
+        "num_fragment_mixtures": 1,
+        "num_site_mixtures": 1,
+        "k_rate_mults": 1,
+
+        "subst_model_type": "gtr",
+        "indp_rate_mults": false,
+        "norm_rate_matrix": false,
+        "norm_rate_mults": false,
+
+        "indel_model_type": null,
+
+        "filenames": {"geom_length_params_file": "./tests/pairhmm_vs_xrate/params_from_xrate/PARAM-MAT_one-GTR_PF07734_geom_length_params.npy",
+                      "equl_dist": "./tests/pairhmm_vs_xrate/params_from_xrate/PARAM-MAT_one-GTR_PF07734_xrate_fitted_equlibriums.npy",
+                      "exch": "./tests/pairhmm_vs_xrate/params_from_xrate/PARAM-MAT_one-GTR_PF07734_xrate_fitted_exchanges_unnormed_Q.npy"},
+
+        "times_from": "t_per_sample"
+        }
+    
+}

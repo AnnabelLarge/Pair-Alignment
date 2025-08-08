@@ -200,6 +200,7 @@ class GeomLenTransitionLogprobsFromFile(GeomLenTransitionLogprobs):
         
     
     def __call__(self,
+                 return_all_matrices: bool,
                  *args,
                  **kwargs):
         """

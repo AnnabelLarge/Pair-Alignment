@@ -792,7 +792,12 @@ class IndpSites(ModuleBase):
             ####################################################
             ### under geometric length (only scoring subs)
             if self.indel_model_type is None:
-                geom_p_emit = nn.sigmoid(self.transitions_module.p_emit_logit).item() #(1,)
+                if self.config['load_all']:
+                    geom_p_emit = np.exp(self.transitions_module.out_vec)[0].item() #float
+                    
+                elif not self.config['load_all']:
+                    geom_p_emit = nn.sigmoid(self.transitions_module.p_emit_logit).item() #float
+                
                 arr = np.array( [geom_p_emit, 1 - geom_p_emit] )
                 key = f'{prefix}_geom_seq_len'
                 write_matrix_to_npy( out_folder, arr, key )
