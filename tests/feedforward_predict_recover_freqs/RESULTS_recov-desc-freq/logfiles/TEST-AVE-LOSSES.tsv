@@ -1,7 +1,0 @@
-RUN	RESULTS_recov-desc-freq
-sum_cond_logprobs	5464.35546875
-cond_ave_loss	2732.177734375
-cond_ave_loss_seqlen_normed	3.0494375228881836
-cond_perplexity	21.140411376953125
-cond_ece	21.103469848632812
-acc	0.1208750456571579

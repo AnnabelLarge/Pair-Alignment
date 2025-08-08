@@ -1,0 +1,61 @@
+{
+    "training_wkdir": "RESULTS_pairhmm_eval_force-global",
+    "rng_seednum": 1,
+
+    "data_dir": "example_data",
+    "train_dset_splits": ["sevenSamp", "twoSamp"],
+    "test_dset_splits": ["sevenSamp", "twoSamp"],
+    "toss_alignments_longer_than": null,
+    "bos_eos_as_match": false,
+    "batch_size": 9,
+    "emission_alphabet_size": 20,
+    "gap_idx": 43,
+
+    "num_epochs": 1,
+    "optimizer_config": {
+        "init_value": 1e-10,
+        "peak_value": 1e-10,
+        "end_value": 1e-10,
+        "warmup_steps": 0,
+        "weight_decay": 0,
+        "every_k_schedule": 1
+    },
+    "early_stop_cond1_atol": 1e-3,
+    "early_stop_cond2_gap": 3,
+    "patience": 1,
+    "checkpoint_freq_during_training": 0,
+    "update_grads": false,
+
+    "interms_for_tboard": {
+        "finalpred_sow_outputs": false,
+        "forward_pass_outputs": false,
+        "gradients": false,
+        "optimizer": false
+    },
+    "save_arrs": true,
+    "save_per_sample_losses": true,
+    "norm_reported_loss_by": "desc_len",
+
+    "pred_model_type": "pairhmm_indp_sites",
+    "pred_config": {
+        "load_all": true,
+        "num_domain_mixtures": 1,
+        "num_fragment_mixtures": 1,
+        "num_site_mixtures": 1,
+        "k_rate_mults": 1,
+
+        "subst_model_type": "f81",
+        "indp_rate_mults": false,
+        "norm_rate_matrix": true,
+        "norm_rate_mults": false,
+
+        "indel_model_type": "tkf92",
+        "tkf_function": "regular_tkf",
+
+        "filenames": {"equl_dist": "./RESULTS_train_neuralTKF_force-global/out_arrs/PARAMS-MAT_test-set_pt0_prob_emit_at_indel.npy",
+                      "tkf_params_file": "./RESULTS_train_neuralTKF_force-global/out_arrs/PARAMS-DICT_test-set_pt0_tkf92_indel_params.pkl"},
+
+        "times_from": "t_per_sample"
+        }
+    
+}

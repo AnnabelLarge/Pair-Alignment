@@ -343,14 +343,15 @@ def create_all_tstates(seq_shapes,
     
     # for neural TKF and feedforward
     if have_t_grid and ~have_t_per_sample:
-        t_array_for_init = jnp.zeros( t_per_sample.shape ) #(B,)
+        t_array_for_init = t_array_for_all_samples #(T,)
 
     elif ~have_t_grid and have_t_per_sample:
-        t_array_for_init = t_array_for_all_samples #(T,)
+        t_array_for_init = jnp.zeros( t_per_sample.shape ) #(B,)
     
     # could happen for feedforward
     elif ~have_t_grid and ~have_t_per_sample:
         t_array_for_init = None
+        
     del have_t_grid, have_t_per_sample
     
     # keep track of dim3 size

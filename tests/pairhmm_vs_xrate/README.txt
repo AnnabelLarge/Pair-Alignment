@@ -17,3 +17,7 @@ experiment:
 3.) load XRATE parameters, evaluate with my code
 4.) compare loglikes in bits and nats
     > note: XRATE is numerically less precise
+
+result files:
+natscore_difference.tsv
+bitscore_difference.tsv

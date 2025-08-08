@@ -13,6 +13,7 @@ import pickle
 import sys
 from tqdm import tqdm
 from functools import partial
+from copy import copy
 
 from utils.train_eval_utils import ( timers,
                                      write_timing_file,
@@ -82,7 +83,7 @@ class TrainingWrapper:
         # keep track of best model; need to know initial trainstate object
         best_epoch = -1
         best_test_loss = jnp.finfo(jnp.float32).max
-        best_trainstates = all_trainstates.copy()
+        best_trainstates = copy(all_trainstates)
         prev_test_loss = jnp.finfo(jnp.float32).max
         
         for epoch_idx in tqdm(self.epoch_arr): 
@@ -98,7 +99,7 @@ class TrainingWrapper:
                 
                 # update "best" recordings
                 best_test_loss = epoch_test_loss
-                best_trainstates = all_trainstates.copy()
+                best_trainstates = copy(all_trainstates)
                 best_epoch = epoch_idx
                 
                 # save the trainstates
@@ -336,7 +337,7 @@ class TrainingWrapper:
                             all_trainstates,
                             this_batch_size,
                             epoch_idx,
-                            batch_idx ):
+                            batch_idx):
         batch_epoch_idx = epoch_idx * len(self.test_dl) + batch_idx
         
         # two possible keys for perplexity: batch_ave_perpl or batch_ave_joint_perpl
@@ -347,11 +348,13 @@ class TrainingWrapper:
                                     batch_perpl = batch_perpl,
                                     batch_acc = metrics.get('batch_ave_acc', None) )
         
+        no_returns = {k: False for k in self.args.interms_for_tboard.keys()}
+        
         self.optional_outputs_writer(writer_obj = self.writer, 
                                                 all_trainstates = all_trainstates,
                                                 global_step = batch_epoch_idx, 
                                                 dict_of_values = metrics, 
-                                                interms_for_tboard = self.args.interms_for_tboard, 
+                                                interms_for_tboard = no_returns, 
                                                 write_histograms_flag = False)
     
 
@@ -478,11 +481,11 @@ class TrainingWrapper:
 class NeuralTKFTrainingWrapper(TrainingWrapper):
     def _model_specific_inits(self):
         # check model type again
-        assert self.args.pred_model_type == 'feedforward'
+        assert self.args.pred_model_type == 'neural_hmm'
         
         # continue init
-        self.seqlen_bin_fn = jit_compile_determine_seqlen_bin(args)
-        self.alignlen_bin_fn = jit_compile_determine_alignlen_bin(args)
+        self.seqlen_bin_fn = jit_compile_determine_seqlen_bin(self.args)
+        self.alignlen_bin_fn = jit_compile_determine_alignlen_bin(self.args)
         self.have_acc = False
         self.use_tkf_funcs = True
         self.write_approx_dict_fn = partial( write_approx_dict,
@@ -494,7 +497,7 @@ class NeuralTKFTrainingWrapper(TrainingWrapper):
 class FeedforwardTrainingWrapper(TrainingWrapper):
     def _model_specific_inits(self):
         # check model type again
-        assert self.args.pred_model_type == 'neural_hmm'
+        assert self.args.pred_model_type == 'feedforward'
         
         # continue init
         self.seqlen_bin_fn = jit_compile_determine_seqlen_bin(self.args)

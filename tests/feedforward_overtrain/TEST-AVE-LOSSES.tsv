@@ -1,0 +1,7 @@
+RUN	RESULTS_overtrain
+sum_cond_logprobs	0.00015985917707439512
+cond_ave_loss	0.00015985917707439512
+cond_ave_loss_seqlen_normed	1.8165815163229126e-07
+cond_perplexity	1.000000238418579
+cond_ece	1.000000238418579
+acc	1.0

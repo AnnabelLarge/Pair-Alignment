@@ -1,3 +1,0 @@
-	ancestor	descendant	pfam	anc_seq_len	desc_seq_len	alignment_len	num_matches	num_ins	num_del	logP	logP/normlength	perplexity	dataloader_idx	generative_accuracy
-0	I1NCF6_SOYBN/349-1239	B9S7R0_RICCO/23-919	PF05994	891	897	902	886	11	5	2685.2705	2.990279	19.891232	0	0.12513843
-1	U5CR85_AMBTC/1-880	M4CQG8_BRARP/340-1232	PF05994	880	893	908	865	28	15	2779.085	3.108596	22.38959	1	0.11661166

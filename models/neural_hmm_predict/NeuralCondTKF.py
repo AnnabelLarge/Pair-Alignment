@@ -370,8 +370,8 @@ class NeuralCondTKF(ModuleBase):
         s_i_corr_mask = jnp.all( staggered_alignment_state == jnp.array([4, 2]), axis=-1 ) #(B, length_for_scan)
         
         if len(tr.shape) == 3:
-            s_i_corr_mask = jnp.broadcast_to( s_i_corr_mask[None,:], tr.shape ) #(T, B, length_for_scan)
-            s_i_correction = jnp.broadcast_to( corr[None,:], tr.shape ) #(T, B, length_for_scan)
+            s_i_corr_mask = jnp.broadcast_to( s_i_corr_mask[None,...], tr.shape ) #(T, B, length_for_scan)
+            s_i_correction = jnp.broadcast_to( corr[None,...], tr.shape ) #(T, B, length_for_scan)
         
         elif len(tr.shape) == 2:
             s_i_correction = jnp.broadcast_to( corr, tr.shape ) #(B, length_for_scan)

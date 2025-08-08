@@ -92,7 +92,7 @@ class OneHotEmb(SeqEmbBase):
     causal: Optional[Any] = None
     
     def setup(self):
-        self.in_alph_size = self.config.['in_alph_size']
+        self.in_alph_size = self.config['in_alph_size']
         self.seq_padding_idx = self.config.get('seq_padding_idx', 0)
     
     def __call__(self, 

@@ -57,14 +57,18 @@ def final_eval_wrapper(dataloader,
     ### final metrics to keep track of
     sum_cond_logprobs = 0
     final_ave_loss_seqlen_normed = 0
-    final_acc = 0
     final_perplexity = 0
-    final_confusion_matrix = jnp.zeros( (out_alph_size-1, out_alph_size-1) )
+    
+    have_acc_metrics = (out_alph_size is not None)
+    
+    if have_acc_metrics:
+        final_acc = 0
+        final_confusion_matrix = jnp.zeros( (out_alph_size-1, out_alph_size-1) )
     
     if tboard_writer:
         final_stats_for_tboard = dict()
     
-    have_acc_metrics = False
+    
     for batch_idx, batch in tqdm( enumerate(dataloader), total=len(dataloader) ): 
         ##########################
         ### run model on a batch #
@@ -137,9 +141,8 @@ def final_eval_wrapper(dataloader,
         final_perplexity += eval_metrics['batch_ave_perpl'] * wf
 
         # model may or may not record accuracy as well    
-        acc_perSamp = eval_metrics.get('acc_perSamp', None)
-        if acc_perSamp is not None:
-            have_acc_metrics = True
+        if have_acc_metrics:
+            acc_perSamp = eval_metrics.get('acc_perSamp', None)
             final_loglikes['generative_accuracy'] = acc_perSamp
             final_acc += eval_metrics['batch_ave_acc'] * wf
         
