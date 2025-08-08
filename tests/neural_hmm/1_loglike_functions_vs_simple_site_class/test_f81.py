@@ -30,7 +30,7 @@ class TestF81(unittest.TestCase):
         self.A = 4
         
         # reference implementation from pairHMM codebase
-        self.ref = F81Logprobs(config={'num_mixtures': 1,
+        self.ref = F81Logprobs(config={'num_site_mixtures': 1,
                                        "k_rate_mults": 1,
                                        'norm_rate_matrix': True,
                                        'norm_rate_mults': False},

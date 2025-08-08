@@ -26,9 +26,6 @@ def init_pairhmm_indp_sites( seq_shapes,
     elif pred_config['load_all']:
         from models.simple_site_class_predict.IndpSites import IndpSitesLoadAll as model
     
-    # enforce this default
-    pred_config['num_tkf_fragment_classes'] = 1
-    
     pairhmm_instance = model(config = pred_config,
                                  name = 'IndpSites')
     
@@ -77,9 +74,6 @@ def init_pairhmm_frag_and_site_classes( seq_shapes,
         
     elif pred_config['load_all']:
         from models.simple_site_class_predict.FragAndSiteClasses import FragAndSiteClassesLoadAll as model
-    
-    # enforce this default
-    pred_config['num_tkf_fragment_classes'] = pred_config['num_mixtures']
     
     pairhmm_instance = model(config = pred_config,
                              name = 'FragAndSiteClasses')

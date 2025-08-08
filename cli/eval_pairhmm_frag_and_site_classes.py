@@ -87,7 +87,7 @@ def eval_pairhmm_frag_and_site_classes( args,
         g.write( f'Indel model: {training_argparse.pred_config["indel_model_type"]}\n' )
                 
         g.write( (f'  - Number of latent site and fragment classes: '+
-                  f'{training_argparse.pred_config["num_mixtures"]}\n' +
+                  f'{training_argparse.pred_config["num_site_mixtures"]}\n' +
                   f'  - Possible substitution rate multipliers: ' +
                   f'{training_argparse.pred_config["k_rate_mults"]}\n')
                 )
@@ -101,9 +101,9 @@ def eval_pairhmm_frag_and_site_classes( args,
                     )
                     
         elif not training_argparse.pred_config['indp_rate_mults']:
-            possible_rates = (training_argparse.pred_config['num_domain_mixutres'] *
-                              training_argparse.pred_config['num_fragment_mixutres'] *
-                              training_argparse.pred_config['num_site_mixutres'] *
+            possible_rates = (training_argparse.pred_config['num_domain_mixtures'] *
+                              training_argparse.pred_config['num_fragment_mixtures'] *
+                              training_argparse.pred_config['num_site_mixtures'] *
                               training_argparse.pred_config['k_rate_mults'] )
             g.write( ( f'  - Rates depend on class labels ( P(k | c) ); '+
                        f'{possible_rates} possible rate multipliers\n' )
@@ -188,7 +188,7 @@ def eval_pairhmm_frag_and_site_classes( args,
     no_outputs = {k: False for k in training_argparse.interms_for_tboard.keys()}
     parted_eval_fn = partial( eval_one_batch,
                               t_array = t_array_for_all_samples,
-                              pairhmm_trainstate = best_pairhmm_trainstate,
+                              all_trainstates = [best_pairhmm_trainstate],
                               pairhmm_instance = pairhmm_instance,
                               interms_for_tboard = no_outputs,
                               return_all_loglikes = True )

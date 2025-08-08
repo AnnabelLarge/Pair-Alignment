@@ -38,7 +38,11 @@ from torch.utils.data import DataLoader
 from train_eval_fns.build_optimizer import build_optimizer
 from utils.write_config import write_config
 from utils.edit_argparse import enforce_valid_defaults
-from utils.train_eval_utils import setup_training_dir    
+from utils.train_eval_utils import (setup_training_dir,
+                                    timers,
+                                    write_final_eval_results,
+                                    record_postproc_time_table,
+                                    pigz_compress_tensorboard_file)
 
 # specific to training this model
 from utils.edit_argparse import pairhmm_frag_and_site_classes_fill_with_default_values as fill_with_default_values
@@ -102,7 +106,7 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
         g.write( f'Indel model: {args.pred_config["indel_model_type"]}\n' )
                 
         g.write( (f'  - Number of latent site and fragment classes: '+
-                  f'{args.pred_config["num_mixtures"]}\n' +
+                  f'{args.pred_config["num_site_mixtures"]}\n' +
                   f'  - Possible substitution rate multipliers: ' +
                   f'{args.pred_config["k_rate_mults"]}\n')
                 )
@@ -116,7 +120,7 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
                     )
                     
         elif not args.pred_config['indp_rate_mults']:
-            possible_rates = args.pred_config['num_mixtures'] * args.pred_config['k_rate_mults']
+            possible_rates = args.pred_config['num_site_mixtures'] * args.pred_config['k_rate_mults']
             g.write( ( f'  - Rates depend on class labels ( P(k | c) ); '+
                        f'{possible_rates} possible rate multipliers\n' )
                     )
@@ -297,7 +301,7 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
     ### jit compile new eval function
     parted_eval_fn = partial( eval_one_batch,
                               t_array = t_array_for_all_samples,
-                              pairhmm_trainstate = best_pairhmm_trainstate,
+                              all_trainstates = [best_pairhmm_trainstate],
                               pairhmm_instance = pairhmm_instance,
                               interms_for_tboard = args.interms_for_tboard,
                               return_all_loglikes = True )

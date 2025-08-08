@@ -107,18 +107,19 @@ def neural_hmm_fill_with_default_values(args):
 
 def pairhmm_indp_sites_fill_with_default_values(args):
     """
-    no indel mixtures, so num_tkf_fragment_classes is automatically 1
+    no indel mixtures, so num_domain_mixtures and num_fragment_mixtures is automatically 1
     """
     general_fill_with_default_values(args)
-    args.pred_config['num_tkf_fragment_classes'] = 1
+    args.pred_config['num_domain_mixtures'] = 1
+    args.pred_config['num_fragment_mixtures'] = 1
 
 
 def pairhmm_frag_and_site_classes_fill_with_default_values(args):
     """
-    num_tkf_fragment_classes should match the number of mixtures
+    num_domain_mixtures is automatically 1
     """
     general_fill_with_default_values(args)
-    args.pred_config['num_tkf_fragment_classes'] = args.pred_config['num_mixtures']
+    args.pred_config['num_domain_mixtures'] = 1
 
 
 #########################################################

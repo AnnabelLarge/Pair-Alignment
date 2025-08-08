@@ -1308,12 +1308,23 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
         ### read files
         # tkf parameters
         with open(tkf_params_file,'rb') as f:
-            self.param_dict = pickle.load(f)
-    
-        err = f'KEYS SEEN: {self.param_dict.keys()}'
-        assert 'lambda' in self.param_dict.keys(), err
-        assert 'mu' in self.param_dict.keys(), err
-        assert 'r_extend' in self.param_dict.keys(), err
+            param_dict = pickle.load(f)
+        
+        err = f'KEYS SEEN: {param_dict.keys()}'
+        assert 'lambda' in param_dict.keys(), err
+        assert 'mu' in param_dict.keys(), err
+        assert 'r_extend' in param_dict.keys(), err
+        
+        r_extend = param_dict['r_extend']
+        
+        if len(r_extend.shape)==1:
+            r_extend = r_extend[None, :] #(C_dom=1, C_frag)
+            param_dict['r_extend'] = r_extend
+        
+        assert r_extend.shape[0] == self.num_domain_mixtures
+        assert r_extend.shape[1] == self.num_fragment_mixtures
+        self.param_dict = param_dict
+        
         
         # mixture probability of fragment classes
         if (self.num_domain_mixtures * self.num_fragment_mixtures) > 1:
@@ -1328,6 +1339,8 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
         elif (self.num_domain_mixtures * self.num_fragment_mixtures) == 1:
             self.log_frag_class_probs = jnp.zeros( (1,1) )
         
+        assert self.log_frag_class_probs.shape[0] == self.num_domain_mixtures
+        assert self.log_frag_class_probs.shape[1] == self.num_fragment_mixtures
         
         ### pick tkf function
         if tkf_function_name == 'regular_tkf':

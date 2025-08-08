@@ -22,12 +22,15 @@ import optax
                             
 def train_one_batch(batch, 
                     training_rngkey,
-                    pairhmm_trainstate,  
+                    all_trainstates,
                     t_array,
                     max_align_len,
                     interms_for_tboard,
                     update_grads: bool = True,
+                    *args,
                     **kwargs):
+    pairhmm_trainstate = all_trainstates[0]
+    
     ### batch has 4 entries:
     ### 0.) unaligned seqs: (B, L, 2)
     ### 1.) aligned matrices: (B, L, 2)
@@ -88,17 +91,20 @@ def train_one_batch(batch,
                 'finalpred_gradient': grad,
                 'used_approx': aux_dict['used_approx']}
     
-    return out_dict, new_trainstate
+    return out_dict, [new_trainstate]
 
 
 def eval_one_batch( batch, 
                     t_array,
-                    pairhmm_trainstate,  
+                    all_trainstates,
                     pairhmm_instance,
                     max_align_len,
                     interms_for_tboard,
                     return_all_loglikes: bool,
+                    *args,
                     **kwargs):
+    pairhmm_trainstate = all_trainstates[0]
+    
     ### batch has 4 entries:
     ### 0.) unaligned seqs: (B, L, 2)
     ### 1.) aligned matrices: (B, L, 2)
@@ -128,7 +134,7 @@ def eval_one_batch( batch,
                                           method=pairhmm_instance.calculate_all_loglikes)
         
         # specifically use joint prob for loss
-        loss_NLL = jnp.mean( aux_dict['joint_neg_logP_length_normed'] )
+        loss_NLL = jnp.mean( aux_dict['joint_neg_logP'] )
         
     sow_dict = {'histograms': sow_dict.get( 'histograms', dict() ),
                 'scalars': sow_dict.get( 'scalars', dict() )
@@ -138,7 +144,9 @@ def eval_one_batch( batch,
     joint_neg_logP_length_normed = aux_dict['joint_neg_logP_length_normed']
     joint_perplexity_perSamp = jnp.exp(joint_neg_logP_length_normed)
     
-    out_dict = {'joint_neg_logP': aux_dict['joint_neg_logP'],
+    out_dict = {'batch_loss': loss_NLL,
+                'batch_ave_joint_perpl': jnp.mean(joint_perplexity_perSamp),
+                'joint_neg_logP': aux_dict['joint_neg_logP'],
                 'joint_neg_logP_length_normed': joint_neg_logP_length_normed,
                 'joint_perplexity_perSamp': joint_perplexity_perSamp,
                 'pred_layer_metrics': sow_dict,

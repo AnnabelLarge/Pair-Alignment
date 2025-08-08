@@ -149,14 +149,14 @@ def final_eval_wrapper(dataloader,
             final_loglikes.to_csv((f'{logfile_dir}/{outfile_prefix}_pt{batch_idx}_'+
                                   'FINAL-LOGLIKES.tsv'), sep='\t')
             
-            # as numpy array
-            # col1 is sample_idx, col2 is sum of the negative log-likleihoods
-            col1 = batch[-1]
-            col2 = eval_metrics['sum_neg_logP']
-            to_write = np.stack([col1, col2], axis=1)
-            with open(f'{logfile_dir}/NP-MAT_{outfile_prefix}_pt{batch_idx}_FINAL-LOGLIKES.npy', 'wb') as g:
-                np.save(g, to_write)
-            del col1, col2, g, to_write
+            # # as numpy array
+            # # col1 is sample_idx, col2 is sum of the negative log-likleihoods
+            # col1 = batch[-1]
+            # col2 = eval_metrics['sum_neg_logP']
+            # to_write = np.stack([col1, col2], axis=1)
+            # with open(f'{logfile_dir}/NP-MAT_{outfile_prefix}_pt{batch_idx}_FINAL-LOGLIKES.npy', 'wb') as g:
+            #     np.save(g, to_write)
+            # del col1, col2, g, to_write
         
         
         ###############################################

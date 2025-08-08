@@ -721,126 +721,127 @@ class IndpSites(ModuleBase):
                     del mat_to_save, key
                     
                     
-            ###########################################
-            ### these are returned if params were fit #
-            ### (i.e. did not load these from files)  #
-            ###########################################
-            if not self.config['load_all']:
-                ### logprob_emit_at_indel (AFTER marginalizing over classes)
-                mat = np.exp( out['logprob_emit_at_indel'] ) #(A,)
-                new_key = f'{prefix}_logprob_emit_at_indel'.replace('log','')
-                write_matrix_to_npy( out_folder, mat, new_key )
-                maybe_write_matrix_to_ascii( out_folder, mat, new_key )
-                del mat, new_key
+            ### logprob_emit_at_indel (AFTER marginalizing over classes)
+            mat = np.exp( out['logprob_emit_at_indel'] ) #(A,)
+            new_key = f'{prefix}_logprob_emit_at_indel'.replace('log','')
+            write_matrix_to_npy( out_folder, mat, new_key )
+            maybe_write_matrix_to_ascii( out_folder, mat, new_key )
+            del mat, new_key
+            
+            ### site class probs (if num_site_mixtures > 1)
+            if self.num_site_mixtures > 1:
+                site_class_probs = np.exp(out['log_site_class_probs']) #(C_sites,)
+                key = f'{prefix}_site_class_probs'
+                write_matrix_to_npy( out_folder, site_class_probs, key )
+                maybe_write_matrix_to_ascii( out_folder, site_class_probs, key )
+                del key, site_class_probs
                 
                 
-                ### site class probs (if num_site_mixtures > 1)
-                if self.num_site_mixtures > 1:
-                    site_class_probs = np.exp(out['log_site_class_probs']) #(C_sites,)
-                    key = f'{prefix}_site_class_probs'
-                    write_matrix_to_npy( out_folder, site_class_probs, key )
-                    maybe_write_matrix_to_ascii( out_folder, site_class_probs, key )
-                    del key, site_class_probs
-                    
-                    
-                ### rate multipliers 
-                # P(K|C) or P(K), if not 1
-                if not self.rate_mult_module.prob_rate_mult_is_one:
-                    rate_mult_probs = np.exp(out['log_rate_mult_probs']) #(C_sites,K)
-                    key = f'{prefix}_rate_mult_probs'
-                    write_matrix_to_npy( out_folder, rate_mult_probs, key )
-                    maybe_write_matrix_to_ascii( out_folder, rate_mult_probs, key )
-                    del key
+            ### rate multipliers 
+            # P(K|C) or P(K), if not 1
+            if not self.rate_mult_module.prob_rate_mult_is_one:
+                rate_mult_probs = np.exp(out['log_rate_mult_probs']) #(C_sites,K)
+                key = f'{prefix}_rate_mult_probs'
+                write_matrix_to_npy( out_folder, rate_mult_probs, key )
+                maybe_write_matrix_to_ascii( out_folder, rate_mult_probs, key )
+                del key
+            
+            # \rho_{c,k} or \rho_k
+            if not self.rate_mult_module.use_unit_rate_mult:
+                rate_multipliers = out['rate_multipliers'] #(C_sites,K)
+                key = f'{prefix}_rate_multipliers'
+                write_matrix_to_npy( out_folder, rate_multipliers, key )
+                maybe_write_matrix_to_ascii( out_folder, rate_multipliers, key )
+                del key
                 
-                # \rho_{c,k} or \rho_k
-                if not self.rate_mult_module.use_unit_rate_mult:
-                    rate_multipliers = out['rate_multipliers'] #(C_sites,K)
-                    key = f'{prefix}_rate_multipliers'
-                    write_matrix_to_npy( out_folder, rate_multipliers, key )
-                    maybe_write_matrix_to_ascii( out_folder, rate_multipliers, key )
-                    del key, logits
-                    
-                    
-                ### exchangeabilities, if gtr or hky85
-                exchangeabilities = out['exchangeabilities'] #(A, A) or None
                 
-                if self.subst_model_type == 'gtr':
-                    key = f'{prefix}_gtr-exchangeabilities'
-                    write_matrix_to_npy( out_folder, exchangeabilities, key )
-                    maybe_write_matrix_to_ascii( out_folder, exchangeabilities, key )
-                    del key
+            ### exchangeabilities, if gtr or hky85
+            exchangeabilities = out['exchangeabilities'] #(A, A) or None
+            
+            if self.subst_model_type == 'gtr':
+                key = f'{prefix}_gtr-exchangeabilities'
+                write_matrix_to_npy( out_folder, exchangeabilities, key )
+                maybe_write_matrix_to_ascii( out_folder, exchangeabilities, key )
+                del key
+                
+            elif self.subst_model_type == 'hky85':
+                ti = exchangeabilities[0, 2]
+                tv = exchangeabilities[0, 1]
+                arr = np.array( [ti, tv] )
+                key = f'{prefix}_hky85_ti_tv'
+                write_matrix_to_npy( out_folder, arr, key )
+                
+                with open(f'{out_folder}/ASCII_{prefix}_hky85_ti_tv.txt','w') as g:
+                    g.write(f'transition rate, ti: {ti}\n')
+                    g.write(f'transition rate, tv: {tv}')
+                del key, arr
+                
                     
-                elif self.subst_model_type == 'hky85':
-                    ti = exchangeabilities[0, 2]
-                    tv = exchangeabilities[0, 1]
-                    arr = np.array( [ti, tv] )
-                    key = f'{prefix}_hky85_ti_tv'
-                    write_matrix_to_npy( out_folder, arr, key )
+            ### equilibrium distribution (BEFORE marginalizing over site clases)
+            equl_dist = np.exp(out['log_equl_dist_per_mixture']) #(C_sites, A)
+            key = f'{prefix}_equilibriums-per-site-class'
+            write_matrix_to_npy( out_folder, equl_dist, key )
+            maybe_write_matrix_to_ascii( out_folder, equl_dist, key )
+            del key
+                
+                
+            ####################################################
+            ### extract transition paramaters, intermediates   # 
+            ### needed for final scoring matrices              #
+            ### (also does not depend on time)                 #
+            ####################################################
+            ### under geometric length (only scoring subs)
+            if self.indel_model_type is None:
+                geom_p_emit = nn.sigmoid(self.transitions_module.p_emit_logit).item() #(1,)
+                arr = np.array( [geom_p_emit, 1 - geom_p_emit] )
+                key = f'{prefix}_geom_seq_len'
+                write_matrix_to_npy( out_folder, arr, key )
+                del key, arr
+                
+                with open(f'{out_folder}/ASCII_{prefix}_geom_seq_len.txt','w') as g:
+                    g.write(f'P(emit): {geom_p_emit}\n')
+                    g.write(f'1-P(emit): {1 - geom_p_emit}\n')
                     
-                    with open(f'{out_folder}/ASCII_{prefix}_hky85_ti_tv.txt','w') as g:
-                        g.write(f'transition rate, ti: {ti}\n')
-                        g.write(f'transition rate, tv: {tv}')
-                    del key, arr
                     
+            ### for TKF models (not saved to intermediates)
+            elif self.indel_model_type in ['tkf91', 'tkf92']:
+                # always write lambda and mu
+                if self.config['load_all']:
+                    lam = self.transitions_module.param_dict['lambda']
+                    mu = self.transitions_module.param_dict['mu']
+                    offset = 1 - (lam/mu)
+                    
+                elif not self.config['load_all']:
+                    mu_min_val = self.transitions_module.mu_min_val #float
+                    mu_max_val = self.transitions_module.mu_max_val #float
+                    offs_min_val = self.transitions_module.offs_min_val #float
+                    offs_max_val = self.transitions_module.offs_max_val #float
+                    mu_offset_logits = self.transitions_module.tkf_mu_offset_logits #(2,)
+                
+                    mu = bound_sigmoid(x = mu_offset_logits[0],
+                                       min_val = mu_min_val,
+                                       max_val = mu_max_val).item() #float
+                    
+                    offset = bound_sigmoid(x = mu_offset_logits[1],
+                                             min_val = offs_min_val,
+                                             max_val = offs_max_val).item() #float
+                    lam = mu * (1 - offset)  #float
+                    
+                with open(f'{out_folder}/ASCII_{prefix}_{self.indel_model_type}_indel_params.txt','w') as g:
+                    g.write(f'insert rate, lambda: {lam}\n')
+                    g.write(f'deletion rate, mu: {mu}\n')
+                    g.write(f'offset: {offset}\n\n')
+                
+                out_dict = {'lambda': np.array(lam), # shape=()
+                            'mu': np.array(mu), # shape=()
+                            'offset': np.array(offset)} # shape=()
+                                
+                # if tkf92, have extra r_ext param
+                if self.indel_model_type == 'tkf92':
+                    if self.config['load_all']:
+                        r_extend = self.transitions_module.param_dict['r_extend']
                         
-                ### equilibrium distribution (BEFORE marginalizing over site clases)
-                if 'logits' in dir(self.equl_dist_module):
-                    equl_dist = np.exp(out['log_equl_dist_per_mixture']) #(C_sites, A)
-                    key = f'{prefix}_equilibriums-per-site-class'
-                    write_matrix_to_npy( out_folder, equl_dist, key )
-                    maybe_write_matrix_to_ascii( out_folder, equl_dist, key )
-                    del key
-                    
-                    
-                ####################################################
-                ### extract transition paramaters, intermediates   # 
-                ### needed for final scoring matrices              #
-                ### (also does not depend on time)                 #
-                ####################################################
-                ### under geometric length (only scoring subs)
-                if self.indel_model_type is None:
-                    geom_p_emit = nn.sigmoid(self.transitions_module.p_emit_logit).item() #(1,)
-                    arr = np.array( [geom_p_emit, 1 - geom_p_emit] )
-                    key = f'{prefix}_geom_seq_len'
-                    write_matrix_to_npy( out_folder, arr, key )
-                    del key, arr
-                    
-                    with open(f'{out_folder}/ASCII_{prefix}_geom_seq_len.txt','w') as g:
-                        g.write(f'P(emit): {geom_p_emit}\n')
-                        g.write(f'1-P(emit): {1 - geom_p_emit}\n')
-                        
-                        
-                ### for TKF models (not saved to intermediates)
-                elif self.indel_model_type in ['tkf91', 'tkf92']:
-                    # always write lambda and mu
-                    # also record if you used any tkf approximations
-                    if 'tkf_mu_offset_logits' in dir(self.transitions_module):
-                        mu_min_val = self.transitions_module.mu_min_val #float
-                        mu_max_val = self.transitions_module.mu_max_val #float
-                        offs_min_val = self.transitions_module.offs_min_val #float
-                        offs_max_val = self.transitions_module.offs_max_val #float
-                        mu_offset_logits = self.transitions_module.tkf_mu_offset_logits #(2,)
-                    
-                        mu = bound_sigmoid(x = mu_offset_logits[0],
-                                           min_val = mu_min_val,
-                                           max_val = mu_max_val).item() #float
-                        
-                        offset = bound_sigmoid(x = mu_offset_logits[1],
-                                                 min_val = offs_min_val,
-                                                 max_val = offs_max_val).item() #float
-                        lam = mu * (1 - offset)  #float
-                        
-                        with open(f'{out_folder}/ASCII_{prefix}_{self.indel_model_type}_indel_params.txt','w') as g:
-                            g.write(f'insert rate, lambda: {lam}\n')
-                            g.write(f'deletion rate, mu: {mu}\n')
-                            g.write(f'offset: {offset}\n\n')
-                        
-                        out_dict = {'lambda': np.array(lam), # shape=()
-                                    'mu': np.array(mu), # shape=()
-                                    'offset': np.array(offset)} # shape=()
-                                    
-                    # if tkf92, have extra r_ext param
-                    if self.indel_model_type == 'tkf92':
+                    elif not self.config['load_all']:
                         r_extend_min_val = self.transitions_module.r_extend_min_val
                         r_extend_max_val = self.transitions_module.r_extend_max_val
                         r_extend_logits = self.transitions_module.r_extend_logits #(C_dom=1, C_frag=1)
@@ -848,22 +849,22 @@ class IndpSites(ModuleBase):
                         r_extend = bound_sigmoid(x = r_extend_logits,
                                                  min_val = r_extend_min_val,
                                                  max_val = r_extend_max_val) #(C_dom=1, C_frag=1)
-                        
-                        mean_indel_lengths = 1 / (1 - r_extend) #(C_dom=1, C_frag=1)
-                        
-                        with open(f'{out_folder}/ASCII_{prefix}_{self.indel_model_type}_indel_params.txt','a') as g:
-                            g.write(f'extension prob, r: ')
-                            [g.write(f'{elem}\t') for elem in r_extend.flatten()]
-                            g.write('\n')
-                            g.write(f'mean indel length: ')
-                            [g.write(f'{elem}\t') for elem in mean_indel_lengths]
-                            g.write('\n')
-                        
-                        out_dict['r_extend'] = r_extend #(C_dom=1, C_frag=1)
                     
-                    with open(f'{out_folder}/PARAMS-DICT_{prefix}_{self.indel_model_type}_indel_params.pkl','wb') as g:
-                        pickle.dump(out_dict, g)
-                    del out_dict
+                    mean_indel_lengths = 1 / (1 - r_extend) #(C_dom=1, C_frag=1)
+                    
+                    with open(f'{out_folder}/ASCII_{prefix}_{self.indel_model_type}_indel_params.txt','a') as g:
+                        g.write(f'extension prob, r: ')
+                        [g.write(f'{elem}\t') for elem in r_extend.flatten()]
+                        g.write('\n')
+                        g.write(f'mean indel length: ')
+                        [g.write(f'{elem}\t') for elem in mean_indel_lengths]
+                        g.write('\n')
+                    
+                    out_dict['r_extend'] = r_extend #(C_dom=1, C_frag=1)
+                
+                with open(f'{out_folder}/PARAMS-DICT_{prefix}_{self.indel_model_type}_indel_params.pkl','wb') as g:
+                    pickle.dump(out_dict, g)
+                del out_dict
 
 
 class IndpSitesLoadAll(IndpSites):
@@ -875,7 +876,7 @@ class IndpSitesLoadAll(IndpSites):
     Initialize with
     ----------------
     config : dict
-        config['num_mixtures'] :  int
+        config['num_site_mixtures'] :  int
             number of emission site classes
             
         config['subst_model_type'] : {gtr, hky85}

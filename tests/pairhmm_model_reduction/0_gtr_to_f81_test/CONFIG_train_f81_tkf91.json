@@ -1,5 +1,5 @@
 {
-    "training_wkdir": "RESULTS_indp-sites",
+    "training_wkdir": "RESULTS_train_f81_tkf91",
     "rng_seednum": 0,
 
     "data_dir": "example_data",
@@ -13,9 +13,9 @@
 
     "num_epochs": 5000,
     "optimizer_config": {
-        "init_value": 0.1,
-        "peak_value": 0.1,
-        "end_value": 0.1,
+        "init_value": 0.005,
+        "peak_value": 0.005,
+        "end_value": 0.005,
         "warmup_steps": 0,
         "weight_decay": 0,
         "every_k_schedule": 1
@@ -23,12 +23,14 @@
     "early_stop_cond1_atol": 1e-3,
     "early_stop_cond2_gap": 3,
     "patience": 5000,
+    "checkpoint_freq_during_training": 0,
     "update_grads": true,
 
     "interms_for_tboard": {
-        "finalpred_sow_outputs": true,
-        "forward_pass_outputs": true,
-        "gradients": true
+        "finalpred_sow_outputs": false,
+        "forward_pass_outputs": false,
+        "gradients": false,
+        "optimizer": false
     },
     "save_arrs": true,
     "save_per_sample_losses": true,
@@ -37,15 +39,18 @@
     "pred_model_type": "pairhmm_indp_sites",
     "pred_config": {
         "load_all": false,
-        "num_mixtures": 1,
-
-        "subst_model_type": "gtr",
+        "num_domain_mixtures": 1,
+        "num_fragment_mixtures": 1,
+        "num_site_mixtures": 1,
         "k_rate_mults": 1,
+
+        "subst_model_type": "f81",
         "indp_rate_mults": false,
         "norm_rate_matrix": true,
-        "norm_rate_mults": true,
+        "norm_rate_mults": false,
 
-        "indel_model_type": "tkf92",
+        "indel_model_type": "tkf91",
+        "tkf_function": "regular_tkf",
 
         "times_from": "t_per_sample"
         }

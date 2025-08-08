@@ -481,7 +481,9 @@ def eval_one_batch(batch,
                    gap_idx: int = 43,
                    seq_padding_idx: int = 0,
                    align_idx_padding: int = -9,
-                   extra_args_for_eval: dict = dict() ):
+                   extra_args_for_eval: dict = dict(),
+                   *args,
+                   **kwargs):
     """
     Jit-able function to evaluate a model on a batch of alignments
     

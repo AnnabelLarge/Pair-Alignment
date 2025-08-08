@@ -12,6 +12,7 @@ import numpy
 import pickle
 import sys
 from tqdm import tqdm
+from functools import partial
 
 from utils.train_eval_utils import ( timers,
                                      write_timing_file,
@@ -21,7 +22,8 @@ from utils.train_eval_utils import ( timers,
                                      jit_compile_determine_alignlen_bin,
                                      jit_compilation_tracker )
 
-from utils.tensorboard_recording_utils import (write_optional_outputs_during_training)
+from utils.tensorboard_recording_utils import (write_optional_outputs_during_training,
+                                               write_optional_outputs_during_training_hmms)
 
 
 ###############################################################################
@@ -69,7 +71,7 @@ class TrainingWrapper:
         
         
         ### model-specific initializations
-        self._model_specific_inits(args)
+        self._model_specific_inits()
 
 
     ###########################################################################
@@ -140,9 +142,9 @@ class TrainingWrapper:
                                   epoch_idx ):
         ### metrics for the WHOLE DATASET; these get re-initialized at the 
         ###   start of every epoch
-        train_metrics_recorder = metrics_for_epoch( have_acc = have_acc,
+        train_metrics_recorder = metrics_for_epoch( have_acc = self.have_acc,
                                                  epoch_idx = epoch_idx )  
-        eval_metrics_recorder = metrics_for_epoch( have_acc = have_acc,
+        eval_metrics_recorder = metrics_for_epoch( have_acc = self.have_acc,
                                                  epoch_idx = epoch_idx ) 
         self.whole_epoch_timer.start_timer()
         
@@ -215,9 +217,14 @@ class TrainingWrapper:
         rngkey_for_batch = jax.random.fold_in(rngkey_for_batch, batch_epoch_idx) 
         
         # prep sequence lengths; this determines whether or not you jit-compile 
-        out = self._set_sequence_lengths_for_jit( args = self.args, 
-                                                  batch = batch )
+        out = self._set_sequence_lengths_for_jit( batch = batch )
         batch_max_seqlen, batch_max_alignlen = out
+        
+        if batch_max_seqlen is not None:
+            batch_max_seqlen = batch_max_seqlen.item()
+        if batch_max_alignlen is not None:
+            batch_max_alignlen = batch_max_alignlen.item()
+            
         size_tuple = (this_batch_size, batch_max_seqlen, batch_max_alignlen)
         self.train_jit_compilation_tracker.maybe_record_jit_compilation( size_tuple = size_tuple,
                                                                          epoch_idx = epoch_idx )
@@ -257,7 +264,7 @@ class TrainingWrapper:
         batch_epoch_idx = epoch_idx * len(self.training_dl) + batch_idx
         
         # if applicable: check for TKF approximation used
-        if self.use_tkf_funcs:
+        if (self.use_tkf_funcs) and (metrics['used_approx'] is not None):
             subline = f'epoch {epoch_idx}, batch {batch_idx}:'
             self.write_approx_dict_fn( approx_dict = metrics['used_approx'], 
                                        subline = subline )
@@ -270,13 +277,16 @@ class TrainingWrapper:
                                 batch_loss = metrics['batch_loss'],
                                 trainstate_objs = updated_trainstates )
         
+        # two possible keys for perplexity: batch_ave_perpl or batch_ave_joint_perpl
+        batch_perpl = metrics.get('batch_ave_perpl', None) or metrics.get('batch_ave_joint_perpl', None) 
+        
         # record metrics
         metrics_recorder.update_after_batch( batch_weight = this_batch_size / len(self.training_dset),
                                     batch_loss = metrics['batch_loss'],
-                                    batch_perpl = metrics['batch_ave_perpl'],
+                                    batch_perpl = batch_perpl,
                                     batch_acc = metrics.get('batch_ave_acc', None) )
         
-        write_optional_outputs_during_training(writer_obj = self.writer, 
+        self.optional_outputs_writer(writer_obj = self.writer, 
                                                 all_trainstates = updated_trainstates,
                                                 global_step = batch_epoch_idx, 
                                                 dict_of_values = metrics, 
@@ -292,9 +302,14 @@ class TrainingWrapper:
 
         # prep sequence lengths; this determines whether or not you jit-compile 
         #   again
-        out = self._set_sequence_lengths_for_jit( args = self.args, 
-                                                  batch = batch )
+        out = self._set_sequence_lengths_for_jit( batch = batch )
         batch_max_seqlen, batch_max_alignlen = out
+        
+        if batch_max_seqlen is not None:
+            batch_max_seqlen = batch_max_seqlen.item()
+        if batch_max_alignlen is not None:
+            batch_max_alignlen = batch_max_alignlen.item()
+        
         size_tuple = (this_batch_size, batch_max_seqlen, batch_max_alignlen)
         self.eval_jit_compilation_tracker.maybe_record_jit_compilation( size_tuple = size_tuple,
                                                                          epoch_idx = epoch_idx )
@@ -324,12 +339,15 @@ class TrainingWrapper:
                             batch_idx ):
         batch_epoch_idx = epoch_idx * len(self.test_dl) + batch_idx
         
+        # two possible keys for perplexity: batch_ave_perpl or batch_ave_joint_perpl
+        batch_perpl = metrics.get('batch_ave_perpl', None) or metrics.get('batch_ave_joint_perpl', None) 
+        
         metrics_recorder.update_after_batch( batch_weight = this_batch_size / len(self.test_dset),
                                     batch_loss = metrics['batch_loss'],
-                                    batch_perpl = metrics['batch_ave_perpl'],
+                                    batch_perpl = batch_perpl,
                                     batch_acc = metrics.get('batch_ave_acc', None) )
         
-        write_optional_outputs_during_training(writer_obj = self.writer, 
+        self.optional_outputs_writer(writer_obj = self.writer, 
                                                 all_trainstates = all_trainstates,
                                                 global_step = batch_epoch_idx, 
                                                 dict_of_values = metrics, 
@@ -359,10 +377,12 @@ class TrainingWrapper:
                            batch_idx,
                            batch_loss,
                            trainstate_objs ):
-        cond1 = self.args.checkpoint_freq_during_training > 0
-        cond2 = self.intermediate_training_checkpoint_counter % self.args.checkpoint_freq_during_training == 0
+        if self.args.checkpoint_freq_during_training > 0:
+            flag = ( self.intermediate_training_checkpoint_counter % self.args.checkpoint_freq_during_training == 0 )
+        else:
+            flag = False
         
-        if cond1 and cond2:
+        if flag:
             # save some metadata about the trainstate files
             with open(f'{self.args.model_ckpts_dir}/INPROGRESS_trainstates_info.txt','w') as g:
                 g.write(f'Checkpoint created at: epoch {epoch_idx}, batch {batch_idx}\n')
@@ -465,10 +485,11 @@ class NeuralTKFTrainingWrapper(TrainingWrapper):
         self.alignlen_bin_fn = jit_compile_determine_alignlen_bin(args)
         self.have_acc = False
         self.use_tkf_funcs = True
-        self.write_approx_dict_fn = parted( write_approx_dict,
+        self.write_approx_dict_fn = partial( write_approx_dict,
                                             calc_sum = True,
                                             out_arrs_dir = self.args.out_arrs_dir,
                                             out_file = 'TRAIN_tkf_approx.tsv' )
+        self.optional_outputs_writer = write_optional_outputs_during_training
 
 class FeedforwardTrainingWrapper(TrainingWrapper):
     def _model_specific_inits(self):
@@ -476,11 +497,12 @@ class FeedforwardTrainingWrapper(TrainingWrapper):
         assert self.args.pred_model_type == 'neural_hmm'
         
         # continue init
-        self.seqlen_bin_fn = jit_compile_determine_seqlen_bin(args)
-        self.alignlen_bin_fn = jit_compile_determine_alignlen_bin(args)
+        self.seqlen_bin_fn = jit_compile_determine_seqlen_bin(self.args)
+        self.alignlen_bin_fn = jit_compile_determine_alignlen_bin(self.args)
         self.have_acc = True
         self.use_tkf_funcs = False
         self.write_approx_dict_fn = lambda *args, **kwargs: None
+        self.optional_outputs_writer = write_optional_outputs_during_training
 
 class FragAndSiteClassesTrainingWrapper(TrainingWrapper):
     def _model_specific_inits(self):
@@ -489,13 +511,14 @@ class FragAndSiteClassesTrainingWrapper(TrainingWrapper):
         
         # continue init
         self.seqlen_bin_fn = lambda *args, **kwargs: None
-        self.alignlen_bin_fn = jit_compile_determine_alignlen_bin(args)
+        self.alignlen_bin_fn = jit_compile_determine_alignlen_bin(self.args)
         self.have_acc = False
         self.use_tkf_funcs = True
-        self.write_approx_dict_fn = parted( write_approx_dict,
+        self.write_approx_dict_fn = partial( write_approx_dict,
                                             calc_sum = False,
                                             out_arrs_dir = self.args.out_arrs_dir,
                                             out_file = 'TRAIN_tkf_approx.tsv' )
+        self.optional_outputs_writer = write_optional_outputs_during_training_hmms
 
 class IndpSitesTrainingWrapper(TrainingWrapper):
     def _model_specific_inits(self):
@@ -507,7 +530,8 @@ class IndpSitesTrainingWrapper(TrainingWrapper):
         self.alignlen_bin_fn = lambda *args, **kwargs: None
         self.have_acc = False
         self.use_tkf_funcs = True
-        self.write_approx_dict_fn = parted( write_approx_dict,
+        self.write_approx_dict_fn = partial( write_approx_dict,
                                             calc_sum = False,
                                             out_arrs_dir = self.args.out_arrs_dir,
                                             out_file = 'TRAIN_tkf_approx.tsv' )
+        self.optional_outputs_writer = write_optional_outputs_during_training_hmms

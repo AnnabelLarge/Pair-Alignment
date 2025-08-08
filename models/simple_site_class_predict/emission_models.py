@@ -613,16 +613,25 @@ class RateMultipliersPerClassFromFile(RateMultipliersPerClass):
         
         elif self.use_unit_rate_mult:
             self.rate_multipliers = jnp.ones( out_size ) #(C_tr, C_s, K)
-            
+        
+        assert self.rate_multipliers.shape[0] == self.num_transit_mixtures
+        assert self.rate_multipliers.shape[1] == self.num_site_mixtures
+        assert self.rate_multipliers.shape[2] == self.k_rate_mults
+        
             
         ### read files: P(k|c_trans, c_sites)
         if not self.prob_rate_mult_is_one:
             in_file =  self.config['filenames']['rate_mult_probs']
-            self.log_rate_mult_probs = _load_params(in_file, target_ndim=3) #(C_tr, C_s, K)
+            rate_mult_probs = _load_params(in_file, target_ndim=3) #(C_tr, C_s, K)
+            self.log_rate_mult_probs = safe_log(rate_mult_probs) #(C_tr, C_s, K)
             del in_file
             
         elif self.prob_rate_mult_is_one:
             self.log_rate_mult_probs = jnp.zeros( out_size ) #(C_tr, C_s, K)
+        
+        assert self.log_rate_mult_probs.shape[0] == self.num_transit_mixtures
+        assert self.log_rate_mult_probs.shape[1] == self.num_site_mixtures
+        assert self.log_rate_mult_probs.shape[2] == self.k_rate_mults
             
         
     def __call__(self,
@@ -977,10 +986,10 @@ class EqulDistLogprobsFromFile(ModuleBase):
         self.num_transit_mixtures = ( self.config['num_fragment_mixtures'] *
                                       self.config['num_domain_mixtures'] )# C_tr
         self.num_site_mixtures = self.config['num_site_mixtures'] # C_s
-        self.k_rate_mults = self.config['k_rate_mults'] #K
+        self.emission_alphabet_size = self.config['emission_alphabet_size'] #A
         
         equl_file = self.config['filenames']['equl_dist']
-        
+
         if (self.num_transit_mixtures * self.num_site_mixtures) > 1:
             site_class_probs_file = self.config['filenames']['site_class_probs']
         
@@ -989,14 +998,22 @@ class EqulDistLogprobsFromFile(ModuleBase):
         # equilibrium distribution
         equl_dist = _load_params(equl_file, target_ndim=3) #(C_tr, C_s, A)
         self.log_equl_dist = safe_log(equl_dist) #(C_tr, C_s, A)
+        assert self.log_equl_dist.shape[0] == self.num_transit_mixtures
+        assert self.log_equl_dist.shape[1] == self.num_site_mixtures
+        assert self.log_equl_dist.shape[2] == self.emission_alphabet_size
         
         # probability of site classes
         if (self.num_transit_mixtures * self.num_site_mixtures) > 1:
-            site_class_probs = _load_params(equl_file, target_ndim=2) #(C_tr, C_s)
+            site_class_probs = _load_params(site_class_probs_file, target_ndim=2) #(C_tr, C_s)
             self.log_site_class_probs = safe_log(site_class_probs) #(C_tr, C_s)
             
-        elif self.num_site_mixtures == 1:
+        elif (self.num_transit_mixtures * self.num_site_mixtures) == 1:
             self.log_site_class_probs = jnp.zeros( (1,1) ) #(C_tr=1, C_s=1)
+
+
+        assert self.log_site_class_probs.shape[0] == self.num_transit_mixtures
+        assert self.log_site_class_probs.shape[1] == self.num_site_mixtures
+
         
     def __call__(self,
                  *args,

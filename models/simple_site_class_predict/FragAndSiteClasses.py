@@ -683,75 +683,76 @@ class FragAndSiteClasses(ModuleBase):
                         key = f'{prefix}_frag-class-{c_fr}_site-class-{c_s}_rate_matrix'
                         maybe_write_matrix_to_ascii( out_folder, mat_to_save, key )
                         del mat_to_save, key
-            
+                        
+                        
+            ### logprob_emit_at_indel AFTER marginalizing out site and rate mixtures
+            mat = np.exp( out['logprob_emit_at_indel'] ) #(C_frag, A)
+            new_key = f'{prefix}_logprob_emit_at_indel'.replace('log','')
+            write_matrix_to_npy( out_folder, mat, new_key )
+            maybe_write_matrix_to_ascii( out_folder, mat, new_key )
+            del mat, new_key
 
-            ###########################################
-            ### these are returned if params were fit #
-            ### (i.e. did not load these from files)  #
-            ###########################################
-            if not self.config['load_all']:
-                ### logprob_emit_at_indel AFTER marginalizing out site and rate mixtures
-                mat = np.exp( out['logprob_emit_at_indel'] ) #(C_frag, A)
-                new_key = f'{prefix}_logprob_emit_at_indel'.replace('log','')
-                write_matrix_to_npy( out_folder, mat, new_key )
-                maybe_write_matrix_to_ascii( out_folder, mat, new_key )
-                del mat, new_key
+
+            ### site class probs (if num_mixtures > 1)
+            if (self.num_transit_mixtures * self.num_site_mixtures) > 1:
+                site_class_probs = np.exp(out['log_site_class_probs']) #(C_frag, C_sites)
+                key = f'{prefix}_site_class_probs'
+                write_matrix_to_npy( out_folder, site_class_probs, key )
+                maybe_write_matrix_to_ascii( out_folder, site_class_probs, key )
+                del key, site_class_probs
                 
+        
+            ### rate multipliers 
+            # P(K|C) or P(K), if not 1
+            if not self.rate_mult_module.prob_rate_mult_is_one:
+                rate_mult_probs = np.exp(out['log_rate_mult_probs']) #(C_frag, C_sites, K)
+                key = f'{prefix}_rate_mult_probs'
+                write_matrix_to_npy( out_folder, rate_mult_probs, key )
+                maybe_write_matrix_to_ascii( out_folder, rate_mult_probs, key )
+                del key
+        
+            # \rho_{c,k} or \rho_k
+            if not self.rate_mult_module.use_unit_rate_mult:
+                rate_multipliers = out['rate_multipliers'] #(C_frag, C_sites, K)
+                key = f'{prefix}_rate_multipliers'
+                write_matrix_to_npy( out_folder, rate_multipliers, key )
+                maybe_write_matrix_to_ascii( out_folder, rate_multipliers, key )
+                del key
                 
-                ### site class probs (if num_mixtures > 1)
-                if (self.num_transit_mixtures * self.num_site_mixtures) > 1:
-                    site_class_probs = np.exp(out['log_site_class_probs']) #(C_frag, C_sites)
-                    key = f'{prefix}_site_class_probs'
-                    write_matrix_to_npy( out_folder, site_class_probs, key )
-                    maybe_write_matrix_to_ascii( out_folder, site_class_probs, key )
-                    del key, site_class_probs
-                    
             
-                ### rate multipliers 
-                # P(K|C) or P(K), if not 1
-                if not self.rate_mult_module.prob_rate_mult_is_one:
-                    rate_mult_probs = np.exp(out['log_rate_mult_probs']) #(C_frag, C_sites, K)
-                    key = f'{prefix}_rate_mult_probs'
-                    write_matrix_to_npy( out_folder, rate_mult_probs, key )
-                    maybe_write_matrix_to_ascii( out_folder, rate_mult_probs, key )
-                    del key
+            ### exchangeabilities, if gtr or hky85
+            exchangeabilities = out['exchangeabilities'] #(A, A) or None
             
-                # \rho_{c,k} or \rho_k
-                if not self.rate_mult_module.use_unit_rate_mult:
-                    rate_multipliers = out['rate_multipliers'] #(C_frag, C_sites, K)
-                    key = f'{prefix}_rate_multipliers'
-                    write_matrix_to_npy( out_folder, rate_multipliers, key )
-                    maybe_write_matrix_to_ascii( out_folder, rate_multipliers, key )
-                    del key
-                    
+            if self.subst_model_type == 'gtr':
+                key = f'{prefix}_gtr-exchangeabilities'
+                write_matrix_to_npy( out_folder, exchangeabilities, key )
+                maybe_write_matrix_to_ascii( out_folder, exchangeabilities, key )
+                del key
                 
-                ### exchangeabilities, if gtr or hky85
-                exchangeabilities = out['exchangeabilities'] #(A, A) or None
+            elif self.subst_model_type == 'hky85':
+                ti = exchangeabilities[0, 2]
+                tv = exchangeabilities[0, 1]
+                arr = np.array( [ti, tv] )
+                key = f'{prefix}_hky85_ti_tv'
+                write_matrix_to_npy( out_folder, arr, key )
                 
-                if self.subst_model_type == 'gtr':
-                    key = f'{prefix}_gtr-exchangeabilities'
-                    write_matrix_to_npy( out_folder, exchangeabilities, key )
-                    maybe_write_matrix_to_ascii( out_folder, exchangeabilities, key )
-                    del key
-                    
-                elif self.subst_model_type == 'hky85':
-                    ti = exchangeabilities[0, 2]
-                    tv = exchangeabilities[0, 1]
-                    arr = np.array( [ti, tv] )
-                    key = f'{prefix}_hky85_ti_tv'
-                    write_matrix_to_npy( out_folder, arr, key )
-                    
-                    with open(f'{out_folder}/ASCII_{prefix}_hky85_ti_tv.txt','w') as g:
-                        g.write(f'transition rate, ti: {ti}\n')
-                        g.write(f'transition rate, tv: {tv}')
-                    del key, arr
-                    
-                    
-                ####################################################
-                ### extract transition paramaters, intermediates   # 
-                ### needed for final scoring matrices              #
-                ### (also does not depend on time)                 #
-                ####################################################
+                with open(f'{out_folder}/ASCII_{prefix}_hky85_ti_tv.txt','w') as g:
+                    g.write(f'transition rate, ti: {ti}\n')
+                    g.write(f'transition rate, tv: {tv}')
+                del key, arr
+                
+                
+            ####################################################
+            ### extract transition paramaters, intermediates   # 
+            ### needed for final scoring matrices              #
+            ### (also does not depend on time)                 #
+            ####################################################
+            if self.config['load_all']:
+                lam = self.transitions_module.param_dict['lambda']
+                mu = self.transitions_module.param_dict['mu']
+                offset = 1 - (lam/mu)
+                
+            elif not self.config['load_all']:
                 # lambda and mu
                 # also record if you used any tkf approximations
                 mu_min_val = self.transitions_module.mu_min_val #float
@@ -768,17 +769,22 @@ class FragAndSiteClasses(ModuleBase):
                                          min_val = offs_min_val,
                                          max_val = offs_max_val).item() #float
                 lam = mu * (1 - offset)  #float
+            
+            
+            with open(f'{out_folder}/ASCII_{prefix}_tkf92_indel_params.txt','w') as g:
+                g.write(f'insert rate, lambda: {lam}\n')
+                g.write(f'deletion rate, mu: {mu}\n')
+                g.write(f'offset: {offset}\n\n')
+            
+            out_dict = {'lambda': np.array(lam), # shape=()
+                        'mu': np.array(mu), # shape=()
+                        'offset': np.array(offset)} # shape=()
+                            
+            # tkf92 r_ext param
+            if self.config['load_all']:
+                r_extend = self.transitions_module.param_dict['r_extend']
                 
-                with open(f'{out_folder}/ASCII_{prefix}_tkf92_indel_params.txt','w') as g:
-                    g.write(f'insert rate, lambda: {lam}\n')
-                    g.write(f'deletion rate, mu: {mu}\n')
-                    g.write(f'offset: {offset}\n\n')
-                
-                out_dict = {'lambda': np.array(lam), # shape=()
-                            'mu': np.array(mu), # shape=()
-                            'offset': np.array(offset)} # shape=()
-                                
-                # tkf92 r_ext param
+            elif not self.config['load_all']:
                 r_extend_min_val = self.transitions_module.r_extend_min_val
                 r_extend_max_val = self.transitions_module.r_extend_max_val
                 r_extend_logits = self.transitions_module.r_extend_logits #(C_dom=1,C_frag)
@@ -787,21 +793,21 @@ class FragAndSiteClasses(ModuleBase):
                                          min_val = r_extend_min_val,
                                          max_val = r_extend_max_val) #(C_dom=1,C_frag)
                 
-                mean_indel_lengths = 1 / (1 - r_extend) #(C_dom=1,C_frag)
-                
-                with open(f'{out_folder}/ASCII_{prefix}_tkf92_indel_params.txt','a') as g:
-                    g.write(f'extension prob, r: ')
-                    [g.write(f'{elem}\t') for elem in r_extend.flatten()]
-                    g.write('\n')
-                    g.write(f'mean indel length: ')
-                    [g.write(f'{elem}\t') for elem in mean_indel_lengths]
-                    g.write('\n')
-                
-                out_dict['r_extend'] = r_extend #(C_dom=1,C_frag)
+            mean_indel_lengths = 1 / (1 - r_extend) #(C_dom=1,C_frag)
             
-                with open(f'{out_folder}/PARAMS-DICT_{prefix}_tkf92_indel_params.pkl','wb') as g:
-                    pickle.dump(out_dict, g)
-                del out_dict
+            with open(f'{out_folder}/ASCII_{prefix}_tkf92_indel_params.txt','a') as g:
+                g.write(f'extension prob, r: ')
+                [g.write(f'{elem}\t') for elem in r_extend.flatten()]
+                g.write('\n')
+                g.write(f'mean indel length: ')
+                [g.write(f'{elem}\t') for elem in mean_indel_lengths]
+                g.write('\n')
+            
+            out_dict['r_extend'] = r_extend #(C_dom=1,C_frag)
+        
+            with open(f'{out_folder}/PARAMS-DICT_{prefix}_tkf92_indel_params.pkl','wb') as g:
+                pickle.dump(out_dict, g)
+            del out_dict
 
 class FragAndSiteClassesLoadAll(FragAndSiteClasses):
     """
@@ -811,8 +817,11 @@ class FragAndSiteClassesLoadAll(FragAndSiteClasses):
     
     Initialize with
     ----------------
-    config : dict
-        config['num_mixtures'] :  int
+    config : dict    
+        config['num_fragment_mixtures'] :  int
+            number of fragment classes (for transitions)
+    
+        config['num_site_mixtures'] :  int
             number of emission site classes
         
         config['subst_model_type'] : {gtr, hky85}

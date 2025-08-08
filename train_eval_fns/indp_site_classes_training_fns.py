@@ -25,12 +25,12 @@ from utils.train_eval_utils import write_approx_dict
 
 def train_one_batch(batch, 
                     training_rngkey, 
-                    pairhmm_trainstate,
+                    all_trainstates,
                     t_array,
                     interms_for_tboard,
                     indel_model_type,
                     update_grads: bool = True,
-                    whole_dset_grad_desc: bool = False,
+                    *args,
                     **kwargs):
     """
     provided during part + jit:
@@ -42,13 +42,14 @@ def train_one_batch(batch,
         - batch
         - pairhmm_trainstate
     """
+    pairhmm_trainstate = all_trainstates[0]
+    
     finalpred_sow_outputs = interms_for_tboard['finalpred_sow_outputs']
     def apply_model(pairhmm_params):
         # in training, only evaluate joint loglike i.e. use default __call__
         (loss_NLL, aux_dict), sow_dict = pairhmm_trainstate.apply_fn(variables = pairhmm_params,
                                           batch = batch,
                                           t_array = t_array,
-                                          whole_dset_grad_desc = whole_dset_grad_desc,
                                           sow_intermediates = finalpred_sow_outputs,
                                           mutable=['histograms','scalars'] if finalpred_sow_outputs else [])
         
@@ -90,42 +91,36 @@ def train_one_batch(batch,
                 'finalpred_gradient': grad,
                 'used_approx': aux_dict['used_approx']}
     
-    return out_dict, new_trainstate
+    return out_dict, [new_trainstate]
 
 
 def eval_one_batch( batch, 
                     t_array,
-                    pairhmm_trainstate,
+                    all_trainstates,
                     pairhmm_instance,
                     interms_for_tboard,
                     return_all_loglikes: bool,
                     *args,
                     **kwargs):
     """
-    WARNING: might have to pull trainstate and instance out of parted+jit 
-      function, if it doesn't compile correctly
-    
-    could alternatively provide the function pairhmm_instance.calculate_all_loglikes
-      or pairhmm_instance.__call__ as arguments during parital+jit compilation?
-      
     provided during part + jit:
         - t_array
         - interms_for_tboard
         - pairhmm_instance
         - update_grads
-        - (if final eval) pairhmm_trainstate
+        - (if final eval) all_trainstates
     
     need to be specified every training loop:
         - batch
-        - (if training) pairhmm_trainstate
+        - (if training) all_trainstates
     """
+    pairhmm_trainstate = all_trainstates[0]
     finalpred_sow_outputs = interms_for_tboard['finalpred_sow_outputs']
     
     if not return_all_loglikes:
-        (_, aux_dict), sow_dict = pairhmm_trainstate.apply_fn(variables = pairhmm_trainstate.params,
+        (loss_NLL, aux_dict), sow_dict = pairhmm_trainstate.apply_fn(variables = pairhmm_trainstate.params,
                                           batch = batch,
                                           t_array = t_array,
-                                          whole_dset_grad_desc = False,
                                           sow_intermediates = False,
                                           mutable=['histograms','scalars'] if finalpred_sow_outputs else [])
     
@@ -137,6 +132,8 @@ def eval_one_batch( batch,
                                           return_intermeds = False,
                                           method=pairhmm_instance.calculate_all_loglikes)
         
+        # specifically use joint prob for loss
+        loss_NLL = jnp.mean( aux_dict['joint_neg_logP'] )
         
     sow_dict = {'histograms': sow_dict.get( 'histograms', dict() ),
                 'scalars': sow_dict.get( 'scalars', dict() )
@@ -146,7 +143,9 @@ def eval_one_batch( batch,
     joint_neg_logP_length_normed = aux_dict['joint_neg_logP_length_normed']
     joint_perplexity_perSamp = jnp.exp(joint_neg_logP_length_normed)
     
-    out_dict = {'joint_neg_logP': aux_dict['joint_neg_logP'],
+    out_dict = {'batch_loss': loss_NLL,
+                'batch_ave_joint_perpl': jnp.mean(joint_perplexity_perSamp),
+                'joint_neg_logP': aux_dict['joint_neg_logP'],
                 'joint_neg_logP_length_normed': joint_neg_logP_length_normed,
                 'joint_perplexity_perSamp': joint_perplexity_perSamp,
                 'pred_layer_metrics': sow_dict,
@@ -232,6 +231,7 @@ def final_eval_wrapper(dataloader,
             write_approx_dict( approx_dict = eval_metrics['used_approx'], 
                                out_arrs_dir = out_arrs_dir,
                                out_file = 'FINAL-EVAL_tkf_approx.tsv',
+                               calc_sum = False,
                                subline = subline )
             
             
@@ -278,23 +278,23 @@ def final_eval_wrapper(dataloader,
             final_loglikes.to_csv((f'{logfile_dir}/{outfile_prefix}_pt{batch_idx}_'+
                                   'FINAL-LOGLIKES.tsv'), sep='\t')
             
-            # as numpy array
-            # col1 is sample_idx
-            # col2 is sum of the negative JOINT log-likleihoods
-            # col3 is sum of the negative ANC MARGINAL log-likleihoods
-            # col4 is sum of the negative DESC MARGINAL log-likleihoods
-            # col5 is sum of the negative CONDITIONAL log-likleihoods
-            col1 = batch[-1]
-            col2 = eval_metrics['joint_neg_logP']
-            col3 = eval_metrics['cond_neg_logP']
-            col4 = eval_metrics['anc_neg_logP']
-            col5 = eval_metrics['desc_neg_logP']
+            # # as numpy array
+            # # col1 is sample_idx
+            # # col2 is sum of the negative JOINT log-likleihoods
+            # # col3 is sum of the negative ANC MARGINAL log-likleihoods
+            # # col4 is sum of the negative DESC MARGINAL log-likleihoods
+            # # col5 is sum of the negative CONDITIONAL log-likleihoods
+            # col1 = batch[-1]
+            # col2 = eval_metrics['joint_neg_logP']
+            # col3 = eval_metrics['cond_neg_logP']
+            # col4 = eval_metrics['anc_neg_logP']
+            # col5 = eval_metrics['desc_neg_logP']
             
-            to_write = np.stack([col1, col2, col3, col4, col5], axis=1)
-            with open(f'{logfile_dir}/NP-MAT_{outfile_prefix}_pt{batch_idx}_FINAL-LOGLIKES.npy', 'wb') as g:
-                np.save(g, to_write)
+            # to_write = np.stack([col1, col2, col3, col4, col5], axis=1)
+            # with open(f'{logfile_dir}/NP-MAT_{outfile_prefix}_pt{batch_idx}_FINAL-LOGLIKES.npy', 'wb') as g:
+            #     np.save(g, to_write)
             
-            del col1, col2, col3, col4, col5, g, to_write
+            # del col1, col2, col3, col4, col5, g, to_write
     
     
     ######################

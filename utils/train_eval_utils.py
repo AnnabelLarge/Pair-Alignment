@@ -191,7 +191,7 @@ def determine_alignlen_bin(batch,
                                       padding_idx = seq_padding_idx)
       
     # add one again, to re-include <bos>
-    return batch_max_alignlen + 1
+    return (batch_max_alignlen + 1)
 
 def jit_compile_determine_alignlen_bin(args):
     parted_determine_alignlen_bin = partial(determine_alignlen_bin,  
@@ -224,7 +224,6 @@ def write_approx_dict(approx_dict,
                 to_write += f'{key}: {val}\n'
             
     if used_approx:
-        
         # for pairHMMs, also record time
         if 't_array' in approx_dict.keys():
             t_to_write = approx_dict['t_array']

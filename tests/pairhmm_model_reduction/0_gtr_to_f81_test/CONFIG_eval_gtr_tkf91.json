@@ -1,0 +1,62 @@
+{
+    "training_wkdir": "RESULTS_eval_gtr_tkf91",
+    "rng_seednum": 0,
+
+    "data_dir": "example_data",
+    "train_dset_splits": ["sevenSamp"],
+    "test_dset_splits": ["sevenSamp"],
+    "toss_alignments_longer_than": null,
+    "bos_eos_as_match": false,
+    "batch_size": 7,
+    "emission_alphabet_size": 20,
+    "gap_idx": 43,
+
+    "num_epochs": 1,
+    "optimizer_config": {
+        "init_value": 1e-10,
+        "peak_value": 1e-10,
+        "end_value": 1e-10,
+        "warmup_steps": 0,
+        "weight_decay": 0,
+        "every_k_schedule": 1
+    },
+    "early_stop_cond1_atol": 1e-3,
+    "early_stop_cond2_gap": 3,
+    "patience": 1,
+    "checkpoint_freq_during_training": 0,
+    "update_grads": false,
+
+    "interms_for_tboard": {
+        "finalpred_sow_outputs": false,
+        "forward_pass_outputs": false,
+        "gradients": false,
+        "optimizer": false
+    },
+    "save_arrs": true,
+    "save_per_sample_losses": true,
+    "norm_reported_loss_by": "desc_len",
+
+    "pred_model_type": "pairhmm_indp_sites",
+    "pred_config": {
+        "load_all": true,
+        "num_domain_mixtures": 1,
+        "num_fragment_mixtures": 1,
+        "num_site_mixtures": 1,
+        "k_rate_mults": 1,
+
+        "subst_model_type": "gtr",
+        "indp_rate_mults": false,
+        "norm_rate_matrix": true,
+        "norm_rate_mults": false,
+
+        "indel_model_type": "tkf91",
+        "tkf_function": "regular_tkf",
+
+        "filenames": {"tkf_params_file": "./RESULTS_train_f81_tkf91/out_arrs/PARAMS-DICT_test-set_pt0_tkf91_indel_params.pkl",
+                      "equl_dist": "./RESULTS_train_f81_tkf91/out_arrs/PARAMS-MAT_test-set_pt0_prob_emit_at_indel.npy",
+                      "exch": "./tests/pairhmm_model_reduction/req_files/all_ones_exchangeabilities.npy"},
+
+        "times_from": "t_per_sample"
+        }
+    
+}

@@ -487,11 +487,11 @@ def write_optional_outputs_during_training(writer_obj,
 
 
 def write_optional_outputs_during_training_hmms(writer_obj, 
-                                           pairhmm_trainstate,
-                                           global_step, 
-                                           dict_of_values, 
-                                           interms_for_tboard, 
-                                           write_histograms_flag):
+                                                all_trainstates,
+                                                global_step, 
+                                                dict_of_values, 
+                                                interms_for_tboard, 
+                                                write_histograms_flag):
     """
     in the training loop, could record the following (under certain flags)
     
