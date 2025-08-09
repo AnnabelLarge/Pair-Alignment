@@ -84,7 +84,7 @@ def eval_pairhmm_frag_and_site_classes( args,
         # standard header
         g.write(f'PairHMM TKF92 with latent site and fragment classes\n')
         g.write( f'Substitution model: {training_argparse.pred_config["subst_model_type"]}\n' )
-        g.write( f'Indel model: {training_argparse.pred_config["indel_model_type"]}\n' )
+        g.write( f'Indel model: TKF92\n' )
                 
         g.write( (f'  - Number of latent site and fragment classes: '+
                   f'{training_argparse.pred_config["num_site_mixtures"]}\n' +

@@ -249,10 +249,10 @@ def final_eval_wrapper(dataloader,
     ### POST EVAL LOOP   #
     ######################
     # record the column order for the numpy matrix written earlier
-    if save_per_sample_losses:
-        with open(f'{logfile_dir}/COLS-FOR-NP-MAT_{outfile_prefix}_pt{batch_idx}_FINAL-LOGLIKES.tsv', 'w') as g:
-            g.write(f'dataloader_idx\n')
-            g.write(f'sum_cond_loglikes\n')
+    #if save_per_sample_losses:
+        #with open(f'{logfile_dir}/COLS-FOR-NP-MAT_{outfile_prefix}_pt{batch_idx}_FINAL-LOGLIKES.tsv', 'w') as g:
+        #    g.write(f'dataloader_idx\n')
+        #    g.write(f'sum_cond_loglikes\n')
             
     # extract whole-dataset performance
     final_ave_loss = sum_cond_logprobs / len(dataset)
