@@ -73,6 +73,7 @@ def cont_training_feedforward(args,
                                     prev_decoder_savemodel_filename,
                                     prev_finalpred_savemodel_filename]
     
+    prev_argparse_obj = prev_model_ckpts_dir + '/' + f'TRAINING_ARGPARSE.pkl'
     with open(prev_argparse_obj,'rb') as f:
         epoch_ended = pickle.load(f).epoch_idx
     del prev_argparse_obj, f

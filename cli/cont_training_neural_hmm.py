@@ -52,7 +52,11 @@ from train_eval_fns.TrainingWrapper import NeuralTKFTrainingWrapper as TrainingW
 
 
 
-def cont_training_neural_hmm(args, dataloader_dict: dict):
+def cont_training_neural_hmm(args, 
+                              dataloader_dict,
+                              new_training_wkdir,
+                              prev_model_ckpts_dir,
+                              tstate_to_load):
     ###########################################################################
     ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES   #########################
     ###########################################################################
@@ -71,6 +75,7 @@ def cont_training_neural_hmm(args, dataloader_dict: dict):
                                     prev_decoder_savemodel_filename,
                                     prev_finalpred_savemodel_filename]
     
+    prev_argparse_obj = prev_model_ckpts_dir + '/' + f'TRAINING_ARGPARSE.pkl'
     with open(prev_argparse_obj,'rb') as f:
         epoch_ended = pickle.load(f).epoch_idx
     del prev_argparse_obj, f
@@ -375,7 +380,7 @@ def cont_training_neural_hmm(args, dataloader_dict: dict):
                                              jitted_determine_seqlen_bin = training_wrapper.seqlen_bin_fn,
                                              jitted_determine_alignlen_bin = training_wrapper.alignlen_bin_fn,
                                              eval_fn_jitted = eval_fn_jitted,
-                                             out_alph_size = args.out_alph_size,
+                                             out_alph_size = getattr(args,'out_alph_size',None),
                                              save_arrs = args.save_arrs,
                                              save_per_sample_losses = args.save_per_sample_losses,
                                              interms_for_tboard = args.interms_for_tboard, 
@@ -399,7 +404,7 @@ def cont_training_neural_hmm(args, dataloader_dict: dict):
                                              jitted_determine_seqlen_bin = training_wrapper.seqlen_bin_fn,
                                              jitted_determine_alignlen_bin = training_wrapper.alignlen_bin_fn,
                                              eval_fn_jitted = eval_fn_jitted,
-                                             out_alph_size = args.out_alph_size, 
+                                             out_alph_size = getattr(args,'out_alph_size',None), 
                                              save_arrs = args.save_arrs,
                                              save_per_sample_losses = args.save_per_sample_losses,
                                              interms_for_tboard = args.interms_for_tboard, 

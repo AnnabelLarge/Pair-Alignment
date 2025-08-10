@@ -62,7 +62,11 @@ def _save_trainstate(out_file, tstate_obj):
     _save_to_pickle(out_file, model_state_dict)
     
     
-def cont_training_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
+def cont_training_pairhmm_frag_and_site_classes(args, 
+                              dataloader_dict,
+                              new_training_wkdir,
+                              prev_model_ckpts_dir,
+                              tstate_to_load):
     ###########################################################################
     ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES   #########################
     ###########################################################################
@@ -75,7 +79,7 @@ def cont_training_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
     # vvv___DIFFERENT FROM ORIGINAL TRAINING CODE___vvv
     
     prev_pairhmm_savemodel_filename = prev_model_ckpts_dir + '/'+ tstate_to_load
-    prev_argparse_obj = prev_model_ckpts_dir + '/' + f'FINAL_PRED_{tstate_to_load}.pkl'
+    prev_argparse_obj = prev_model_ckpts_dir + '/' + f'TRAINING_ARGPARSE.pkl'
     with open(prev_argparse_obj,'rb') as f:
         epoch_ended = pickle.load(f).epoch_idx
     del prev_argparse_obj, f

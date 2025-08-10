@@ -100,7 +100,6 @@ def neural_hmm_fill_with_default_values(args):
     if 'in_alph_size' not in provided_args:
         args.in_alph_size = args.emission_alphabet_size + 3
 
-    
     if 'chunk_length' not in provided_args:
         args.chunk_length = 512
     
@@ -148,7 +147,13 @@ def feedforward_share_top_level_args(args):
     
 def neural_hmm_share_top_level_args(args):
     general_share_top_level_args(args)
+    
+    args.pred_config['in_alph_size'] = args.in_alph_size
+    
+    args.anc_enc_config['in_alph_size'] = args.in_alph_size
     args.anc_enc_config['seq_padding_idx'] = args.seq_padding_idx
+
+    args.desc_dec_config['in_alph_size'] = args.in_alph_size
     args.desc_dec_config['seq_padding_idx'] = args.seq_padding_idx
     
     args.pred_config['emission_alphabet_size'] = args.emission_alphabet_size

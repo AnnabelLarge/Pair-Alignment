@@ -24,8 +24,8 @@ from dloaders.init_dataloader import init_dataloader
 
 def main():
     # debug
-    if 'RESULTS' in os.listdir():
-        shutil.rmtree('RESULTS')
+    # if 'RESULTS' in os.listdir():
+    #     shutil.rmtree('RESULTS')
     
     # need pigz for compression
     err = "pigz is not installed. Please install it to proceed."
@@ -87,9 +87,16 @@ def main():
     top_level_args = parser.parse_args()
     
     
-    # ## UNCOMMENT TO RUN IN SPYDER IDE
+    # UNCOMMENT TO RUN IN SPYDER IDE
+    # top_level_args.task = 'continue_train'
+    # top_level_args.configs = 'CONFIG.json'
+    # top_level_args.new_training_wkdir = 'CONTINUE_TRAIN'
+    # top_level_args.prev_model_ckpts_dir = 'RESULTS/model_ckpts'
+    # top_level_args.tstate_to_load = 'BEST'
+    # top_level_args.load_dset_pkl = None
+    
     # top_level_args.task = 'train'
-    # top_level_args.configs = 'CONFIG_4GTR-mixes_seed142.json'
+    # top_level_args.configs = 'CONFIG.json'
     # top_level_args.load_dset_pkl = None
     
     
@@ -280,9 +287,9 @@ def main():
         # train model
         cont_train_fn( args=args_from_training_config, 
                         dataloader_dict=dload_dict,
-                        new_training_wkdir=args.new_training_wkdir,
-                        prev_model_ckpts_dir=args.prev_model_ckpts_dir,
-                        tstate_to_load=args.tstate_to_load
+                        new_training_wkdir=top_level_args.new_training_wkdir,
+                        prev_model_ckpts_dir=top_level_args.prev_model_ckpts_dir,
+                        tstate_to_load=top_level_args.tstate_to_load
                         )
     
     
