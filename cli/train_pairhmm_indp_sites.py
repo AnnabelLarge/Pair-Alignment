@@ -11,6 +11,7 @@ train a pair hmm, under independent site class model assumption
 # general python
 import os
 import shutil
+import glob
 from tqdm import tqdm
 from time import process_time
 from time import time as wall_clock_time
@@ -391,4 +392,11 @@ def train_pairhmm_indp_sites(args, dataloader_dict: dict):
     #   compress the output file
     writer.close()
     pigz_compress_tensorboard_file( args )
+    
+    # clean up intermediates
+    for file_path in glob.glob(f"{args.model_ckpts_dir}/*_INPROGRESS.pkl"):
+        try:
+            os.remove(file_path)
+        except FileNotFoundError:
+            pass  # File might have been deleted already
     

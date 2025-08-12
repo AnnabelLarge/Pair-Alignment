@@ -24,8 +24,8 @@ from dloaders.init_dataloader import init_dataloader
 
 def main():
     # debug
-    # if 'RESULTS' in os.listdir():
-    #     shutil.rmtree('RESULTS')
+    if 'RESULTS' in os.listdir():
+        shutil.rmtree('RESULTS')
     
     # need pigz for compression
     err = "pigz is not installed. Please install it to proceed."
@@ -82,7 +82,7 @@ def main():
     parser.add_argument('-tstate_to_load',
                         type = str,
                         help='FOR CONTINUE_TRAIN OPTION; The suffix (not including file extension) of the tstate object to load')
-    
+  
     # parse the arguments
     top_level_args = parser.parse_args()
     
@@ -96,7 +96,7 @@ def main():
     # top_level_args.load_dset_pkl = None
     
     # top_level_args.task = 'train'
-    # top_level_args.configs = 'CONFIG.json'
+    # top_level_args.configs = 'example_config_neural_hmm.json'
     # top_level_args.load_dset_pkl = None
     
     

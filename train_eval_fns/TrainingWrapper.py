@@ -63,7 +63,7 @@ class TrainingWrapper:
         self.train_loop_timer = timers( num_epochs = len(self.epoch_arr) )
         self.eval_loop_timer = timers( num_epochs = len(self.epoch_arr) )
         self.whole_epoch_timer = timers( num_epochs = len(self.epoch_arr) )
-        self.intermediate_training_checkpoint_counter = 0
+        self.intermediate_training_checkpoint_counter = 1
         self.early_stopping_counter = 0
         
         # track when jit compilations are made
@@ -375,6 +375,7 @@ class TrainingWrapper:
                 model_state_dict = flax.serialization.to_state_dict(trainstate_objs[i])
                 pickle.dump(model_state_dict, g)    
     
+    # COME BACK HERE
     def _maybe_checkpoint( self,
                            epoch_idx,
                            batch_idx,
@@ -400,7 +401,7 @@ class TrainingWrapper:
             with open(self.args.logfile_name,'a') as g:
                 g.write(f'\tTrain loss at epoch {epoch_idx}, batch {batch_idx}: {batch_loss}\n')
             
-            self.intermediate_training_checkpoint_counter = 0
+            self.intermediate_training_checkpoint_counter = 1
         
         else:
             self.intermediate_training_checkpoint_counter += 1
