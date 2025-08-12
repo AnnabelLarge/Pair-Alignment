@@ -76,10 +76,10 @@ def cont_training_neural_hmm(args,
                                     prev_decoder_savemodel_filename,
                                     prev_finalpred_savemodel_filename]
     
-    prev_argparse_obj = prev_model_ckpts_dir + '/' + f'TRAINING_ARGPARSE.pkl'
-    with open(prev_argparse_obj,'rb') as f:
-        epoch_ended = pickle.load(f).epoch_idx
-    del prev_argparse_obj, f
+    # prev_argparse_obj = prev_model_ckpts_dir + '/' + f'TRAINING_ARGPARSE.pkl'
+    # with open(prev_argparse_obj,'rb') as f:
+    #     epoch_ended = pickle.load(f).epoch_idx
+    # del prev_argparse_obj, f
     
     # ^^^___DIFFERENT FROM ORIGINAL TRAINING CODE___^^^
     
@@ -117,9 +117,6 @@ def cont_training_neural_hmm(args,
     
     # create a new logfile
     with open(args.logfile_name,'w') as g:
-        if not args.update_grads:
-            g.write('DEBUG MODE: DISABLING GRAD UPDATES\n\n')
-            
         g.write( f'Neural sequence embedders with Markovian alignment assumption\n' )
         g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )
         g.write( f'Indel model: {args.pred_config["indel_model_type"]}\n' )
@@ -289,14 +286,13 @@ def cont_training_neural_hmm(args,
     
     ### initialize training wrapper
     training_wrapper = TrainingWrapper( args = args,
-                                        epoch_arr = range(args.num_epochs - epoch_ended),
+                                        epoch_arr = range(args.num_epochs),
                                         initial_training_rngkey = rngkey,
                                         dataloader_dict = dataloader_dict,
                                         train_fn_jitted = train_fn_jitted,
                                         eval_fn_jitted = eval_fn_jitted,
                                         all_save_model_filenames = all_save_model_filenames,
                                         writer = writer )
-    del epoch_ended
     
     
     ### train

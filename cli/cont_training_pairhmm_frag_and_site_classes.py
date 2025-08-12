@@ -80,10 +80,10 @@ def cont_training_pairhmm_frag_and_site_classes(args,
     # vvv___DIFFERENT FROM ORIGINAL TRAINING CODE___vvv
     
     prev_pairhmm_savemodel_filename = prev_model_ckpts_dir + '/'+ tstate_to_load
-    prev_argparse_obj = prev_model_ckpts_dir + '/' + f'TRAINING_ARGPARSE.pkl'
-    with open(prev_argparse_obj,'rb') as f:
-        epoch_ended = pickle.load(f).epoch_idx
-    del prev_argparse_obj, f
+    # prev_argparse_obj = prev_model_ckpts_dir + '/' + f'TRAINING_ARGPARSE.pkl'
+    # with open(prev_argparse_obj,'rb') as f:
+    #     epoch_ended = pickle.load(f).epoch_idx
+    # del prev_argparse_obj, f
     
     # ^^^___DIFFERENT FROM ORIGINAL TRAINING CODE___^^^
     
@@ -121,10 +121,6 @@ def cont_training_pairhmm_frag_and_site_classes(args,
     
     # create a new logfile
     with open(args.logfile_name,'w') as g:
-        # disabled training
-        if not args.update_grads:
-            g.write('DEBUG MODE: DISABLING GRAD UPDATES\n\n')
-            
         # standard header
         g.write(f'PairHMM TKF92 with latent site and fragment classes\n')
         g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )
@@ -278,14 +274,13 @@ def cont_training_pairhmm_frag_and_site_classes(args,
     
     ### initialize training wrapper
     training_wrapper = TrainingWrapper( args = args,
-                                        epoch_arr = range(args.num_epochs - epoch_ended),
+                                        epoch_arr = range(args.num_epochs),
                                         initial_training_rngkey = rngkey,
                                         dataloader_dict = dataloader_dict,
                                         train_fn_jitted = train_fn_jitted,
                                         eval_fn_jitted = eval_fn_jitted,
                                         all_save_model_filenames = [finalpred_save_model_filename],
                                         writer = writer )
-    del epoch_ended
     
     
     ### train
