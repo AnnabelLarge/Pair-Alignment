@@ -126,6 +126,7 @@ class FeedforwardPredict(ModuleBase):
         """
         Cross-entropy loss per position, along with collecting accuracy metrics
         """
+        
         ### loss
         # logP(desc, align | anc) comes from -cross_ent()
         logprob_perSamp_perPos = -optax.softmax_cross_entropy_with_integer_labels(logits = final_logits, 
