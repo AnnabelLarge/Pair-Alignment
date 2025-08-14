@@ -261,7 +261,7 @@ class TestTKF92JointCondMarg(unittest.TestCase):
         
         ### check values
         true = np.reshape(true, log_pred.shape)
-        npt.assert_allclose(true, jnp.exp(log_pred), rtol=1e-6)
+        npt.assert_allclose( jnp.log(true), log_pred, rtol=1e-6)
     
     
     ###################

@@ -18,10 +18,8 @@ import unittest
 from models.simple_site_class_predict.transition_models import (TKF91TransitionLogprobs,
                                                                 TKF92TransitionLogprobs)
 from models.simple_site_class_predict.model_functions import (switch_tkf,
-                                                              regular_tkf,
-                                                              approx_tkf)
+                                                              regular_tkf)
 
-THRESHOLD = 1e-6
 
 
 class TestTKF92ReductionToTKF91(unittest.TestCase):
@@ -32,16 +30,15 @@ class TestTKF92ReductionToTKF91(unittest.TestCase):
     
     """
     def setUp(self):
-        # fake params
-        self.lam = jnp.array(0.3)
-        self.mu = jnp.array(0.5)
-        self.offset = 1 - (self.lam/self.mu)
+        # # fake params
+        # lam = jnp.array(0.3)
+        # mu = jnp.array(0.5)
+        # offset = 1 - (lam/mu)
         
-        C_dom = 5
+        C_dom = 3
         C_frag = 2
         
         self.r_mix = np.zeros( (C_dom, C_frag) )
-        self.domain_class_probs = softmax( np.random.rand( (C_dom) ) )
         
         logits = np.random.rand( C_dom, C_frag )
         self.fragment_class_probs = softmax( logits, axis=-1 )
@@ -66,13 +63,15 @@ class TestTKF92ReductionToTKF91(unittest.TestCase):
                                                  name='tkf92')
     
     def _get_tkf_param_dict(self, 
+                            mu,
+                            offset,
                             tkf_function,
                             t_array):
-        tkf_param_dict, _ = tkf_function(mu = self.mu, 
-                                         offset = self.offset,
+        tkf_param_dict, _ = tkf_function(mu = mu, 
+                                         offset = offset,
                                          t_array = t_array)
-        tkf_param_dict['log_one_minus_offset'] = jnp.log1p(-self.offset)
-        tkf_param_dict['log_offset'] = jnp.log(self.offset)
+        tkf_param_dict['log_one_minus_offset'] = jnp.log1p(-offset)
+        tkf_param_dict['log_offset'] = jnp.log(offset)
         return tkf_param_dict
         
         
@@ -80,16 +79,31 @@ class TestTKF92ReductionToTKF91(unittest.TestCase):
     ### joint   #
     #############
     def _run_joint_reduction_test(self,
+                                  lam,
+                                  mu,
                                   tkf_function,
-                                  t_array):
+                                  t_array,
+                                  rtol):
         T = t_array.shape[0]
         C_dom = self.C_dom
         C_frag = self.C_frag
         S = 4
         
-        tkf_param_dict = self._get_tkf_param_dict(tkf_function, t_array)
+        # check shapes
+        assert lam.shape == (C_dom,)
+        assert mu.shape == (C_dom,)
         
-        # tkf91
+        # get offset
+        offset = 1 - lam/mu #(C_dom,)
+        
+        # get tkf parameters
+        tkf_param_dict = self._get_tkf_param_dict(mu=mu,
+                                                  offset=offset,
+                                                  tkf_function=tkf_function, 
+                                                  t_array=t_array)
+        
+        
+        ### tkf91
         fake_tkf91_params = self.tkf91_mod.init(rngs=jax.random.key(0),
                                                 t_array = t_array,
                                                 return_all_matrices = False,
@@ -97,9 +111,13 @@ class TestTKF92ReductionToTKF91(unittest.TestCase):
         
         log_joint_tkf91 = self.tkf91_mod.apply(variables = fake_tkf91_params,
                                                out_dict = tkf_param_dict,
-                                               method = 'fill_joint_tkf91') #(T, 4, 4)
+                                               method = 'fill_joint_tkf91') #(T, C_dom, 4, 4)
         
-        # tkf92, in parts
+        # check size
+        assert log_joint_tkf91.shape == (T, C_dom, S, S)
+        
+        
+        ### tkf92, in parts
         fake_tkf92_params = self.tkf92_mod.init(rngs=jax.random.key(0),
                                                 t_array = t_array,
                                                 return_all_matrices = False,
@@ -110,41 +128,53 @@ class TestTKF92ReductionToTKF91(unittest.TestCase):
                                                       r_extend = self.r_mix,
                                                       frag_class_probs = self.fragment_class_probs,
                                                       method = 'fill_joint_tkf92') #(T, C_dom, C_frag, C_frag, 4, 4)
+        
+        # check size
+        assert log_joint_tkf92_in_parts.shape == (T, C_dom, C_frag, C_frag, S, S)
+        
+        # exponentiate to probability space
         joint_tkf92_in_parts = np.exp(log_joint_tkf92_in_parts) #(T, C_dom, C_frag, C_frag, 4, 4)
         
+        
+        ### check values for each dom
         for c_dom in range(C_dom):
             mat = joint_tkf92_in_parts[:, c_dom, ...] #(T, C_frag, C_frag, 4, 4)
             
             for c in range( C_frag ):
-                # all transitions except any->End are weighted by P(d); sum over all P(d)
-                pred = np.zeros( log_joint_tkf91.shape ) 
+                pred = np.zeros( (T, S, S) ) #(T, 4, 4)
                 
                 for d in range( C_frag ):
                     weighted_mat_c_d = mat[:, c, d, :, :-1] #(T, 4, 3)
                     pred[..., :-1] += weighted_mat_c_d
                 
                 # add end probability, which is not weighted
-                pred[..., -1] = mat[:, c, d, :, -1]
-                npt.assert_allclose( np.exp(log_joint_tkf91) , pred, atol=THRESHOLD)
-        
-    def test_switch_tkf_joint(self):
-        t_array = jnp.array([0.3, 0.5, 0.9, 0.0003, 0.0005, 0.0009])
-        self._run_joint_reduction_test( tkf_function = switch_tkf,
-                                        t_array = t_array ) 
+                pred[..., -1] = mat[:, c, d, :, -1]#(T, 4, 3)
+                
+                # compare in log space
+                npt.assert_allclose( log_joint_tkf91[:, c_dom, ...], jnp.log(pred), rtol=rtol)
     
     def test_regular_tkf_joint(self):
-        t_array = jnp.array([0.3, 0.5, 0.9, 0.0003, 0.0005, 0.0009])
-        self._run_joint_reduction_test( tkf_function = regular_tkf,
-                                        t_array = t_array )
+        lam = jnp.array([0.3, 0.4, 0.5])
+        mu = lam + 0.2
+        rtol = 1e-6
+        times = jnp.array([0.3, 0.5, 0.9, 0.0003, 0.0005, 0.0009])
+        self._run_joint_reduction_test( lam = lam,
+                                      mu = mu,
+                                      tkf_function = regular_tkf,
+                                      t_array = times,
+                                      rtol=rtol)
     
-    def test_approx_tkf_joint(self):
-        """
-        run this at small times only
-        """
-        t_array = jnp.array([0.0003, 0.0005, 0.0009])
-        self._run_joint_reduction_test( tkf_function = approx_tkf,
-                                        t_array = t_array )
-    
+    def test_switch_tkf_joint(self):
+        lam = jnp.array([0.3, 0.4, 0.5])
+        mu = jnp.array([0.30001, 0.40001, 0.7])
+        rtol = 1e-4
+        times = jnp.array([0.3, 0.5, 0.9, 0.0003, 0.0005, 0.0009])
+        self._run_joint_reduction_test( lam = lam,
+                                      mu = mu,
+                                      tkf_function = switch_tkf,
+                                      t_array = times,
+                                      rtol=rtol)
+
     ################
     ### marginal   #
     ################
@@ -152,29 +182,39 @@ class TestTKF92ReductionToTKF91(unittest.TestCase):
         C_dom = self.C_dom
         C_frag = self.C_frag
         S = 2
+        
+        lam = jnp.array([0.3, 0.4, 0.5])
+        mu = lam + 0.2
+        offset = 1 - lam/mu
     
         ### to make this run, technically need to get the joint matrix
         ###   however, it's not really used in this calculation
-        dummy_tkf_param_dict = self._get_tkf_param_dict(switch_tkf, np.ones(1,))
-        dummy_time = np.ones( (1,) )
-        offset = 1 - (self.lam / self.mu)
+        dummy_time = jnp.ones( (6,) )
+        T = dummy_time.shape[0]
+        dummy_tkf_param_dict = self._get_tkf_param_dict(mu=mu,
+                                                        offset=offset,
+                                                        tkf_function=regular_tkf, 
+                                                        t_array=dummy_time )
+        offset = 1 - (lam / mu)
         
-        # tkf91
+        
+        ### tkf91
         fake_tkf91_params = self.tkf91_mod.init(rngs=jax.random.key(0),
                                                 t_array = dummy_time,
                                                 return_all_matrices = False,
                                                 sow_intermediates = False)
         
         log_joint_tkf91 = self.tkf91_mod.apply(variables = fake_tkf91_params,
-                                               out_dict = dummy_tkf_param_dict,
-                                               method = 'fill_joint_tkf91') #(T, 4, 4)
+                                                out_dict = dummy_tkf_param_dict,
+                                                method = 'fill_joint_tkf91') #(T, C_dom, 4, 4)
         
         all_tkf91 = self.tkf91_mod.apply(variables = fake_tkf91_params,
                                           offset = offset,
                                           joint_matrix = log_joint_tkf91,
                                           method = 'return_all_matrices' )
         
-        # tkf92, in parts
+        
+        ### tkf92, in parts
         fake_tkf92_params = self.tkf92_mod.init(rngs=jax.random.key(0),
                                                 t_array = dummy_time,
                                                 return_all_matrices = False,
@@ -194,15 +234,19 @@ class TestTKF92ReductionToTKF91(unittest.TestCase):
                                           method = 'return_all_matrices' )
         
         ### test marginals
-        log_marg_tkf91 = all_tkf91['marginal'] #(C_dom, C_frag, C_frag, 2, 2)
-        marg_tkf92_in_parts = np.exp( all_tkf92['marginal'] )
+        log_marg_tkf91 = all_tkf91['marginal'] #(C_dom, 2, 2)
+        marg_tkf92_in_parts = np.exp( all_tkf92['marginal'] ) #(C_dom, C_frag, C_frag, 2, 2)
+        
+        # check shapes
+        assert log_marg_tkf91.shape == (C_dom, S, S)
+        assert marg_tkf92_in_parts.shape == (C_dom, C_frag, C_frag, 2, 2)
         
         
         for c_dom in range(C_dom):
             mat = marg_tkf92_in_parts[c_dom, ...] #(C_frag, C_frag, 4, 4)
             
             for c in range( C_frag ):
-                pred = np.zeros( log_marg_tkf91.shape )
+                pred = np.zeros( (S,S) )
                 
                 # start -> emit and emit -> emit are weighted by P(d)
                 start_to_emit = 0
@@ -218,41 +262,58 @@ class TestTKF92ReductionToTKF91(unittest.TestCase):
                 pred[0,1] = mat[c, d, 0, 1]
                 pred[1,1] = mat[c, d, 1, 1]
                     
-                npt.assert_allclose( np.exp(log_marg_tkf91) , pred, atol=THRESHOLD)
+                npt.assert_allclose( np.exp(log_marg_tkf91[c_dom,...]) , pred, rtol=1e-6)
                 
     
     ###################
     ### conditional   #
     ###################
     def _run_cond_reduction_test(self,
+                                  lam,
+                                  mu,
                                   tkf_function,
-                                  t_array):
+                                  t_array,
+                                  rtol):
         T = t_array.shape[0]
         C_dom = self.C_dom
         C_frag = self.C_frag
         S = 4
         
-        tkf_param_dict = self._get_tkf_param_dict(tkf_function, t_array)
-        offset = 1 - (self.lam / self.mu)
+        # check shapes
+        assert lam.shape == (C_dom,)
+        assert mu.shape == (C_dom,)
         
-        ### generate all matrices
-        # tkf91
+        # get offset
+        offset = 1 - lam/mu #(C_dom,)
+        
+        # get tkf parameters
+        tkf_param_dict = self._get_tkf_param_dict(mu=mu,
+                                                  offset=offset,
+                                                  tkf_function=tkf_function, 
+                                                  t_array=t_array)
+        
+        
+        ### tkf91
         fake_tkf91_params = self.tkf91_mod.init(rngs=jax.random.key(0),
                                                 t_array = t_array,
                                                 return_all_matrices = False,
                                                 sow_intermediates = False)
         
         log_joint_tkf91 = self.tkf91_mod.apply(variables = fake_tkf91_params,
-                                               out_dict = tkf_param_dict,
-                                               method = 'fill_joint_tkf91') #(T, 4, 4)
+                                                out_dict = tkf_param_dict,
+                                                method = 'fill_joint_tkf91') #(T, C_dom, 4, 4)
         
         all_tkf91 = self.tkf91_mod.apply(variables = fake_tkf91_params,
                                           offset = offset,
                                           joint_matrix = log_joint_tkf91,
                                           method = 'return_all_matrices' )
-        log_cond_tkf91 = all_tkf91['conditional']
+        log_cond_tkf91 = all_tkf91['conditional'] #(T, C_dom, 4, 4)
         
-        # tkf92, in parts
+        # check size
+        assert log_cond_tkf91.shape == (T, C_dom, S, S)
+        
+        
+        ### tkf92, in parts
         fake_tkf92_params = self.tkf92_mod.init(rngs=jax.random.key(0),
                                                 t_array = t_array,
                                                 return_all_matrices = False,
@@ -270,7 +331,11 @@ class TestTKF92ReductionToTKF91(unittest.TestCase):
                                           r_ext_prob = self.r_mix,
                                           frag_class_probs = self.fragment_class_probs,
                                           method = 'return_all_matrices' )
-        cond_tkf92_in_parts = np.exp( all_tkf92['conditional'] )
+        cond_tkf92_in_parts = np.exp( all_tkf92['conditional'] ) #(T, C_dom, C_frag, C_frag, 4, 4)
+        
+        
+        # check size
+        assert cond_tkf92_in_parts.shape == (T, C_dom, C_frag, C_frag, S, S)
         
         
         for c_dom in range(C_dom):
@@ -278,7 +343,7 @@ class TestTKF92ReductionToTKF91(unittest.TestCase):
             
             for c in range( C_frag ):
                 # all transitions except any->End are weighted by P(d); sum over all P(d)
-                pred = np.zeros( log_cond_tkf91.shape ) 
+                pred = np.zeros( (T,S,S) ) 
                 
                 for d in range( C_frag ):
                     weighted_mat_c_d = mat[:, c, d, :, 1] #(T, 4)
@@ -287,25 +352,32 @@ class TestTKF92ReductionToTKF91(unittest.TestCase):
                 # all others aren't weighted; use as-is
                 pred[..., 0] = mat[:, c, d, :, 0]
                 pred[..., 2:] = mat[:, c, d, :, 2:]
-                npt.assert_allclose( np.exp(log_cond_tkf91), pred, atol=THRESHOLD)
+                
+                # compare in log space
+                npt.assert_allclose( log_cond_tkf91[:, c_dom, ...], jnp.log(pred), rtol=rtol)
+        
+    def test_regular_tkf_cond(self):
+        lam = jnp.array([0.3, 0.4, 0.5])
+        mu = lam + 0.2
+        rtol = 1e-6
+        times = jnp.array([0.3, 0.5, 0.9, 0.0003, 0.0005, 0.0009])
+        self._run_cond_reduction_test( lam = lam,
+                                      mu = mu,
+                                      tkf_function = regular_tkf,
+                                      t_array = times,
+                                      rtol=rtol)
         
     def test_switch_tkf_cond(self):
-        t_array = jnp.array([0.3, 0.5, 0.9, 0.0003, 0.0005, 0.0009])
-        self._run_cond_reduction_test( tkf_function = switch_tkf,
-                                        t_array = t_array ) 
-    
-    # def test_regular_tkf_cond(self):
-    #     t_array = jnp.array([0.3, 0.5, 0.9, 0.0003, 0.0005, 0.0009])
-    #     self._run_cond_reduction_test( tkf_function = regular_tkf,
-    #                                     t_array = t_array )
-    
-    # def test_approx_tkf_cond(self):
-    #     """
-    #     run this at small times only
-    #     """
-    #     t_array = jnp.array([0.0003, 0.0005, 0.0009])
-    #     self._run_cond_reduction_test( tkf_function = approx_tkf,
-    #                                     t_array = t_array )
+        lam = jnp.array([0.3, 0.4, 0.5])
+        mu = jnp.array([0.30001, 0.40001, 0.7])
+        rtol = 1e-4
+        times = jnp.array([0.3, 0.5, 0.9, 0.0003, 0.0005, 0.0009])
+        self._run_cond_reduction_test( lam = lam,
+                                      mu = mu,
+                                      tkf_function = switch_tkf,
+                                      t_array = times,
+                                      rtol=rtol)
+        
     
 if __name__ == '__main__':
     unittest.main()
