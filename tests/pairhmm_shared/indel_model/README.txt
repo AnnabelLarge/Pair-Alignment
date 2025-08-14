@@ -67,15 +67,10 @@ functions tested:
 flax modules tested:
   - transition_models.TKF91TransitionLogprobs.fill_joint_tkf92
   
-  
-test_tkf92_domain_mix_joint_cond_marg
----------------------------------------
-(repeat test_tkf92_joint_cond_marg, but now repeated C_domain different times)
-
 
 test_tkf92_frag_mix_joint_cond_marg
 -------------------------------------
-CALCULATION TESTED: TKF92 solution, but with different domain and fragment mixtures
+CALCULATION TESTED: TKF92 solution, but with different fragment mixtures
 
 ABOUT: compare my implementation of mixture of TKF92 fragments against hand-done calculations
 

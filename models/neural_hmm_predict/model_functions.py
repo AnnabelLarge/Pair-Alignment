@@ -563,8 +563,8 @@ def switch_tkf( mu,
         #   1-gamma or not (meh)
         valid_frac = gamma_log_numerator_indv < gamma_log_denom
         large_product = mu_indv * offset_indv * t > 1e-3
-        log_diff_large = jnp.abs(gamma_log_numerator_indv - gamma_log_denom) > 0.1
-        approx_formula_will_fail = (0.5*mu_indv*t) > 1.0
+        log_diff_large = jnp.abs(gamma_log_numerator_indv - gamma_log_denom) > 0.01 #prev val was 0.1
+        approx_formula_will_fail = (0.5*mu_indv*t) > 1.0 
         
         cond1 = large_product
         cond2 = ~large_product & log_diff_large

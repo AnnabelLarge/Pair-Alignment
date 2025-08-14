@@ -18,7 +18,6 @@ import unittest
 from models.simple_site_class_predict.transition_models import TKF92TransitionLogprobs
 from models.simple_site_class_predict.model_functions import (switch_tkf,
                                                               regular_tkf,
-                                                              approx_tkf,
                                                               get_tkf92_single_seq_marginal_transition_logprobs,
                                                               get_cond_transition_logprobs)
 

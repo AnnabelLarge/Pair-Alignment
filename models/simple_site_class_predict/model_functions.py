@@ -520,53 +520,60 @@ def true_beta(oper):
     """
     the true formula for beta, assuming mu = lambda * (1 - offset)
     """
+    # t is either single float, or (T, 1)
+    # mu, offset are either single float, or (1,C_dom)
     mu, offset, t = oper
     
     # log( (1 - offset) * (exp(mu*offset*t) - 1) )
-    log_num = jnp.log1p(-offset) + log_x_minus_one( mu*offset*t )
+    operand = mu*offset*t #float or (T, C_dom)
+    log_num = jnp.log1p(-offset) + log_x_minus_one( operand ) #float or (T, C_dom)
     
     # x = mu*offset*t
     # y = jnp.log( 1 - offset )
     # logsumexp with coeffs does: 
     #   log( exp(x) - exp(y) ) = log( exp(mu*offset*t) - (1-offset) )
-    log_one_minus_offset = jnp.broadcast_to( jnp.log1p(-offset), t.shape )
-    log_denom = logsumexp_with_arr_lst( [mu*offset*t, log_one_minus_offset],
-                                    coeffs = jnp.array([1.0, -1.0]) )
+    log_one_minus_offset = jnp.broadcast_to( jnp.log1p(-offset), operand.shape ) #float or (T, C_dom)
+    log_denom = logsumexp_with_arr_lst( [operand, log_one_minus_offset],
+                                    coeffs = jnp.array([1.0, -1.0]) ) #float or (T, C_dom)
     
-    return log_num - log_denom
+    return log_num - log_denom #float or (T, C_dom)
 
 def approx_beta(oper):
     """
     as lambda approaches mu (or as time shrinks to small values), use 
       first-order taylor approximation
     """
+    # t is either single float, or (T, 1)
+    # mu, offset are either single float, or (1,C_dom)
     mu, offset, t = oper
     
     # log(  (1 - offset) * mu * t  )
-    log_num = jnp.log1p(-offset) + jnp.log(mu) + jnp.log(t)
+    log_num = jnp.log1p(-offset) + jnp.log(mu) + jnp.log(t) #float or (T, C_dom)
     
     # log( mu*t + 1 )
-    log_denom = jnp.log1p( mu * t )
+    log_denom = jnp.log1p( mu * t ) #float or (T, C_dom)
     
-    return log_num - log_denom
+    return log_num - log_denom #float or (T, C_dom)
 
 def approx_one_minus_gamma(oper):
     """
     where 1 - gamma is unstable, use this second-order taylor approximation
         instead
     """
+    # t is either single float, or (T, 1)
+    # mu, offset are either single float, or (1,C_dom)
     mu, offset, t = oper
     
     # log( 1 + 0.5*mu*offset*t )
-    log_num = jnp.log1p( 0.5 * mu * offset * t )
+    log_num = jnp.log1p( 0.5 * mu * offset * t ) # float or (T, C_dom)
     
     # log( (1 - 0.5*mu*t) (mu*t + 1) )
     # there's another squared term here:
     #   0.5 * offset * (mu*t)**2
     # but it's so small that it's negligible
-    log_denom = jnp.log1p( -0.5*mu*t ) + jnp.log1p( mu*t )
+    log_denom = jnp.log1p( -0.5*mu*t ) + jnp.log1p( mu*t ) # float or (T, C_dom)
     
-    return log_num - log_denom
+    return log_num - log_denom # float or (T, C_dom)
 
 def switch_tkf( mu, offset, t_array ):
     """
@@ -574,80 +581,111 @@ def switch_tkf( mu, offset, t_array ):
 
     use real formulas where you can, and taylor-approximations where you can't
     
+    C_dom: number of domain mixes
     T: number of branch lengths in t_array
     
-    returns:
+    Arguments:
+    -----------
+    mu, offset : ArrayLike, (C_dom,)
+    t_array : ArrayLike, (T,)
+    
+    
+    Returns:
     --------
     out_dict: the tkf values
-        out_dict['log_alpha']: ArrayLike[float32], (T,)
-        out_dict['log_one_minus_alpha']: ArrayLike[float32], (T,)
-        out_dict['log_beta']: ArrayLike[float32], (T,)
-        out_dict['log_one_minus_beta']: ArrayLike[float32], (T,)
-        out_dict['log_gamma']: ArrayLike[float32], (T,)
-        out_dict['log_one_minus_gamma']: ArrayLike[float32], (T,)
+        out_dict['log_alpha']: ArrayLike[float32], (T, C_dom)
+        out_dict['log_one_minus_alpha']: ArrayLike[float32], (T, C_dom)
+        out_dict['log_beta']: ArrayLike[float32], (T, C_dom)
+        out_dict['log_one_minus_beta']: ArrayLike[float32], (T, C_dom)
+        out_dict['log_gamma']: ArrayLike[float32], (T, C_dom)
+        out_dict['log_one_minus_gamma']: ArrayLike[float32], (T, C_dom)
     
     approx_flags_dict: where you used approx formulas
-        out_dict['log_one_minus_alpha']: ArrayLike[bool], (T,)
-        out_dict['log_beta']: ArrayLike[bool], (T,)
-        out_dict['log_one_minus_gamma']: ArrayLike[bool], (T,)
-        out_dict['log_gamma']: ArrayLike[bool], (T,)
+        out_dict['log_one_minus_alpha']: ArrayLike[bool], (T*C_dom)
+        out_dict['log_beta']: ArrayLike[bool], (T*C_dom)
+        out_dict['log_one_minus_gamma']: ArrayLike[bool], (T*C_dom)
+        out_dict['log_gamma']: ArrayLike[bool], (T*C_dom)
     
     """
+    T = t_array.shape[0]
+    C_dom = mu.shape[0]
+    
+    t_array = t_array[:, None] #(T, 1)
+    mu = mu[None, :] #(1, C_dom)
+    offset = offset[None, :] #(1, C_dom)
+    
+    
     ######################################################
     ### Some operations can be done with entire arrays   #
     ######################################################
     ### alpha = exp(-mu*t)
     ### log(alpha) = -mu*t
-    log_alpha = -mu*t_array
+    log_alpha = -mu*t_array #(T, C_dom)
     
     
     ### start of calculation for 1 - gamma
     # numerator:
     # log( exp(mu*offset*t) - 1 )
-    gamm_full_log_num = log_x_minus_one( log_x = mu*offset*t_array )
+    gamma_operand = mu*offset*t_array #(T, C_dom)
+    gamma_full_log_num = log_x_minus_one( log_x = gamma_operand ) #(T, C_dom)
     
     # denominator, term 1
     # x = mu*offset*t
     # y = jnp.log( 1 - offset )
     # logsumexp with coeffs does: 
     #   log( exp(x) - exp(y) ) = log( exp(mu*offset*t) - (1-offset) )
-    constant = jnp.broadcast_to(jnp.log1p(-offset), t_array.shape)
-    gamma_full_log_denom_term1 = logsumexp_with_arr_lst( [mu*offset*t_array, constant],
-                                              coeffs = jnp.array([1.0, -1.0]) )
+    constant = jnp.broadcast_to(jnp.log1p(-offset), gamma_operand.shape) #(T, C_dom)
+    gamma_full_log_denom_term1 = logsumexp_with_arr_lst( [gamma_operand, constant],
+                                              coeffs = jnp.array([1.0, -1.0]) ) #(T, C_dom)
     
     
     ###############################################################
     ### Most have to be done one-at-a-time, due to jax.lax.cond   #
     ###############################################################
-    def tkf_params_per_timepoint(log_alpha_at_t, 
-                                 gamma_log_numerator_at_t,
-                                 gamma_log_denom_term1_at_t,
-                                 t):
+    # def tkf_params_per_timepoint(log_alpha_at_t, 
+    #                              gamma_log_numerator_at_t,
+    #                              gamma_log_denom_term1_at_t,
+    #                              t):
+    def tkf_params_per_datapoint(idx_tup):
+        # unpack indices
+        t_idx, c_idx = idx_tup
+        
+        # indel params
+        time_t_c = t_array[t_idx,0] #float
+        mu_t_c = mu[0, c_idx] #float
+        offset_t_c = offset[0, c_idx] #float
+        
+        # derived tkf params
+        log_alpha_t_c  = log_alpha[t_idx, c_idx] #float
+        gamma_log_numerator_t_c = gamma_full_log_num[t_idx, c_idx] #float
+        gamma_log_denom_term1_t_c = gamma_full_log_denom_term1[t_idx, c_idx] #float
+        
+        
         ### 1 - alpha
-        log_one_minus_alpha = stable_log_one_minus_x(log_x = log_alpha_at_t)
+        log_one_minus_alpha = stable_log_one_minus_x(log_x = log_alpha_t_c)
         
         
         ### beta, 1 - beta
         # beta
-        log_beta = jax.lax.cond( mu*offset*t > SMALL_POSITIVE_NUM ,
-                                  true_beta,
-                                  approx_beta,
-                                  (mu, offset, t) )  
+        log_beta = jax.lax.cond( mu_t_c * offset_t_c * time_t_c > SMALL_POSITIVE_NUM ,
+                                 true_beta,
+                                 approx_beta,
+                                 (mu_t_c, offset_t_c, time_t_c) ) 
         
-        # regardless of approx or not, 1-beta calculated from beta
-        log_one_minus_beta = log_one_minus_x(log_x = log_beta)
+        # 1-beta calculated from beta
+        log_one_minus_beta = stable_log_one_minus_x(log_x = log_beta)
         
         
         ### 1 - gamma, gamma
         # need log(1 - alpha) to finish calculating denominator for log(1 - gamma)
-        gamma_log_denom = gamma_log_denom_term1_at_t + log_one_minus_alpha
+        gamma_log_denom = gamma_log_denom_term1_t_c + log_one_minus_alpha
         
         # ad hoc series of conditionals to determine if you approx
         #   1-gamma or not (meh)
-        valid_frac = gamma_log_numerator_at_t < gamma_log_denom
-        large_product = mu * offset * t > 1e-3
-        log_diff_large = jnp.abs(gamma_log_numerator_at_t - gamma_log_denom) > 0.1
-        approx_formula_will_fail = (0.5*mu*t) > 1.0
+        valid_frac = gamma_log_numerator_t_c < gamma_log_denom
+        large_product = mu_t_c * offset_t_c * time_t_c > 1e-3
+        log_diff_large = jnp.abs(gamma_log_numerator_t_c - gamma_log_denom) > 0.01 #prev val was 0.1
+        approx_formula_will_fail = (0.5 * mu_t_c * time_t_c) > 1.0
         
         cond1 = large_product
         cond2 = ~large_product & log_diff_large
@@ -656,9 +694,9 @@ def switch_tkf( mu, offset, t_array ):
         
         # the final value
         log_one_minus_gamma = jax.lax.cond( use_real_function,
-                                            lambda _: gamma_log_numerator_at_t - gamma_log_denom,
+                                            lambda _: gamma_log_numerator_t_c - gamma_log_denom,
                                             approx_one_minus_gamma,
-                                            (mu, offset, t) )
+                                            (mu_t_c, offset_t_c, time_t_c) )
         
         # gamma
         log_gamma = stable_log_one_minus_x(log_x = log_one_minus_gamma)
@@ -671,16 +709,15 @@ def switch_tkf( mu, offset, t_array ):
                     'log_gamma': log_gamma,
                     'log_one_minus_gamma': log_one_minus_gamma}
         
-        used_one_minus_alpha_approx = ~(log_alpha_at_t < -SMALL_POSITIVE_NUM)
-        used_beta_approx = ~(mu*offset*t > SMALL_POSITIVE_NUM)
+        used_one_minus_alpha_approx = ~(log_alpha_t_c < -SMALL_POSITIVE_NUM)
+        used_beta_approx = ~(mu_t_c * offset_t_c * time_t_c > SMALL_POSITIVE_NUM)
         used_log_one_minus_gamma_approx = ~use_real_function
         used_log_gamma_approx = ~(log_one_minus_gamma < -SMALL_POSITIVE_NUM)
         
-        # if you used an approx anywhere, save the time
+        
+        # record some approximations; others aren't as interesting
         flag = used_one_minus_alpha_approx | used_beta_approx | used_log_one_minus_gamma_approx | used_log_gamma_approx
-        t_to_add = jnp.where( flag,
-                              t,
-                              -1. )
+        t_to_add = jnp.where( flag, time_t_c, -1. )
         
         approx_flags_dict = {'log_one_minus_alpha': used_one_minus_alpha_approx,
                               'log_beta': used_beta_approx,
@@ -694,16 +731,24 @@ def switch_tkf( mu, offset, t_array ):
         
         return out_dict, approx_flags_dict
     
-    vmapped_tkf_params_per_timepoint = jax.vmap(tkf_params_per_timepoint,
-                                                in_axes=(0,0,0,0))
-    out = vmapped_tkf_params_per_timepoint(log_alpha,
-                                           gamm_full_log_num,
-                                           gamma_full_log_denom_term1,
-                                           t_array)
+    vmapped_tkf_params_per_datapoint = jax.vmap(tkf_params_per_datapoint, in_axes=0)
+    idx_arr = jnp.stack(jnp.meshgrid(jnp.arange(T), jnp.arange(C_dom), indexing='ij'), axis=-1).reshape(-1, 2) #(T*C_dom, 2)
+    
+    # all terms of out_dict are (T*C_dom,)
+    out = vmapped_tkf_params_per_datapoint(idx_arr)
     out_dict, approx_flags_dict = out
     del out
     
+    # explicitly flatten all outputs
+    out_dict['log_one_minus_alpha'] = jnp.reshape(out_dict['log_one_minus_alpha'], (T, C_dom)) #(T, C_dom)
+    out_dict['log_beta'] = jnp.reshape(out_dict['log_beta'], (T, C_dom)) #(T, C_dom)
+    out_dict['log_one_minus_beta'] = jnp.reshape(out_dict['log_one_minus_beta'], (T, C_dom)) #(T, C_dom)
+    out_dict['log_gamma'] = jnp.reshape(out_dict['log_gamma'], (T, C_dom)) #(T, C_dom)
+    out_dict['log_one_minus_gamma'] = jnp.reshape(out_dict['log_one_minus_gamma'], (T, C_dom)) #(T, C_dom)
+    
+    # add log_alpha and return
     out_dict['log_alpha'] = log_alpha
+    
     return out_dict, approx_flags_dict
 
 
@@ -718,20 +763,28 @@ def regular_tkf( mu, offset, t_array ):
     returns:
     --------
     out_dict: the tkf values
-        out_dict['log_alpha']: ArrayLike[float32], (T,)
-        out_dict['log_one_minus_alpha']: ArrayLike[float32], (T,)
-        out_dict['log_beta']: ArrayLike[float32], (T,)
-        out_dict['log_one_minus_beta']: ArrayLike[float32], (T,)
-        out_dict['log_gamma']: ArrayLike[float32], (T,)
-        out_dict['log_one_minus_gamma']: ArrayLike[float32], (T,)
+        out_dict['log_alpha']: ArrayLike[float32], (T,C_dom)
+        out_dict['log_one_minus_alpha']: ArrayLike[float32], (T,C_dom)
+        out_dict['log_beta']: ArrayLike[float32], (T,C_dom)
+        out_dict['log_one_minus_beta']: ArrayLike[float32], (T,C_dom)
+        out_dict['log_gamma']: ArrayLike[float32], (T,C_dom)
+        out_dict['log_one_minus_gamma']: ArrayLike[float32], (T,C_dom)
     
     approx_flags_dict: None (placeholder)
     
     """
+    T = t_array.shape[0]
+    C_dom = mu.shape[0]
+    
+    t_array = t_array[:, None] #(T, 1)
+    mu = mu[None, :] #(1, C_dom)
+    offset = offset[None, :] #(1, C_dom)
+    
+    
     ### alpha
     # alpha = exp(-mu*t)
     # log(alpha) = -mu*t
-    log_alpha = -mu*t_array
+    log_alpha = -mu*t_array #(T, C_dom)
     
     
     ### beta
@@ -740,41 +793,57 @@ def regular_tkf( mu, offset, t_array ):
     # y = jnp.log( 1 - offset )
     # logsumexp with coeffs does: 
     #   log( exp(x) - exp(y) ) = log( exp(mu*offset*t) - (1-offset) )
-    log_beta = true_beta( (mu, offset, t_array) )
-    
-    # 1 - beta; never use stable log one minus x for this
-    log_one_minus_beta = log_one_minus_x(log_x = log_beta)
+    log_beta = true_beta( (mu, offset, t_array) ) #(T, C_dom)
     
     
     ### vmap + jax.lax.cond solely for stable_log_one_minus_x function
-    def tkf_params_per_timepoint(idx):
-        log_alpha_at_this_t = log_alpha[idx]
-        log_beta_at_this_t = log_beta[idx]
+    def tkf_params_per_datapoint(idx_tup):
+        # unpack indices
+        t_idx, c_idx = idx_tup
+        
+        # indel params
+        time_t_c = t_array[t_idx,0] #float
+        mu_t_c = mu[0, c_idx] #float
+        offset_t_c = offset[0, c_idx] #float
+        
+        # derived tkf params
+        log_alpha_t_c  = log_alpha[t_idx, c_idx] #float
+        log_beta_t_c = log_beta[t_idx, c_idx] #float
         
         # 1 - alpha
-        log_one_minus_alpha = stable_log_one_minus_x(log_x = log_alpha_at_this_t)
+        log_one_minus_alpha = stable_log_one_minus_x(log_x = log_alpha_t_c)
+        
+        # 1 - beta
+        log_one_minus_beta = log_one_minus_x(log_x = log_beta_t_c) 
         
         # 1 - gamma
-        log_one_minus_gamma = (log_beta_at_this_t - 
-                               ( jnp.log( 1-offset) + log_one_minus_alpha )
+        log_one_minus_gamma = (log_beta_t_c - 
+                               ( jnp.log( 1-offset_t_c) + log_one_minus_alpha )
                                )
         
         # gamma
         log_gamma = stable_log_one_minus_x(log_x = log_one_minus_gamma)
         
         return {'log_one_minus_alpha': log_one_minus_alpha,
+                'log_one_minus_beta': log_one_minus_beta,
                 'log_gamma': log_gamma,
                 'log_one_minus_gamma': log_one_minus_gamma}
     
-    vmapped_tkf_params_per_timepoint = jax.vmap(tkf_params_per_timepoint)
-    to_add = vmapped_tkf_params_per_timepoint( jnp.arange(t_array.shape[0]) )
-        
+    vmapped_tkf_params_per_datapoint = jax.vmap(tkf_params_per_datapoint)
+    idx_arr = jnp.stack(jnp.meshgrid(jnp.arange(T), jnp.arange(C_dom), indexing='ij'), axis=-1).reshape(-1, 2) #(T*C_dom, 2)
     
-    ### output
-    out_dict = {'log_alpha': log_alpha,
-                'log_beta': log_beta,
-                'log_one_minus_beta': log_one_minus_beta}
-    out_dict = {**out_dict, **to_add}
+    # all terms of out_dict are (T*C_dom,)
+    out_dict = vmapped_tkf_params_per_datapoint( idx_arr )
+    
+    # explicitly flatten all outputs
+    out_dict['log_one_minus_alpha'] = jnp.reshape(out_dict['log_one_minus_alpha'], (T, C_dom)) #(T, C_dom)
+    out_dict['log_one_minus_beta'] = jnp.reshape(out_dict['log_one_minus_beta'], (T, C_dom)) #(T, C_dom)
+    out_dict['log_gamma'] = jnp.reshape(out_dict['log_gamma'], (T, C_dom)) #(T, C_dom)
+    out_dict['log_one_minus_gamma'] = jnp.reshape(out_dict['log_one_minus_gamma'], (T, C_dom)) #(T, C_dom)
+    
+    # add log_alpha and log_beta, and return
+    out_dict['log_alpha'] = log_alpha
+    out_dict['log_beta'] = log_beta
     
     return out_dict, None
 
@@ -790,16 +859,24 @@ def approx_tkf( mu, offset, t_array ):
     returns:
     --------
     out_dict: the tkf values
-        out_dict['log_alpha']: ArrayLike[float32], (T,)
-        out_dict['log_one_minus_alpha']: ArrayLike[float32], (T,)
-        out_dict['log_beta']: ArrayLike[float32], (T,)
-        out_dict['log_one_minus_beta']: ArrayLike[float32], (T,)
-        out_dict['log_gamma']: ArrayLike[float32], (T,)
-        out_dict['log_one_minus_gamma']: ArrayLike[float32], (T,)
+        out_dict['log_alpha']: ArrayLike[float32], (T,C_dom)
+        out_dict['log_one_minus_alpha']: ArrayLike[float32], (T,C_dom)
+        out_dict['log_beta']: ArrayLike[float32], (T,C_dom)
+        out_dict['log_one_minus_beta']: ArrayLike[float32], (T,C_dom)
+        out_dict['log_gamma']: ArrayLike[float32], (T,C_dom)
+        out_dict['log_one_minus_gamma']: ArrayLike[float32], (T,C_dom)
     
     approx_flags_dict: None (placeholder)
     
     """
+    T = t_array.shape[0]
+    C_dom = mu.shape[0]
+    
+    t_array = t_array[:, None] #(T, 1)
+    mu = mu[None, :] #(1, C_dom)
+    offset = offset[None, :] #(1, C_dom)
+    
+    
     ### alpha
     # alpha = exp(-mu*t)
     # log(alpha) = -mu*t
@@ -814,38 +891,53 @@ def approx_tkf( mu, offset, t_array ):
     #   log( exp(x) - exp(y) ) = log( exp(mu*offset*t) - (1-offset) )
     log_beta = approx_beta( (mu, offset, t_array) )
     
-    # 1 - beta; never use stable log one minus x for this
-    log_one_minus_beta = log_one_minus_x(log_x = log_beta)
-    
     
     ### vmap + jax.lax.cond solely for stable_log_one_minus_x function
-    def tkf_params_per_timepoint(idx):
-        t = t_array[idx]
-        log_alpha_at_this_t = log_alpha[idx]
-        log_beta_at_this_t = log_beta[idx]
+    def tkf_params_per_datapoint(idx_tup):
+        # unpack indices
+        t_idx, c_idx = idx_tup
+        
+        # indel params
+        time_t_c = t_array[t_idx,0] #float
+        mu_t_c = mu[0, c_idx] #float
+        offset_t_c = offset[0, c_idx] #float
+        
+        # derived tkf params
+        log_alpha_t_c  = log_alpha[t_idx, c_idx] #float
+        log_beta_t_c = log_beta[t_idx, c_idx] #float
         
         # 1 - alpha
-        log_one_minus_alpha = stable_log_one_minus_x(log_x = log_alpha_at_this_t)
+        log_one_minus_alpha = stable_log_one_minus_x(log_x = log_alpha_t_c)
+        
+        # 1 - beta
+        log_one_minus_beta = log_one_minus_x(log_x = log_beta_t_c) 
         
         # 1 - gamma
-        log_one_minus_gamma = approx_one_minus_gamma( (mu, offset, t) )
+        log_one_minus_gamma = approx_one_minus_gamma( (mu_t_c, offset_t_c, time_t_c) )
         
         # gamma
         log_gamma = stable_log_one_minus_x(log_x = log_one_minus_gamma)
         
         return {'log_one_minus_alpha': log_one_minus_alpha,
+                'log_one_minus_beta': log_one_minus_beta,
                 'log_gamma': log_gamma,
                 'log_one_minus_gamma': log_one_minus_gamma}
     
-    vmapped_tkf_params_per_timepoint = jax.vmap(tkf_params_per_timepoint)
-    to_add = vmapped_tkf_params_per_timepoint( jnp.arange(t_array.shape[0]) )
-        
+    vmapped_tkf_params_per_datapoint = jax.vmap(tkf_params_per_datapoint)
+    idx_arr = jnp.stack(jnp.meshgrid(jnp.arange(T), jnp.arange(C_dom), indexing='ij'), axis=-1).reshape(-1, 2) #(T*C_dom, 2)
     
-    ### output
-    out_dict = {'log_alpha': log_alpha,
-                'log_beta': log_beta,
-                'log_one_minus_beta': log_one_minus_beta}
-    out_dict = {**out_dict, **to_add}
+    # all terms of out_dict are (T*C_dom,)
+    out_dict = vmapped_tkf_params_per_datapoint( idx_arr )
+    
+    # explicitly flatten all outputs
+    out_dict['log_one_minus_alpha'] = jnp.reshape(out_dict['log_one_minus_alpha'], (T, C_dom)) #(T, C_dom)
+    out_dict['log_one_minus_beta'] = jnp.reshape(out_dict['log_one_minus_beta'], (T, C_dom)) #(T, C_dom)
+    out_dict['log_gamma'] = jnp.reshape(out_dict['log_gamma'], (T, C_dom)) #(T, C_dom)
+    out_dict['log_one_minus_gamma'] = jnp.reshape(out_dict['log_one_minus_gamma'], (T, C_dom)) #(T, C_dom)
+    
+    # add log_alpha and log_beta, and return
+    out_dict['log_alpha'] = log_alpha
+    out_dict['log_beta'] = log_beta
     
     return out_dict, None
 
@@ -862,13 +954,13 @@ def get_tkf91_single_seq_marginal_transition_logprobs(offset,
     
     Arguments
     ----------
-    offset : ArrayLike, ()
+    offset : ArrayLike, (C_dom,)
         1 - (lam/mu)
     
         
     Returns
     -------
-    log_arr : ArrayLike, (2,2)
+    log_arr : ArrayLike, (C_dom,2,2)
         
         emit -> emit   |  emit -> end
         -------------------------------
@@ -878,9 +970,11 @@ def get_tkf91_single_seq_marginal_transition_logprobs(offset,
     # lam / mu = 1 - offset
     log_lam_div_mu = jnp.log1p(-offset)
     log_one_minus_lam_div_mu = jnp.log(offset)
-
-    log_arr = jnp.array( [[log_lam_div_mu, log_one_minus_lam_div_mu],
-                          [log_lam_div_mu, log_one_minus_lam_div_mu]] ) #(2,2)
+    
+    log_arr = jnp.stack([ jnp.stack([log_lam_div_mu, log_one_minus_lam_div_mu], axis=-1),
+                          jnp.stack([log_lam_div_mu, log_one_minus_lam_div_mu], axis=-1)
+                         ], axis=-2 ) #(C_dom, 2, 2)
+    
     return log_arr
 
 
@@ -898,7 +992,7 @@ def get_tkf92_single_seq_marginal_transition_logprobs(offset,
     
     Arguments
     ----------
-    offset : ArrayLike, ()
+    offset : ArrayLike, (C_dom,)
         1 - (lam/mu)
     
     r_ext_prob : ArrayLike, (C_dom, C_frag)
@@ -920,6 +1014,8 @@ def get_tkf92_single_seq_marginal_transition_logprobs(offset,
     C_dom = frag_class_probs.shape[0] #domain-level classes
     C_frag = frag_class_probs.shape[1] #fragment-level classes
     
+    offset = offset[:, None] #(C_dom, 1)
+    
     ### move values to log space
     log_frag_class_prob = safe_log(frag_class_probs) #(C_dom, C_{frag_to})
     log_r_ext_prob = safe_log(r_ext_prob) #(C_dom, C_{frag_from})
@@ -927,8 +1023,8 @@ def get_tkf92_single_seq_marginal_transition_logprobs(offset,
     
     # lam / mu = 1 - offset
     # offset = 1 - (lam/mu)
-    log_lam_div_mu = jnp.log1p(-offset) #float
-    log_one_minus_lam_div_mu = jnp.log(offset) #float
+    log_lam_div_mu = jnp.log1p(-offset) # (C_dom, 1)
+    log_one_minus_lam_div_mu = jnp.log(offset) # (C_dom, 1)
     
     
     ### build cells
@@ -951,7 +1047,7 @@ def get_tkf92_single_seq_marginal_transition_logprobs(offset,
     
     # cell 4: start -> end
     # (1-lam/mu)
-    log_cell4 = jnp.broadcast_to( log_one_minus_lam_div_mu, (C_dom, C_frag, C_frag) ) # (C_dom, C_{frag_from}, C_{frag_to})
+    log_cell4 = jnp.broadcast_to( log_one_minus_lam_div_mu[...,None], (C_dom, C_frag, C_frag) ) # (C_dom, C_{frag_from}, C_{frag_to})
     
 
     ### build matrix

@@ -15,16 +15,13 @@ import numpy.testing as npt
 import unittest
 
 from models.simple_site_class_predict.model_functions import (switch_tkf,
-                                                              regular_tkf,
-                                                              approx_tkf)
+                                                              regular_tkf)
 
 
-THRESHOLD = 1e-6
-
-### function from Ian
+### function from Ian (in numpy, so always float64)
 def TKF_coeffs (lam, mu, t):
-    alpha = jnp.exp(-mu*t)
-    beta = (lam*(jnp.exp(-lam*t)-jnp.exp(-mu*t))) / (mu*jnp.exp(-lam*t)-lam*jnp.exp(-mu*t))
+    alpha = np.exp(-mu*t)
+    beta = (lam*(np.exp(-lam*t)-np.exp(-mu*t))) / (mu*np.exp(-lam*t)-lam*np.exp(-mu*t))
     gamma = 1 - ( (mu * beta) / ( lam * (1-alpha) ) )
     return alpha, beta, gamma
 
@@ -37,59 +34,72 @@ class TestOriginalTKFParamFns(unittest.TestCase):
         original function
     
     """
-    def setUp(self):
-        self.lam = jnp.array(0.3)
-        self.mu = jnp.array(0.5)
-        self.offset = 1 - (self.lam/self.mu)
-        
     def _run_test(self, 
+                  lam,
+                  mu,
                   t_array,
-                  tkf_function):
-        # get true values
-        true_alpha = []
-        true_beta = []
-        true_gamma = []
+                  tkf_function,
+                  rtol):
+        C = lam.shape[0]
+        T = t_array.shape[0]
+        offset = 1 - lam/mu
+        
+        ### get true values
+        true_log_alpha = np.zeros( (T,C) )
+        true_log_beta = np.zeros( (T,C) )
+        true_log_gamma = np.zeros( (T,C) )
 
-        for t in t_array:
-            out = TKF_coeffs (self.lam, self.mu, t)
-            true_alpha.append(out[0])
-            true_beta.append(out[1])
-            true_gamma.append(out[2])
+        for c in range(C):
+            for i,t in enumerate( t_array ):
+                a,b,g = TKF_coeffs (lam[c], mu[c], t)
+                true_log_alpha[i,c] = np.log( a )
+                true_log_beta[i,c] = np.log( b )
+                true_log_gamma[i,c] = np.log( g )
         
-        true_alpha = np.array(true_alpha)
-        true_beta = np.array(true_beta)
-        true_gamma = np.array(true_gamma)
         
-        # my function comes packaged in a flax module
-        my_tkf_params, _ = tkf_function(mu = self.mu, 
-                                        offset = self.offset,
+        ### my function comes packaged in a flax module
+        my_tkf_params, approx_dict = tkf_function(mu = mu, 
+                                        offset = offset,
                                         t_array = t_array)
         
-        pred_alpha = jnp.exp(my_tkf_params['log_alpha'])
-        pred_beta = jnp.exp(my_tkf_params['log_beta'])
-        pred_gamma = jnp.exp(my_tkf_params['log_gamma'])
+        pred_log_alpha = my_tkf_params['log_alpha']
+        pred_log_beta = my_tkf_params['log_beta']
+        pred_log_gamma = my_tkf_params['log_gamma']
         
-        npt.assert_allclose(true_alpha, pred_alpha, atol=THRESHOLD)
-        npt.assert_allclose(true_beta, pred_beta, atol=THRESHOLD)
-        npt.assert_allclose(true_gamma, pred_gamma, atol=THRESHOLD)
         
-    def test_switch_tkf(self):
-        self._run_test( tkf_function = switch_tkf,
-                        t_array = jnp.array([0.3, 0.5, 0.9,
-                                             0.0003, 0.0005, 0.0009]) )
-    
+        # check shape
+        assert pred_log_alpha.shape == (T, C)
+        assert pred_log_beta.shape == (T, C)
+        assert pred_log_gamma.shape == (T, C)
+        
+        # check values IN LOG SPACE
+        npt.assert_allclose(true_log_alpha, pred_log_alpha, rtol=rtol, err_msg='log_alpha')
+        npt.assert_allclose(true_log_beta, pred_log_beta, rtol=rtol, err_msg='log_beta')
+        npt.assert_allclose(true_log_gamma, pred_log_gamma, rtol=rtol, err_msg='log_gamma')
+        
+        
     def test_regular_tkf(self):
-        self._run_test( tkf_function = regular_tkf,
-                        t_array = jnp.array([0.3, 0.5, 0.9,
-                                             0.0003, 0.0005, 0.0009]) )
-    
-    def test_approx_tkf(self):
+        lam = jnp.array([0.3, 0.4, 0.5])
+        mu = jnp.array([0.5, 0.6, 0.7])
+        rtol = 1e-6
+        self._run_test( lam = lam,
+                        mu = mu,
+                        tkf_function = regular_tkf,
+                        t_array = jnp.array([0.3, 0.5, 0.9, 0.0003, 0.0005, 0.0009]),
+                        rtol = rtol )
+
+    def test_switch_tkf(self):
         """
-        run this at small times only
+        needs a lower rtol, since approx formulas aren't exact
         """
-        self._run_test( tkf_function = approx_tkf,
-                        t_array = jnp.array([0.0003, 0.0005, 0.0009]) )
-    
+        lam = jnp.array([0.3, 0.3])
+        mu = jnp.array([0.5, 0.30001])
+        rtol = 1e-4
+        self._run_test( lam = lam,
+                        mu = mu,
+                        tkf_function = switch_tkf,
+                        t_array = jnp.array([0.3, 0.5, 0.9, 0.0003, 0.0005, 0.0009]),
+                        rtol = rtol )
     
 
 if __name__ == '__main__':
