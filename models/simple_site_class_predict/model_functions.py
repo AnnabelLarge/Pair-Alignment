@@ -2548,3 +2548,27 @@ def maybe_write_matrix_to_ascii(out_folder,
                     np.array(mat), 
                     fmt = '%.8f',
                     delimiter= '\t' )
+
+
+###############################################################################
+### matrix algebra tools   ####################################################
+###############################################################################
+def two_by_two_log_inverse(M):
+    """
+    if M = log(A), this calculates (I - A)^-1
+    """
+    # get adjugate matrix of I-M
+    log_adjugate = jnp.stack( [jnp.stack([log_one_minus_x(M[...,1,1]), M[...,0,1]], axis=-1),
+                               jnp.stack([M[...,1,0], log_one_minus_x(M[...,0,0])], axis=-1)],
+                              axis=-2) #(..., 2, 2)
+    
+    # find determinant
+    log_M_deter_term1 = log_adjugate[..., 0, 0] + log_adjugate[..., 1, 1] #(...,)
+    log_M_deter_term2 = log_adjugate[..., 0, 1] + log_adjugate[..., 1, 0] #(...,)
+    log_M_deter = logsumexp_with_arr_lst( [log_M_deter_term1, log_M_deter_term2],
+                                          coeffs = jnp.array([1.0, -1.0]) ) #(...,)
+     
+    # inv = adjugate / determinant
+    log_M_inv = log_adjugate - log_M_deter[..., None, None] #(..., 2, 2)
+    
+    return log_M_inv
