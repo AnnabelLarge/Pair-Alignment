@@ -37,7 +37,7 @@ import pickle
 from models.BaseClasses import ModuleBase
 from models.simple_site_class_predict.model_functions import (bound_sigmoid,
                                                               safe_log,
-                                                              logsumexp_with_arr_lst,
+                                                              # logsumexp_with_arr_lst,
                                                               log_one_minus_x,
                                                               switch_tkf,
                                                               regular_tkf,
@@ -1440,7 +1440,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
                                                    joint_matrix=joint_matrix)
             
             # correction factors for S->I transition
-            matrix_dict['log_corr'] = jnp.log(lam/mu) - jnp.log( r_extend + (1-r_extend)*(lam/mu) ) #(C_dom, C_fr)
+            matrix_dict['log_corr'] = jnp.log(lam[:,None]/mu[:,None]) - jnp.log( r_extend + (1-r_extend)*(lam[:,None]/mu[:,None]) ) #(C_dom, C_fr)
         
         # add tkf92 indel parameters
         # matrix_dict['lam'] (C_dom,)
@@ -1542,9 +1542,10 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         # add r to specific locations
         # log_tkf92_rate_mat[:, :, i_idx, i_idx, j_idx, j_idx] (T, C_dom, S-1)
         prev_vals = log_tkf92_rate_mat[:, :, i_idx, i_idx, j_idx, j_idx].reshape( (T, C_dom, C_frag, S-1) ) #(T, C_dom, C_frag, S-1)
-        r_to_add = jnp.broadcast_to( log_r_ext_prob[None,...,None], prev_vals.shape) #(T, C_dom, C_frag, S-1)
-        new_vals = logsumexp_with_arr_lst([r_to_add, prev_vals]).reshape(T, C_dom, -1) #(T, C_dom, C_frag * S-1)
-        del prev_vals, r_to_add
+        # r_to_add = jnp.broadcast_to( log_r_ext_prob[None,...,None], prev_vals.shape) #(T, C_dom, C_frag, S-1)
+        # new_vals = logsumexp_with_arr_lst([r_to_add, prev_vals]).reshape(T, C_dom, -1) #(T, C_dom, C_frag * S-1)
+        new_vals = jnp.logaddexp( log_r_ext_prob[None,...,None], prev_vals ).reshape(T, C_dom, -1) #(T, C_dom, C_frag * S-1)
+        del prev_vals #, r_to_add
 
         # scatter back with advanced indexing
         #  log_tkf92_rate_mat is: (T, C_dom, C_{frag_from}, C_{frag_to}, S_from, S_to)   
@@ -1831,7 +1832,7 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
                                                    joint_matrix=joint_matrix)
             
             # correction factors for S->I transition
-            matrix_dict['log_corr'] = jnp.log(lam/mu) - jnp.log( r_extend + (1-r_extend)*(lam/mu) ) #(C_dom, C_fr)
+            matrix_dict['log_corr'] = jnp.log(lam[:,None]/mu[:,None]) - jnp.log( r_extend + (1-r_extend)*(lam[:,None]/mu[:,None]) ) #(C_dom, C_fr)
         
         # add tkf92 indel parameters
         # matrix_dict['lam'] (C_dom,)

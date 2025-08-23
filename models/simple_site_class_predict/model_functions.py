@@ -1060,7 +1060,8 @@ def get_tkf92_single_seq_marginal_transition_logprobs(offset,
     # r + (1-r) * (lam/mu) * P(c)
     i_idx = jnp.arange(C_frag)
     prev_vals = log_single_seq_tkf92[:, i_idx, i_idx, 0, 0] #(C_dom, C_frag)
-    new_vals = logsumexp_with_arr_lst([log_r_ext_prob, prev_vals]) #(C_dom, C_frag)
+    # new_vals = logsumexp_with_arr_lst([log_r_ext_prob, prev_vals]) #(C_dom, C_frag)
+    new_vals = jnp.logaddexp( log_r_ext_prob, prev_vals ) #(C_dom, C_frag)
     log_single_seq_tkf92 = log_single_seq_tkf92.at[:, i_idx, i_idx, 0, 0].set(new_vals) #(C_dom, C_{frag_from}, C_{frag_to}, 2, 2)
     return log_single_seq_tkf92 #(C_dom, C_{frag_from}, C_{frag_to}, 2, 2)
 
@@ -2553,8 +2554,10 @@ def maybe_write_matrix_to_ascii(out_folder,
 ###############################################################################
 ### matrix algebra tools   ####################################################
 ###############################################################################
-def two_by_two_log_inverse(M):
+def logspace_marginalize_inf_transits(M):
     """
+    \sum_{k=0}^{inf} A^{k} = (I - A)^{-1}
+    
     if M = log(A), this calculates (I - A)^-1
     """
     # get adjugate matrix of I-M
