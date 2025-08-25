@@ -2575,3 +2575,14 @@ def logspace_marginalize_inf_transits(M):
     log_M_inv = log_adjugate - log_M_deter[..., None, None] #(..., 2, 2)
     
     return log_M_inv
+
+def log_matmul(log_A, log_B):
+    """
+    does A @ B in log space
+    
+         A: (..., M, K)
+         B: (..., K, N)
+    output: (..., M, N)
+    
+    """
+    return logsumexp(log_A[..., :, :, None] + log_B[..., None, :, :], axis=-2)

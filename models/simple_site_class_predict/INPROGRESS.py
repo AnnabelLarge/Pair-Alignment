@@ -18,7 +18,9 @@ from models.simple_site_class_predict.model_functions import (get_tkf92_single_s
                                                               logsumexp_with_arr_lst,
                                                               log_one_minus_x,
                                                               logspace_marginalize_inf_transits,
-                                                              regular_tkf)
+                                                              regular_tkf,
+                                                              log_matmul)
+
 
 ###########
 ### init  #
@@ -123,7 +125,7 @@ log_one_minus_z_0 = log_one_minus_x( log_z_0 ) #(T,)
 # multiply any -> M by (1 - z_t)
 S = dom_joint_transit_mat.shape[-1]
 mask = jnp.concatenate( [jnp.ones(  (T, S, 1), dtype = bool),
-                          jnp.zeros( (T, S, 3), dtype=bool )], axis=2 )
+                         jnp.zeros( (T, S, 3), dtype=bool )], axis=2 )
 log_T_mat = jnp.where(mask, 
                   dom_joint_transit_mat + log_one_minus_z_t[:,None,None], 
                   dom_joint_transit_mat) #(T, S_from, S_to)
@@ -205,38 +207,70 @@ del log_u_b_a, log_u_b_b, log_u_a_ab, log_u_b_ab
 
 ### T_{MIDS, MIDE} = U_{MIDS, MIDE} + U_{MIDS,AB} * (I-U_{AB,AB})^-1 * U_{AB,MIDE}
 # modifying matrix: U_{MIDS,AB} * (I-U_{AB,AB})^-1 * U_{AB,MIDE}
-inv_arg = logspace_marginalize_inf_transits( log_u_ab_ab ) #(T, 2, 2)
-modifier = log_u_mids_ab @ inv_arg @ log_u_ab_mide #(T, 4, 4)
+log_inv_arg = logspace_marginalize_inf_transits( log_u_ab_ab ) #(T, 2, 2)
+mod_first_half = log_matmul( log_A = log_u_mids_ab,
+                             log_B = log_inv_arg ) #(T, 4, 2)
+modifier = log_matmul( log_A = mod_first_half, 
+                       log_B = log_u_ab_mide ) #(T, 4, 4)
 log_T_mat = jnp.logaddexp( log_T_mat, modifier ) #(T, S_from, S_to)
-del inv_arg, modifier, log_u_mids_ab, log_u_ab_mide, log_u_ab_ab
+del log_inv_arg, mod_first_half, modifier, log_u_mids_ab, log_u_ab_mide, log_u_ab_ab
 del log_one_minus_z_0, log_one_minus_z_t, log_z_0, log_z_t
 
 
 ##############################################
 ### Precompute some values that get reused   #
 ##############################################
-# v_m * (lam_m / mu_m) * w_{mg}; used to open single-sequence fragments
+# frag_joint_transit_mat: (T, C_dom, C_frag_from, C_frag_to, S_from, S_to)
+# log_domain_class_probs: (C_dom,)
+# log_frag_class_probs: (C_dom, C_frag)
+# log_T_mat = (T, S_from, S_to)
+
+### v_m * (lam_m / mu_m) * w_{mg}; used to open single-sequence fragments
 start_single_seq_frag_g = ( log_domain_class_probs[:,None] +
                             frag_tkf_params_dict['log_one_minus_offset'][:,None] + 
                             log_frag_class_probs ) #(C_dom_to, C_frag_to)
 assert start_single_seq_frag_g.shape == (C_dom, C_frag)
 
-# v_m * \tau_{SY}^(m) * w_{mg}; used to open pair-aligned fragments
+
+### v_m * \tau_{SY}^(m) * w_{mg}; used to open pair-aligned fragments
+log_domain_class_probs_reshaped = log_domain_class_probs[None,:,None,None] #(1, C_dom_to, 1, 1)
+
 # for every C_frag_from -> C_frag_to, the S -> any transition row is the same
 # (since "start" has no class label); so just index the first instance here
 # w_{mg} is already included in frag_joint_transit_mat
-start_pair_frag_g = ( log_domain_class_probs[None,:,None,None] + 
-                      frag_joint_transit_mat[:, :, 0, :, 3, 0:3] ) #(T, C_dom_to, C_frag_to, (S_to \in MID) )
-assert start_pair_frag_g.shape == (T, C_dom, C_frag, S-1)
+#
+# frag_joint_transit_mat indexing:
+# dim0: T; take all
+# dim1: C_dom_to; take all
+# dim2: C_frag_from; take the 0th element
+# dim3: C_frag_to; take all
+# dim4: S_from; take the last element (corresponding to START)
+# dim5: S_to; take element 0, 1, 2 (corresponding to MATCH, INS, DEL)
+frag_joint_transit_mat_reshaped = frag_joint_transit_mat[:, :, 0, :, 3, 0:3] #(T, C_dom_to, C_frag_to, (S_to \in MID) )
 
-# (1 - r_f) (1 - (lam_l / mu_l)); used to close single-sequence fragments
+# final mat
+start_pair_frag_g = log_domain_class_probs_reshaped + frag_joint_transit_mat_reshaped #(T, C_dom_to, C_frag_to, (S_to \in MID) )
+assert start_pair_frag_g.shape == (T, C_dom, C_frag, S-1)
+del log_domain_class_probs_reshaped, frag_joint_transit_mat_reshaped
+
+
+### (1 - r_f) (1 - (lam_l / mu_l)); used to close single-sequence fragments
 end_single_seq_frag_f = jnp.log1p( -r_frag ) + frag_tkf_params_dict['log_offset'][:,None] #(C_dom_from, C_frag_from)
 assert end_single_seq_frag_f.shape == (C_dom, C_frag)
 
-# (1 - r_f) \tau_{XE}^{l}; used to close pair-aligned fragments
+
+### (1 - r_f) \tau_{XE}^{l}; used to close pair-aligned fragments
 # for every C_frag_from -> C_frag_to, the any -> E transition column is the same
 # (since "end" has no class label); so just index the last instance here
-end_pair_frag_f = frag_joint_transit_mat[..., -1, 0:3, 3] #(T, C_dom_from, C_frag_from, (S_from \in MID) )
+#
+# frag_joint_transit_mat indexing:
+# dim0: T; take all
+# dim1: C_dom_from; take all
+# dim2: C_frag_from; take all
+# dim3: C_frag_to; take the last element
+# dim4: S_from; take element 0, 1, 2 (corresponding to MATCH, INS, DEL) 
+# dim5: S_to; take the last element (corresponding to END)
+end_pair_frag_f = frag_joint_transit_mat[:, :, :, -1, 0:3, 3] #(T, C_dom_from, C_frag_from, (S_from \in MID) )
 assert end_pair_frag_f.shape == (T, C_dom, C_frag, S-1)
 
 
@@ -245,6 +279,10 @@ assert end_pair_frag_f.shape == (T, C_dom, C_frag, S-1)
 ### Calculate all the transitions needed   #
 ############################################
 ### MX -> MY
+#   end_pair_frag_f: (T, C_dom_from,        1, C_frag_from,         1, (S_from \in MID),              1 )
+#  log_T_mat[:,0,0]: (T,          1,        1,           1,         1,                1,              1 )
+# start_pair_frag_g: (T,          1, C_dom_to,           1, C_frag_to,                1, (S_to \in MID) )
+#          mx_to_my: (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to, (S_from \in MID), (S_to \in MID) )
 mx_to_my = ( end_pair_frag_f[:, :, None, :, None, :, None] +
              log_T_mat[:,0,0][:, None, None, None, None, None, None] +
              start_pair_frag_g[:, None, :, None, :, None, :] ) #(T, C_dom_from, C_dom_to, C_frag_from, C_frag_to, (S_from \in MID), (S_to \in MID) )
@@ -265,14 +303,25 @@ del prev_values, new_values, idx
 
 
 ### MX -> II, DD, EE
+#         end_pair_frag_f: (T, C_dom_from,        1, C_frag_from,         1, (S_from \in MID) )
+#        log_T_mat[:,0,1]: (T,          1,        1,           1,         1,                1 )
+# start_single_seq_frag_g: (1,          1, C_dom_to,           1, C_frag_to,                1 )
+#                mx_to_ii: (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to, (S_from \in MID) )
 mx_to_ii = ( end_pair_frag_f[:, :, None, :, None, :] +
              log_T_mat[:,0,1][:, None, None, None, None, None] +
              start_single_seq_frag_g[None, None, :, None, :, None] ) #(T, C_dom_from, C_dom_to, C_frag_from, C_frag_to, (S_from \in MID) )
 
+#         end_pair_frag_f: (T, C_dom_from,        1, C_frag_from,         1, (S_from \in MID) )
+#        log_T_mat[:,0,2]: (T,          1,        1,           1,         1,                1 )
+# start_single_seq_frag_g: (1,          1, C_dom_to,           1, C_frag_to,                1 )
+#                mx_to_dd: (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to, (S_from \in MID) )
 mx_to_dd = ( end_pair_frag_f[:, :, None, :, None, :] +
              log_T_mat[:,0,2][:, None, None, None, None, None] +
              start_single_seq_frag_g[None, None, :, None, :, None] ) #(T, C_dom_from, C_dom_to, C_frag_from, C_frag_to, (S_from \in MID) )
 
+#  end_pair_frag_f: (T, C_dom_from, C_frag_from, (S_from \in MID) )
+# log_T_mat[:,0,3]: (T,          1,           1,                1 )
+#         mx_to_ee: (T, C_dom_from, C_frag_from, (S_from \in MID) )
 mx_to_ee = ( end_pair_frag_f + 
              log_T_mat[:,0,3][:, None, None, None] ) #(T, C_dom_from, C_frag_from, (S_from \in MID) )
 
@@ -282,6 +331,10 @@ assert mx_to_ee.shape == (T, C_dom, C_frag, S-1)
 
 
 ### II -> II
+#   end_single_seq_frag_f: (1, C_dom_from,        1, C_frag_from,         1)
+#        log_T_mat[:,1,1]: (T,          1,        1,           1,         1)
+# start_single_seq_frag_g: (1,          1, C_dom_to,           1, C_frag_to)
+#                ii_to_ii: (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
 ii_to_ii = ( end_single_seq_frag_f[None, :, None, :, None] +
              log_T_mat[:,1,1][:, None, None, None, None] +
              start_single_seq_frag_g[None, None, :, None, :] ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
@@ -300,15 +353,26 @@ del prev_values, new_values, idx
 
 
 ### II -> MY, DD, EE
+# end_single_seq_frag_f: (1, C_dom_from,        1, C_frag_from,         1               1 )
+#      log_T_mat[:,1,0]: (T,          1,        1,           1,         1,              1 )
+#     start_pair_frag_g: (T,          1, C_dom_to,           1, C_frag_to, (S_to \in MID) )
+#              ii_to_mx: (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to, (S_to \in MID) )
 ii_to_mx = ( end_single_seq_frag_f[None, :, None, :, None, None] +
              log_T_mat[:,1,0][:, None, None, None, None, None] +
              start_pair_frag_g[:, None, :, None, :, :] )  # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to, (S_to \in MID) )
 
+#   end_single_seq_frag_f: (1, C_dom_from,        1, C_frag_from,         1)
+#        log_T_mat[:,1,2]: (T,          1,        1,           1,         1)
+# start_single_seq_frag_g: (1,          1, C_dom_to,           1, C_frag_to)
+#                ii_to_dd: (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
 ii_to_dd = ( end_single_seq_frag_f[None, :, None, :, None] +
              log_T_mat[:,1,2][:, None, None, None, None] +
              start_single_seq_frag_g[None, None, :, None, :] ) #(T, C_dom_from, C_dom_to, C_frag_from, C_frag_to )
 
-ii_to_ee = ( end_single_seq_frag_f[None, ...] +
+# end_single_seq_frag_f: (1, C_dom_from, C_frag_from)
+#      log_T_mat[:,1,3]: (T,          1,           1)
+#              ii_to_ee: (T, C_dom_from, C_frag_from)
+ii_to_ee = ( end_single_seq_frag_f[None, :, :] +
              log_T_mat[:,1,3][:,None,None] ) # (T, C_dom_from, C_frag_from)
 
 assert ii_to_mx.shape == (T, C_dom, C_dom, C_frag, C_frag, S-1)
@@ -335,14 +399,25 @@ del prev_values, new_values, idx
 
 
 ### DD -> MY, II, EE
+# end_single_seq_frag_f: (1, C_dom_from,        1, C_frag_from,         1               1 )
+#      log_T_mat[:,2,0]: (T,          1,        1,           1,         1,              1 )
+#     start_pair_frag_g: (T,          1, C_dom_to,           1, C_frag_to, (S_to \in MID) )
+#              dd_to_mx: (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to, (S_to \in MID) )
 dd_to_mx = ( end_single_seq_frag_f[None, :, None, :, None, None] +
              log_T_mat[:,2,0][:, None, None, None, None, None] +
              start_pair_frag_g[:, None, :, None, :, :] )  # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to, (S_to \in MID) )
 
+#   end_single_seq_frag_f: (1, C_dom_from,        1, C_frag_from,         1)
+#        log_T_mat[:,2,1]: (T,          1,        1,           1,         1)
+# start_single_seq_frag_g: (1,          1, C_dom_to,           1, C_frag_to)
+#                dd_to_ii: (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
 dd_to_ii = ( end_single_seq_frag_f[None, :, None, :, None] +
              log_T_mat[:,2,1][:, None, None, None, None] +
              start_single_seq_frag_g[None, None, :, None, :] ) #(T, C_dom_from, C_dom_to, C_frag_from, C_frag_to )
 
+# end_single_seq_frag_f: (1, C_dom_from, C_frag_from)
+#      log_T_mat[:,2,3]: (T,          1,           1)
+#              dd_to_ee: (T, C_dom_from, C_frag_from)
 dd_to_ee = ( end_single_seq_frag_f[None, ...] +
              log_T_mat[:,2,3][:,None,None] ) # (T, C_dom_from, C_frag_from)
 
@@ -353,13 +428,81 @@ assert dd_to_ee.shape == (T, C_dom, C_frag)
 
 ### SS -> MY,II,DD
 # ss -> ee is just log_T_mat[:,3,3]; no other modifications needed
+
+#  log_T_mat[:,3,0]: (T,        1,         1,              1 )
+# start_pair_frag_g: (T, C_dom_to, C_frag_to, (S_to \in MID) )
+#          ss_to_my: (T, C_dom_to, C_frag_to, (S_to \in MID) )
 ss_to_my = log_T_mat[:,3,0][:,None, None, None] + start_pair_frag_g #(T, C_dom_to, C_frag_to, (S_to \in MID) )
-ss_to_ii = log_T_mat[:,3,1][:,None, None] + start_single_seq_frag_g[None,...] #(T, C_dom_to, C_frag_to)
-ss_to_dd = log_T_mat[:,3,2][:,None, None] + start_single_seq_frag_g[None,...] #(T, C_dom_to, C_frag_to)
+
+#  log_T_mat[:,3,1]: (T,        1,         1)
+# start_pair_frag_g: (T, C_dom_to, C_frag_to)
+#          ss_to_ii: (T, C_dom_to, C_frag_to)
+ss_to_ii = log_T_mat[:,3,1][:,None, None] + start_single_seq_frag_g[None, :, :] #(T, C_dom_to, C_frag_to)
+
+#  log_T_mat[:,3,2]: (T,        1,         1)
+# start_pair_frag_g: (T, C_dom_to, C_frag_to)
+#          ss_to_dd: (T, C_dom_to, C_frag_to)
+ss_to_dd = log_T_mat[:,3,2][:,None, None] + start_single_seq_frag_g[None, :, :] #(T, C_dom_to, C_frag_to)
 
 assert ss_to_my.shape == (T, C_dom, C_frag, S-1)
 assert ss_to_ii.shape == (T, C_dom, C_frag)
 assert ss_to_dd.shape == (T, C_dom, C_frag)
 
+
+
+#####################################
+### Build final transition matrix   #
+#####################################
+# Row 1: Match -> Any
+m_to_m = mx_to_my[..., 0, 0] # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
+m_to_i = jnp.logaddexp( mx_to_my[..., 0, 1], mx_to_ii[..., 0]) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
+m_to_d = jnp.logaddexp( mx_to_my[..., 0, 2], mx_to_dd[..., 0]) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
+m_to_e = mx_to_ee[..., 0][:,:,None,:,None] # (T, C_dom_from, 1, C_frag_from, 1)
+m_to_e = jnp.broadcast_to( m_to_e, m_to_m.shape ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
+match_to_any = jnp.stack( [m_to_m, m_to_i, m_to_d, m_to_e], axis=-1 ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to, 4)
+del m_to_m, m_to_i, m_to_d, m_to_e
+
+# Row 2: Ins -> Any
+i_to_m = jnp.logaddexp( mx_to_my[..., 1, 0], ii_to_mx[..., 0] ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
+i_to_i = logsumexp_with_arr_lst( [mx_to_my[..., 1, 1],
+                                  mx_to_ii[..., 1],
+                                  ii_to_mx[..., 1], 
+                                  ii_to_ii] ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
+i_to_d = logsumexp_with_arr_lst( [mx_to_my[..., 1, 2],
+                                  mx_to_dd[..., 1],
+                                  ii_to_mx[..., 2], 
+                                  ii_to_dd] ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
+i_to_e = ii_to_ee[:, :, None, :, None] # (T, C_dom_from, 1, C_frag_from, 1)
+i_to_e = jnp.broadcast_to( i_to_e, i_to_m.shape ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
+ins_to_any = jnp.stack( [i_to_m, i_to_i, i_to_d, i_to_e], axis=-1 ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to, 4)
+del i_to_m, i_to_i, i_to_d, i_to_e
+
+# Row 3: Del -> Any
+d_to_m = jnp.logaddexp( mx_to_my[..., 2, 0], dd_to_mx[..., 0] ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
+d_to_i = logsumexp_with_arr_lst( [mx_to_my[..., 2, 1],
+                                  mx_to_ii[..., 2],
+                                  dd_to_mx[..., 1], 
+                                  dd_to_ii] ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
+d_to_d = logsumexp_with_arr_lst( [mx_to_my[..., 2, 2],
+                                  mx_to_dd[..., 2],
+                                  dd_to_mx[..., 2],
+                                  dd_to_dd] ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
+d_to_e = dd_to_ee[:, :, None, :, None] # (T, C_dom_from, 1, C_frag_from, 1)
+d_to_e = jnp.broadcast_to( d_to_e, d_to_m.shape ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
+del_to_any = jnp.stack( [d_to_m, d_to_i, d_to_d, d_to_e], axis=-1 ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to, 4)
+del d_to_m, d_to_i, d_to_d, d_to_e
+
+# Row 4: Start -> any
+s_to_e = log_T_mat[:,3,3][:, None, None] #(T, 1, 1)
+s_to_e = jnp.broadcast_to( s_to_e, ss_to_my[..., 0].shape ) # (T, C_dom_to, C_frag_to)
+start_to_any = jnp.stack( [ss_to_my[..., 0],
+                           jnp.logaddexp( ss_to_my[..., 1], ss_to_ii),
+                           jnp.logaddexp( ss_to_my[..., 2], ss_to_dd),
+                           s_to_e ], axis=-1 ) # (T, C_dom_to, C_frag_to, 4)
+start_to_any = start_to_any[:, None, :, None, :, :] # (T, 1, C_dom_to, 1, C_frag_to, 4)
+start_to_any = jnp.broadcast_to(start_to_any, match_to_any.shape)  # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to, 4)
+del s_to_e
+
+transit_mat = jnp.stack( [match_to_any, ins_to_any, del_to_any, start_to_any], axis=-2 ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to, 4, 4)
 
 
