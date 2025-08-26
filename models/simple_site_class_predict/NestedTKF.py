@@ -121,7 +121,7 @@ class NestedTKF(FragAndSiteClasses):
     
     _build_marginal_nested_tkf_matrix
     
-    _retrieve_transition_matrix
+    _get_transition_scoring_matrices
     
     _get_scoring_matrices
         
@@ -134,6 +134,8 @@ class NestedTKF(FragAndSiteClasses):
     calculate_all_loglikes
         calculate logP(anc, desc, align), logP(anc), logP(desc), and
         logP(desc, align | anc)
+    
+    _get_emission_scoring_matrices
     
     
     Methods inherited from models.model_utils.BaseClasses.ModuleBase
@@ -963,7 +965,7 @@ class NestedTKF(FragAndSiteClasses):
         return transit_mat
     
     
-    def _retrieve_transition_matrix(self,
+    def _get_transition_scoring_matrices(self,
                                     t_array,
                                     sow_intermediates: bool,
                                     return_all_matrices: bool):
@@ -973,9 +975,20 @@ class NestedTKF(FragAndSiteClasses):
         
         
         ### joint prob P(anc, desc, align)
-        raw_joint_logT_mat = self._get_joint_domain_transit_matrix_without_null_cycles( log_domain_class_probs = out_dict['log_domain_class_probs'],
-                                                                        frag_tkf_params_dict = out_dict['frag_tkf_params_dict'],
-                                                                        dom_joint_transit_mat = out_dict['dom_joint_transit_mat'] ) # (T, S_from, S_to)
+        T = t_array.shape[0]
+        C_dom = self.num_domain_mixtures
+        S = out_dict['dom_joint_transit_mat'].shape[-1]
+        
+        if C_dom > 1:
+            raw_joint_logT_mat = self._get_joint_domain_transit_matrix_without_null_cycles( log_domain_class_probs = out_dict['log_domain_class_probs'],
+                                                                            frag_tkf_params_dict = out_dict['frag_tkf_params_dict'],
+                                                                            dom_joint_transit_mat = out_dict['dom_joint_transit_mat'] ) # (T, S_from, S_to)
+        
+        elif C_dom == 1:
+            # WARNING: will this trigger numerical instabilities...?
+            raw_joint_logT_mat = jnp.ones( (T, S, S) ) * jnp.finfo(jnp.float32).min # (T, S_from, S_to)
+            raw_joint_logT_mat = raw_joint_logT_mat.at[:, 3, 0].set(0.0)
+            raw_joint_logT_mat = raw_joint_logT_mat.at[:, 0, 3].set(0.0)
         
         joint_transit_entries = self._retrieve_joint_transition_entries( log_domain_class_probs = out_dict['log_domain_class_probs'],
                                                                         log_frag_class_probs = out_dict['log_frag_class_probs'],
@@ -993,10 +1006,18 @@ class NestedTKF(FragAndSiteClasses):
         
         ### marginal and conditional (if applicable)
         if return_all_matrices:
-            # marginal
-            raw_marg_logT_mat = self._get_marginal_domain_transit_matrix_without_null_cycles( log_domain_class_probs = out_dict['log_domain_class_probs'],
-                                                                        frag_tkf_params_dict = out_dict['frag_tkf_params_dict'],
-                                                                        dom_marginal_transit_mat = out_dict['dom_marginal_transit_mat'] ) #(2, 2)
+            # marginal            
+            if C_dom > 1:
+                raw_marg_logT_mat = self._get_marginal_domain_transit_matrix_without_null_cycles( log_domain_class_probs = out_dict['log_domain_class_probs'],
+                                                                            frag_tkf_params_dict = out_dict['frag_tkf_params_dict'],
+                                                                            dom_marginal_transit_mat = out_dict['dom_marginal_transit_mat'] ) #(2, 2)
+            
+            elif C_dom == 1:
+                # WARNING: will this trigger numerical instabilities...?
+                raw_marg_logT_mat = jnp.ones( (T, 2, 2) ) * jnp.finfo(jnp.float32).min # (T, S_from, S_to)
+                raw_marg_logT_mat = raw_joint_logT_mat.at[:, 1, 0].set(0.0)
+                raw_marg_logT_mat = raw_joint_logT_mat.at[:, 0, 1].set(0.0)
+                
             marginal_transit_mat = self._build_marginal_nested_tkf_matrix( log_domain_class_probs = out_dict['log_domain_class_probs'],
                                                                         log_frag_class_probs = out_dict['log_frag_class_probs'],
                                                                         frag_tkf_params_dict = out_dict['frag_tkf_params_dict'],
@@ -1025,7 +1046,7 @@ class NestedTKF(FragAndSiteClasses):
         """
         C_dom: number of mixtures associated with nested TKF92 models (domain-level)
         C_frag: number of mixtures associated with TKF92 fragments (fragment-level)
-        C_trans: C_dom * C_frag = C_frag
+        C_tr: number of transition mixtures, C_dom * C_frag = C_tr
         
         B = batch size; number of samples
         T = number of branch lengths; this could be: 
@@ -1077,11 +1098,10 @@ class NestedTKF(FragAndSiteClasses):
                 out_dict['log_rate_mult_probs'] : (C_trans, C_sites, K)
             
         """
-        ######################################################
-        ### build transition log-probability matrix, get     #
-        ### fragment-level mixture probs P(c_frag | c_dom)   #
-        ######################################################
-        out = self._retrieve_transition_matrix( t_array = t_array,
+        ######################################
+        ### scoring matrix for TRANSITIONS   #
+        ######################################
+        out = self._get_transition_scoring_matrices( t_array = t_array,
                                                 return_all_matrices = return_all_matrices,
                                                 sow_intermediates = sow_intermediates ) 
         
@@ -1099,98 +1119,53 @@ class NestedTKF(FragAndSiteClasses):
         all_transit_matrices = out[2]
 
         # used_approx is a dictionary of boolean arrays for the FRAGMENT-LEVEL 
-        #   transition matrix
+        #   transition matrix; there's probably approximations at the domain
+        #   level too... but don't worry about that for now
         approx_flags_dict = out[3]
         
         
-        ### BELOW IS THE SAME CODE PULLED FROM FRAGANDSITECLASSES MODEL!!!
+        ####################################
+        ### scoring matrix for EMISSIONS   #
+        ####################################
+        log_transit_class_probs = log_domain_class_probs[:, None] + log_frag_class_probs #(C_dom, C_frag)
+        log_transit_class_probs = log_transit_class_probs.flatten() #(C_dom*C_frag,)
+        
+        ### reuse function from FragAndSiteClasses
+        # always returns:
+        #     out_dict['logprob_emit_at_indel'] : (C_tr, A)
+        #     out_dict['joint_logprob_emit_at_match'] : (T, C_tr, A, A)
+        
+        # if return_all_matrices:
+        #     out_dict['cond_logprob_emit_at_match'] : (T, C_tr, A, A)
+        
+        # if return_intermeds:
+        #     out_dict['log_equl_dist_per_mixture'] : (C_tr, C_sites, A)
+        #     out_dict['rate_multipliers'] : (C_tr, C_sites, K)
+        #     out_dict['rate_matrix'] : (C_tr, C_sites, K)
+        #     out_dict['exchangeabilities'] : (A, A)
+        #     out_dict['cond_subst_logprobs_per_mixture'] : (T, C_tr, C_sites, K, A, A)
+        #     out_dict['joint_subst_logprobs_per_mixture'] : (T, C_tr, C_sites, K, A, A)
+        #     out_dict['log_site_class_probs'] : (C_tr, C_sites)
+        #     out_dict['log_rate_mult_probs'] : (C_tr, C_sites, K)
+        out_dict = self._get_emission_scoring_matrices( log_transit_class_probs = log_transit_class_probs,
+                                                        t_array = t_array,
+                                                        sow_intermediates = sow_intermediates,
+                                                        return_all_matrices = return_all_matrices, 
+                                                        return_intermeds = return_intermeds)
         
         
-        ###########################################################
-        ### build log-transformed equilibrium distribution; get   #
-        ### site-level mixture probability P(c_site | c_tr)       #
-        ###########################################################
-        # C_tr = C_dom * C_frag
-        # log_site_class_probs is (C_tr, C_sites)
-        # log_equl_dist_per_mixture is (C_tr, C_sites, A)
-        out = self.equl_dist_module(sow_intermediates = sow_intermediates) 
-        log_site_class_probs, log_equl_dist_per_mixture = out
-        del out
+        ##################################
+        ### add to out_dict and return   #
+        ##################################
+        out_dict['all_transit_matrices'] = all_transit_matrices
+        out_dict['used_approx'] = approx_flags_dict
         
-        # P(x) = \sum_c P(c) * P(x|c)
-        logprob_emit_at_indel = lse_over_equl_logprobs_per_mixture( log_site_class_probs = log_site_class_probs,
-                                                                    log_equl_dist_per_mixture = log_equl_dist_per_mixture ) #(C_tr, A)
-        
-        
-        ####################################################
-        ### site rate multipliers, and probabilities for   #
-        ### selecting a rate multiplier from the mixture   #
-        ####################################################
-        # Substitution rate multipliers
-        # both are (C_tr, C_sites, K)
-        log_rate_mult_probs, rate_multipliers = self.rate_mult_module( sow_intermediates = sow_intermediates,
-                                                                       log_site_class_probs = log_site_class_probs,
-                                                                       log_transit_class_probs = log_frag_class_probs ) 
-        
-        
-        ####################################################
-        ### build substitution log-probability matrix      #
-        ### use this to score emissions from match sites   #
-        ####################################################
-        # cond_logprobs_per_mixture is (T, C_tr, C_sites, K, A, A) 
-        # subst_module_intermeds is a dictionary of intermediates
-        out = self.logprob_subst_module( log_equl_dist = log_equl_dist_per_mixture,
-                                         rate_multipliers = rate_multipliers,
-                                         t_array = t_array,
-                                         sow_intermediates = sow_intermediates,
-                                         return_cond = True,
-                                         return_intermeds = return_intermeds )        
-        cond_subst_logprobs_per_mixture, subst_module_intermeds = out
-        del out
-        
-        # get the joint probability
-        # joint_subst_logprobs_per_mixture is (T, C_tr, C_sites, K, A, A)
-        joint_subst_logprobs_per_mixture = joint_logprob_emit_at_match_per_mixture( cond_logprob_emit_at_match_per_mixture = cond_subst_logprobs_per_mixture,
-                                                                              log_equl_dist_per_mixture = log_equl_dist_per_mixture ) 
-        
-        # marginalize over classes and possible rate multipliers
-        joint_logprob_emit_at_match = lse_over_match_logprobs_per_mixture(log_site_class_probs = log_site_class_probs,
-                                                            log_rate_mult_probs = log_rate_mult_probs,
-                                                            logprob_emit_at_match_per_mixture = joint_subst_logprobs_per_mixture) # (T, C_tr, A, A)
-        
-        if return_all_matrices:
-            cond_logprob_emit_at_match = lse_over_match_logprobs_per_mixture(log_site_class_probs = log_site_class_probs,
-                                                            log_rate_mult_probs = log_rate_mult_probs,
-                                                            logprob_emit_at_match_per_mixture = cond_subst_logprobs_per_mixture) # (T, C_tr, A, A)
-            
-        #####################
-        ### decide output   #
-        #####################
-        # always returned (at training, at final eval, etc.)
-        out_dict = {'logprob_emit_at_indel': logprob_emit_at_indel, #(C_tr, A)
-                    'joint_logprob_emit_at_match': joint_logprob_emit_at_match, #(T, C_tr, A, A)
-                    'all_transit_matrices': all_transit_matrices, #dict
-                    'used_approx': approx_flags_dict} #dict
-        
-        # returned if you need conditional and marginal logprob matrices
-        if return_all_matrices:
-            out_dict['cond_logprob_emit_at_match'] = cond_logprob_emit_at_match #(T, C_tr, A, A)
-        
-        # all intermediates
         if return_intermeds:
-            to_add = {'log_equl_dist_per_mixture': log_equl_dist_per_mixture, #(C_tr, C_sites, A)
-                      'rate_multipliers': rate_multipliers, #(C_tr, C_sites, K)
-                      'rate_matrix': subst_module_intermeds.get('rate_matrix',None), #(C_tr, C_sites, A, A) or None
-                      'exchangeabilities': subst_module_intermeds.get('exchangeabilities',None), #(A,A) or None
-                      'cond_subst_logprobs_per_mixture': cond_subst_logprobs_per_mixture, #(T, C_tr, C_sites, K, A, A)
-                      'joint_subst_logprobs_per_mixture': joint_subst_logprobs_per_mixture, #(T, C_tr, C_sites, K, A, A)
-                      'log_domain_class_probs': log_domain_class_probs, #(C_dom, )
-                      'log_frag_class_probs': log_frag_class_probs, #(C_dom, C_frag)
-                      'log_site_class_probs': log_site_class_probs, #(C_tr, C_sites)
-                      'log_rate_mult_probs': log_rate_mult_probs } #(C_tr, C_sites, K)
-            out_dict = {**out_dict, **to_add}
+            out_dict['log_domain_class_probs'] = log_domain_class_probs #(C_frag,)
+            out_dict['log_frag_class_probs'] = log_frag_class_probs #(C_dom, C_frag)
         
         return out_dict
+    
     
     def write_params(self,
                      t_array,

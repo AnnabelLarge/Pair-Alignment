@@ -120,6 +120,9 @@ class FragAndSiteClasses(ModuleBase):
     
     Other methods
     --------------
+    _get_emission_scoring_matrices
+        get the emission matrices, specifically
+    
     _get_scoring_matrices
         get the transition and emission matrices
     
@@ -430,7 +433,153 @@ class FragAndSiteClasses(ModuleBase):
         
         return {**out, **to_add}
     
+    
+    def _get_emission_scoring_matrices( self,
+                                        log_transit_class_probs,
+                                        t_array,
+                                        sow_intermediates: bool,
+                                        return_all_matrices: bool,
+                                        return_intermeds: bool ):
+        """
+        Matrices needed to score emissions: substitution rate matrices, 
+            equilibrium distributions, etc.
+        
+        
+        C_dom: number of mixtures associated with nested TKF92 models (domain-level)
+        C_frag: number of mixtures associated with TKF92 fragments (fragment-level)
+        C_tr: number of transition mixtures, C_dom * C_frag = C_tr
+        
+        B = batch size; number of samples
+        T = number of branch lengths; this could be: 
+            > an array of times for all samples (T; marginalize over these later)
+            > an array of time per sample (T=B)
+            > a quantized array of times per sample (T = T', where T' <= T)
+        A: emission alphabet size (20 for proteins)
+        S: number of transition states (4 here: M, I, D, start/end)
+           
+        
+        Arguments
+        ----------
+        log_transit_class_probs : ArrayLike, (C_tr,)
+            P(C_tr, c_dom); MUST be a vector!!! (i.e. 1D)
+        
+        t_array : ArrayLike, (T,)
+            branch lengths, times for marginalizing over
+        
+        return_all_matrices : bool
+            if false, only return the joint (used for model training)
+            if true, return joint, conditional, and marginal matrices
+        
+        return_intermeds : bool
+            return other intermediates
+        
+        sow_intermediates : bool
+            switch for tensorboard logging
+          
+        Returns
+        -------
+        out_dict : dict
+        
+            always returns:
+                out_dict['logprob_emit_at_indel'] : (C_tr, A)
+                out_dict['joint_logprob_emit_at_match'] : (T, C_tr, A, A)
             
+            if return_all_matrices:
+                out_dict['cond_logprob_emit_at_match'] : (T, C_tr, A, A)
+            
+            if return_intermeds:
+                out_dict['log_equl_dist_per_mixture'] : (C_tr, C_sites, A)
+                out_dict['rate_multipliers'] : (C_tr, C_sites, K)
+                out_dict['rate_matrix'] : (C_tr, C_sites, K)
+                out_dict['exchangeabilities'] : (A, A)
+                out_dict['cond_subst_logprobs_per_mixture'] : (T, C_tr, C_sites, K, A, A)
+                out_dict['joint_subst_logprobs_per_mixture'] : (T, C_tr, C_sites, K, A, A)
+                out_dict['log_site_class_probs'] : (C_tr, C_sites)
+                out_dict['log_rate_mult_probs'] : (C_tr, C_sites, K)
+        """
+        ###########################################################
+        ### build log-transformed equilibrium distribution; get   #
+        ### site-level mixture probability P(c_site | c_tr)       #
+        ###########################################################
+        # log_site_class_probs is (C_tr, C_sites)
+        # log_equl_dist_per_mixture is (C_tr, C_sites, A)
+        out = self.equl_dist_module(sow_intermediates = sow_intermediates) 
+        log_site_class_probs, log_equl_dist_per_mixture = out
+        del out
+        
+        # P(x) = \sum_c P(c) * P(x|c)
+        logprob_emit_at_indel = lse_over_equl_logprobs_per_mixture( log_site_class_probs = log_site_class_probs,
+                                                                    log_equl_dist_per_mixture = log_equl_dist_per_mixture ) #(C_tr, A)
+        
+        
+        ####################################################
+        ### site rate multipliers, and probabilities for   #
+        ### selecting a rate multiplier from the mixture   #
+        ####################################################
+        # Substitution rate multipliers
+        # both are (C_tr=C_frag, C_sites, K)
+        # log_frag_class_probs needed in case you're normalizing rate multipliers
+        log_rate_mult_probs, rate_multipliers = self.rate_mult_module( sow_intermediates = sow_intermediates,
+                                                                       log_site_class_probs = log_site_class_probs,
+                                                                       log_transit_class_probs = log_transit_class_probs ) 
+        
+        
+        ####################################################
+        ### build substitution log-probability matrix      #
+        ### use this to score emissions from match sites   #
+        ####################################################
+        # cond_logprobs_per_mixture is (T, C_tr, C_sites, K, A, A) 
+        # subst_module_intermeds is a dictionary of intermediates
+        out = self.logprob_subst_module( log_equl_dist = log_equl_dist_per_mixture,
+                                         rate_multipliers = rate_multipliers,
+                                         t_array = t_array,
+                                         sow_intermediates = sow_intermediates,
+                                         return_cond = True,
+                                         return_intermeds = return_intermeds )        
+        cond_subst_logprobs_per_mixture, subst_module_intermeds = out
+        del out
+        
+        # get the joint probability
+        # joint_subst_logprobs_per_mixture is (T, C_tr, C_sites, K, A, A)
+        joint_subst_logprobs_per_mixture = joint_logprob_emit_at_match_per_mixture( cond_logprob_emit_at_match_per_mixture = cond_subst_logprobs_per_mixture,
+                                                                              log_equl_dist_per_mixture = log_equl_dist_per_mixture ) 
+        
+        # marginalize over classes and possible rate multipliers
+        joint_logprob_emit_at_match = lse_over_match_logprobs_per_mixture(log_site_class_probs = log_site_class_probs,
+                                                            log_rate_mult_probs = log_rate_mult_probs,
+                                                            logprob_emit_at_match_per_mixture = joint_subst_logprobs_per_mixture) # (T, C_tr, A, A)
+        
+        if return_all_matrices:
+            cond_logprob_emit_at_match = lse_over_match_logprobs_per_mixture(log_site_class_probs = log_site_class_probs,
+                                                            log_rate_mult_probs = log_rate_mult_probs,
+                                                            logprob_emit_at_match_per_mixture = cond_subst_logprobs_per_mixture) # (T, C_tr, A, A)
+            
+        #####################
+        ### decide output   #
+        #####################
+        # always returned (at training, at final eval, etc.)
+        out_dict = {'logprob_emit_at_indel': logprob_emit_at_indel, #(C_tr, A)
+                    'joint_logprob_emit_at_match': joint_logprob_emit_at_match } #(T, C_tr, A, A)
+        
+        # returned if you need conditional and marginal logprob matrices
+        if return_all_matrices:
+            out_dict['cond_logprob_emit_at_match'] = cond_logprob_emit_at_match #(T, C_tr, A, A)
+        
+        # all intermediates
+        if return_intermeds:
+            to_add = {'log_equl_dist_per_mixture': log_equl_dist_per_mixture, #(C_tr, C_sites, A)
+                      'rate_multipliers': rate_multipliers, #(C_tr, C_sites, K)
+                      'rate_matrix': subst_module_intermeds.get('rate_matrix',None), #(C_tr, C_sites, A, A) or None
+                      'exchangeabilities': subst_module_intermeds.get('exchangeabilities',None), #(A,A) or None
+                      'cond_subst_logprobs_per_mixture': cond_subst_logprobs_per_mixture, #(T, C_tr, C_sites, K, A, A)
+                      'joint_subst_logprobs_per_mixture': joint_subst_logprobs_per_mixture, #(T, C_tr, C_sites, K, A, A)
+                      'log_site_class_probs': log_site_class_probs, #(C_tr, C_sites)
+                      'log_rate_mult_probs': log_rate_mult_probs } #(C_tr, C_sites, K)
+            out_dict = {**out_dict, **to_add}
+        
+        return out_dict
+        
+    
     def _get_scoring_matrices( self,
                                t_array,
                                sow_intermediates: bool,
@@ -440,7 +589,7 @@ class FragAndSiteClasses(ModuleBase):
         C_dom: number of mixtures associated with nested TKF92 models (domain-level)
             > here, this is one
         C_frag: number of mixtures associated with TKF92 fragments (fragment-level)
-        C_trans: C_dom * C_frag = C_frag
+        C_tr: number of transition mixtures, C_dom * C_frag = C_tr
         
         B = batch size; number of samples
         T = number of branch lengths; this could be: 
@@ -491,10 +640,9 @@ class FragAndSiteClasses(ModuleBase):
                 out_dict['log_rate_mult_probs'] : (C_frag, C_sites, K)
             
         """
-        ######################################################
-        ### build transition log-probability matrix, get     #
-        ### fragment-level mixture probs P(c_frag | c_dom)   #
-        ######################################################
+        ######################################
+        ### scoring matrix for TRANSITIONS   #
+        ######################################
         out = self.transitions_module( t_array = t_array,
                                        return_all_matrices = return_all_matrices,
                                        sow_intermediates = sow_intermediates ) 
@@ -511,7 +659,7 @@ class FragAndSiteClasses(ModuleBase):
         # used_approx is a dictionary of boolean arrays
         approx_flags_dict = out[2]
         
-        # remove unused dims
+        # remove unused dims, since C_dom=1
         log_frag_class_probs = log_frag_class_probs[0,...] #(C_frag,)
         all_transit_matrices['joint'] = all_transit_matrices['joint'][:,0,...] # (T, C_{frag_from}, C_{frag_to}, S_from, S_to)
         if return_all_matrices:
@@ -519,89 +667,43 @@ class FragAndSiteClasses(ModuleBase):
             all_transit_matrices['marginal'] = all_transit_matrices['marginal'][0,...] # (C_{frag_from}, C_{frag_to}, S_from, S_to)
             
         
-        ###########################################################
-        ### build log-transformed equilibrium distribution; get   #
-        ### site-level mixture probability P(c_site | c_tr)       #
-        ###########################################################
-        # log_site_class_probs is (C_tr=C_frag, C_sites)
-        # log_equl_dist_per_mixture is (C_tr=C_frag, C_sites, A)
-        out = self.equl_dist_module(sow_intermediates = sow_intermediates) 
-        log_site_class_probs, log_equl_dist_per_mixture = out
-        del out
+        ####################################
+        ### scoring matrix for EMISSIONS   #
+        ####################################
+        # always returns:
+        #     out_dict['logprob_emit_at_indel'] : (C_tr, A)
+        #     out_dict['joint_logprob_emit_at_match'] : (T, C_tr, A, A)
         
-        # P(x) = \sum_c P(c) * P(x|c)
-        logprob_emit_at_indel = lse_over_equl_logprobs_per_mixture( log_site_class_probs = log_site_class_probs,
-                                                                    log_equl_dist_per_mixture = log_equl_dist_per_mixture ) #(C_tr=C_frag, A)
+        # if return_all_matrices:
+        #     out_dict['cond_logprob_emit_at_match'] : (T, C_tr, A, A)
+        
+        # if return_intermeds:
+        #     out_dict['log_equl_dist_per_mixture'] : (C_tr, C_sites, A)
+        #     out_dict['rate_multipliers'] : (C_tr, C_sites, K)
+        #     out_dict['rate_matrix'] : (C_tr, C_sites, K)
+        #     out_dict['exchangeabilities'] : (A, A)
+        #     out_dict['cond_subst_logprobs_per_mixture'] : (T, C_tr, C_sites, K, A, A)
+        #     out_dict['joint_subst_logprobs_per_mixture'] : (T, C_tr, C_sites, K, A, A)
+        #     out_dict['log_site_class_probs'] : (C_tr, C_sites)
+        #     out_dict['log_rate_mult_probs'] : (C_tr, C_sites, K)
+        out_dict = self._get_emission_scoring_matrices( log_transit_class_probs = log_frag_class_probs,
+                                                        t_array = t_array,
+                                                        sow_intermediates = sow_intermediates,
+                                                        return_all_matrices = return_all_matrices, 
+                                                        return_intermeds = return_intermeds)
         
         
-        ####################################################
-        ### site rate multipliers, and probabilities for   #
-        ### selecting a rate multiplier from the mixture   #
-        ####################################################
-        # Substitution rate multipliers
-        # both are (C_tr=C_frag, C_sites, K)
-        log_rate_mult_probs, rate_multipliers = self.rate_mult_module( sow_intermediates = sow_intermediates,
-                                                                       log_site_class_probs = log_site_class_probs,
-                                                                       log_transit_class_probs = log_frag_class_probs ) 
+        ##################################
+        ### add to out_dict and return   #
+        ##################################
+        out_dict['all_transit_matrices'] = all_transit_matrices
+        out_dict['used_approx'] = approx_flags_dict
         
-        
-        ####################################################
-        ### build substitution log-probability matrix      #
-        ### use this to score emissions from match sites   #
-        ####################################################
-        # cond_logprobs_per_mixture is (T, C_tr=C_frag, C_sites, K, A, A) 
-        # subst_module_intermeds is a dictionary of intermediates
-        out = self.logprob_subst_module( log_equl_dist = log_equl_dist_per_mixture,
-                                         rate_multipliers = rate_multipliers,
-                                         t_array = t_array,
-                                         sow_intermediates = sow_intermediates,
-                                         return_cond = True,
-                                         return_intermeds = return_intermeds )        
-        cond_subst_logprobs_per_mixture, subst_module_intermeds = out
-        del out
-        
-        # get the joint probability
-        # joint_subst_logprobs_per_mixture is (T, C_tr=C_frag, C_sites, K, A, A)
-        joint_subst_logprobs_per_mixture = joint_logprob_emit_at_match_per_mixture( cond_logprob_emit_at_match_per_mixture = cond_subst_logprobs_per_mixture,
-                                                                              log_equl_dist_per_mixture = log_equl_dist_per_mixture ) 
-        
-        # marginalize over classes and possible rate multipliers
-        joint_logprob_emit_at_match = lse_over_match_logprobs_per_mixture(log_site_class_probs = log_site_class_probs,
-                                                            log_rate_mult_probs = log_rate_mult_probs,
-                                                            logprob_emit_at_match_per_mixture = joint_subst_logprobs_per_mixture) # (T, C_tr=C_frag, A, A)
-        
-        if return_all_matrices:
-            cond_logprob_emit_at_match = lse_over_match_logprobs_per_mixture(log_site_class_probs = log_site_class_probs,
-                                                            log_rate_mult_probs = log_rate_mult_probs,
-                                                            logprob_emit_at_match_per_mixture = cond_subst_logprobs_per_mixture) # (T, C_tr=C_frag, A, A)
-            
-        #####################
-        ### decide output   #
-        #####################
-        # always returned (at training, at final eval, etc.)
-        out_dict = {'logprob_emit_at_indel': logprob_emit_at_indel, #(C_frag, A)
-                    'joint_logprob_emit_at_match': joint_logprob_emit_at_match, #(T, C_frag, A, A)
-                    'all_transit_matrices': all_transit_matrices, #dict
-                    'used_approx': approx_flags_dict} #dict
-        
-        # returned if you need conditional and marginal logprob matrices
-        if return_all_matrices:
-            out_dict['cond_logprob_emit_at_match'] = cond_logprob_emit_at_match #(T, C_frag, A, A)
-        
-        # all intermediates
         if return_intermeds:
-            to_add = {'log_equl_dist_per_mixture': log_equl_dist_per_mixture, #(C_frag, C_sites, A)
-                      'rate_multipliers': rate_multipliers, #(C_frag, C_sites, K)
-                      'rate_matrix': subst_module_intermeds.get('rate_matrix',None), #(C_frag, C_sites, A, A) or None
-                      'exchangeabilities': subst_module_intermeds.get('exchangeabilities',None), #(A,A) or None
-                      'cond_subst_logprobs_per_mixture': cond_subst_logprobs_per_mixture, #(T, C_frag, C_sites, K, A, A)
-                      'joint_subst_logprobs_per_mixture': joint_subst_logprobs_per_mixture, #(T, C_frag, C_sites, K, A, A)
-                      'log_frag_class_probs': log_frag_class_probs, #(C_frag,)
-                      'log_site_class_probs': log_site_class_probs, #(C_frag, C_sites)
-                      'log_rate_mult_probs': log_rate_mult_probs } #(C_frag, C_sites, K)
-            out_dict = {**out_dict, **to_add}
+            out_dict['log_frag_class_probs'] = log_frag_class_probs #(C_frag,)
         
         return out_dict
+    
     
     def write_params(self,
                      t_array,
@@ -860,6 +962,8 @@ class FragAndSiteClassesLoadAll(FragAndSiteClasses):
     write_params
         write parameters to files
         
+    _get_emission_scoring_matrices
+    
     _get_scoring_matrices
     
     

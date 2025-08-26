@@ -944,10 +944,15 @@ class TKF91DomainTransitionLogprobs(TKF91TransitionLogprobs):
                                                jnp.float32) #(1, 2)
         
         # initializing probability of domain classes
-        self.domain_class_prob_logits = self.param('domain_class_prob_logits',
-                                                   nn.initializers.normal(),
-                                                   (self.num_domain_mixtures,),
-                                                   jnp.float32) #(C_dom,)
+        if self.num_domain_mixtures > 1:
+            self.domain_class_prob_logits = self.param('domain_class_prob_logits',
+                                                       nn.initializers.normal(),
+                                                       (self.num_domain_mixtures,),
+                                                       jnp.float32) #(C_dom,)
+        
+        elif self.num_domain_mixtures == 1:
+            self.domain_class_prob_logits = jnp.ones( (1,) )
+        
         
         ### decide tkf function
         if tkf_function_name == 'regular_tkf':
@@ -1024,7 +1029,7 @@ class TKF91DomainTransitionLogprobs(TKF91TransitionLogprobs):
         log_domain_class_probs = nn.log_softmax( self.domain_class_prob_logits, axis = -1 ) #(C_dom,)
         domain_class_probs = jnp.exp(log_domain_class_probs) #(C_dom,)
         
-        if sow_intermediates:
+        if (sow_intermediates) and (self.num_domain_mixtures > 1):
             for c_dom in range(domain_class_probs.shape[0]):
                 lab = f'{self.name}/domain {c_dom} class probabilities'
                 self.sow_histograms_scalars(mat= domain_class_probs[c_dom], 
@@ -1111,8 +1116,8 @@ class TKF91DomainTransitionLogprobs(TKF91TransitionLogprobs):
             matrix_dict = self.return_all_matrices(offset=offset,
                                                    joint_matrix=joint_matrix)
             matrix_dict['joint'] = matrix_dict['joint'][:,0,...]
-            matrix_dict['joint'] = matrix_dict['conditional'][:,0,...]
-            matrix_dict['joint'] = matrix_dict['marginal'][0,...]
+            matrix_dict['conditional'] = matrix_dict['conditional'][:,0,...]
+            matrix_dict['marginal'] = matrix_dict['marginal'][0,...]
             matrix_dict['log_corr'] = 0
         
         # add tkf92 indel parameters
@@ -1347,8 +1352,8 @@ class TKF91DomainTransitionLogprobsFromFile(TKF91DomainTransitionLogprobs):
             matrix_dict = self.return_all_matrices(offset=offset,
                                                    joint_matrix=joint_matrix)
             matrix_dict['joint'] = matrix_dict['joint'][:,0,...]
-            matrix_dict['joint'] = matrix_dict['conditional'][:,0,...]
-            matrix_dict['joint'] = matrix_dict['marginal'][0,...]
+            matrix_dict['conditional'] = matrix_dict['conditional'][:,0,...]
+            matrix_dict['marginal'] = matrix_dict['marginal'][0,...]
             matrix_dict['log_corr'] = 0
         
         # add tkf92 indel parameters
@@ -1481,10 +1486,13 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
                                           jnp.float32) #(C_dom, C_frag)
         
         # initializing probability of fragment classes
-        self.frag_class_prob_logits = self.param('frag_class_prob_logits',
-                                          nn.initializers.normal(),
-                                          (self.num_domain_mixtures, self.num_fragment_mixtures),
-                                          jnp.float32) #(C_dom, C_frag)
+        if self.num_fragment_mixtures > 1:
+            self.frag_class_prob_logits = self.param('frag_class_prob_logits',
+                                              nn.initializers.normal(),
+                                              (self.num_domain_mixtures, self.num_fragment_mixtures),
+                                              jnp.float32) #(C_dom, C_frag)
+        elif self.num_fragment_mixtures == 1:
+            self.frag_class_prob_logits = jnp.ones( self.num_domain_mixtures, 1 ) #(C_dom, C_frag)
         
         
         ### decide tkf function
@@ -1564,7 +1572,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
         log_frag_class_probs = nn.log_softmax( self.frag_class_prob_logits, axis = -1 ) #(C_dom, C_fr)
         frag_class_probs = jnp.exp(log_frag_class_probs) #(C_dom, C_fr)
         
-        if sow_intermediates:
+        if (sow_intermediates) and (C_frag > 1):
             for c_dom in range(frag_class_probs.shape[0]):
                 lab = f'{self.name}/fragment class probabilities, domain class {c_dom}'
                 self.sow_histograms_scalars(mat= frag_class_probs[c_dom, ...], 

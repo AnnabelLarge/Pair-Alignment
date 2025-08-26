@@ -195,7 +195,7 @@ class RateMultipliersPerClass(ModuleBase):
         sow_intermediates : bool
             switch for tensorboard logging
         
-        log_site_class_probs : ArrayLike, (C_trans, C_cites)
+        log_site_class_probs : ArrayLike, (C_trans, C_sites)
             (from a different module); the log-probability of latent class 
             assignment for the emission site mixture
         
