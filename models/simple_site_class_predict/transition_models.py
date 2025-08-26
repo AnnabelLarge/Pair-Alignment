@@ -37,7 +37,6 @@ import pickle
 from models.BaseClasses import ModuleBase
 from models.simple_site_class_predict.model_functions import (bound_sigmoid,
                                                               safe_log,
-                                                              # logsumexp_with_arr_lst,
                                                               log_one_minus_x,
                                                               switch_tkf,
                                                               regular_tkf,
@@ -67,7 +66,6 @@ def _expand_arr_in_dict(d, key, expected_ndims):
 
 ###############################################################################
 ### Geometric sequence length (no indels)   ###################################
-###############################################################################
 class GeomLenTransitionLogprobs(ModuleBase):
     """
     Simply assume sequence has geometrically-distributed sequence length
@@ -1024,7 +1022,7 @@ class TKF91DomainTransitionLogprobs(TKF91TransitionLogprobs):
         """
         ### P(C_domain) self.domain_class_prob_logits
         log_domain_class_probs = nn.log_softmax( self.domain_class_prob_logits, axis = -1 ) #(C_dom,)
-        domain_class_probs = jnp.exp(log_domain_class_probs) #(C_dom, C_fr)
+        domain_class_probs = jnp.exp(log_domain_class_probs) #(C_dom,)
         
         if sow_intermediates:
             for c_dom in range(domain_class_probs.shape[0]):
@@ -1074,9 +1072,6 @@ class TKF91DomainTransitionLogprobs(TKF91TransitionLogprobs):
         tkf_param_dict['log_offset'] = jnp.log(offset) #(1,)
         tkf_param_dict['log_one_minus_offset'] = jnp.log1p(-offset) #(1,)
         
-        # if approx_flags_dict is not None:
-        #     approx_flags_dict['t_array'] = t_array
-
         # record values
         if sow_intermediates:
             self.sow_histograms_scalars(mat= jnp.exp(tkf_param_dict['log_alpha'][:,0]), 
@@ -1101,7 +1096,6 @@ class TKF91DomainTransitionLogprobs(TKF91TransitionLogprobs):
                                         which='scalars')
         
         joint_matrix =  self.fill_joint_tkf91(tkf_param_dict) #(T, 1, S, S)
-        log_corr = 0
         
         if not return_all_matrices:
             # contents of final matrix_dict (remove unused dim):
@@ -1128,6 +1122,242 @@ class TKF91DomainTransitionLogprobs(TKF91TransitionLogprobs):
         matrix_dict = {**matrix_dict, **indel_params}
         
         return (log_domain_class_probs, matrix_dict, approx_flags_dict, tkf_param_dict)
+
+
+class TKF91DomainTransitionLogprobsFromFile(TKF91DomainTransitionLogprobs):
+    """
+    Domain-level TKF91 transitions, but load parameters from file
+    
+    B = batch size; number of samples
+    T = number of branch lengths; this could be: 
+        > an array of times for all samples (T; marginalize over these later)
+        > an array of time per sample (T=B)
+        > a quantized array of times per sample (T = T', where T' <= T)
+    S: number of transition states (4 here: M, I, D, start/end)
+        
+    Initialize with
+    ----------------
+    config : dict 
+        config["num_domain_mixtures"] : int
+            number of domain mixtures (for nested TKF model)
+        
+        config["tkf_function"] : {'regular_tkf','approx_tkf','switch_tkf'}
+            which function to use to solve for tkf parameters
+            
+        config["filenames"]["top_level_tkf_params_file"]
+            contains values for lambda, mu
+            
+        config["filenames"]["domain_class_probs"]: str
+              file of domain class probabilities to load
+            
+    name : str
+        class name, for flax
+    
+    
+    Methods here
+    ------------
+    setup
+    __call__
+    
+    
+    inherited from TKF91DomainTransitionLogprobs
+    ---------------------------------------------
+    fill_joint_tkf91
+        fills in joint TKF91 transition matrix
+    
+    return_all_matrices
+        return transition matrices used for joint, marginal, and conditional 
+        log-likelihood transitions
+    
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        """
+        C_dom: number of mixtures associated with nested TKF92 models (domain-level)
+        B = batch size; number of samples
+        T = number of branch lengths; this could be: 
+            > an array of times for all samples (T; marginalize over these later)
+            > an array of time per sample (T=B)
+            > a quantized array of times per sample (T = T', where T' <= T)
+        S: number of transition states (4 here: M, I, D, start/end)
+            
+            
+        Flax Module Parameters
+        -----------------------
+        None
+        """
+        ### unpack config
+        # required
+        self.num_domain_mixtures = self.config['num_domain_mixtures']
+        tkf_function_name = self.config['tkf_function']
+        tkf_params_file = self.config['filenames']['top_level_tkf_params_file']
+        
+        if self.num_domain_mixtures > 1:
+            domain_class_probs_file = self.config['filenames']['domain_class_probs']
+        
+        
+        ### read files
+        # tkf parameters
+        with open(tkf_params_file,'rb') as f:
+            param_dict = pickle.load(f)
+        
+        err = f'KEYS SEEN: {param_dict.keys()}'
+        assert 'lambda' in param_dict.keys(), err
+        assert 'mu' in param_dict.keys(), err
+        assert 'r_extend' in param_dict.keys(), err
+        
+        param_dict = _expand_arr_in_dict(param_dict, 'lambda', 1) #(C_dom,)
+        param_dict = _expand_arr_in_dict(param_dict, 'mu', 1) #(C_dom,)
+        param_dict = _expand_arr_in_dict(param_dict, 'r_extend', 2) #(C_dom, C_frag)
+        self.param_dict = param_dict
+        
+        # mixture probability of domain classes
+        if self.num_domain_mixtures > 1:
+            with open(domain_class_probs_file,'rb') as f:
+                domain_class_probs = jnp.load(f) #(C_dom,) 
+                
+            self.log_domain_class_probs = safe_log(frag_class_probs) #(C_dom,)
+        
+        elif self.num_domain_mixtures == 1:
+            self.log_domain_class_probs = jnp.zeros( (1,) ) #(C_dom,)
+        
+        assert self.log_domain_class_probs.shape[0] == self.num_domain_mixtures
+        
+        
+        ### decide tkf function
+        if tkf_function_name == 'regular_tkf':
+            self.tkf_function = regular_tkf
+        elif tkf_function_name == 'approx_tkf':
+            self.tkf_function = approx_tkf
+        elif tkf_function_name == 'switch_tkf':
+            self.tkf_function = switch_tkf
+    
+    def __call__(self,
+                 t_array,
+                 return_all_matrices: bool,
+                 sow_intermediates: bool):
+        
+        """
+        B = batch size; number of samples
+        T = number of branch lengths; this could be: 
+            > an array of times for all samples (T; marginalize over these later)
+            > an array of time per sample (T=B)
+            > a quantized array of times per sample (T = T', where T' <= T)
+        S: number of transition states (4 here: M, I, D, start/end)
+           
+        
+        Arguments
+        ----------
+        t_array : ArrayLike
+            branch lengths, times for marginalizing over
+        
+        return_all_matrices : bool
+            if false, only return the joint (used for model training)
+            if true, return joint, conditional, and marginal matrices
+        
+        sow_intermediates : bool
+            switch for tensorboard logging
+          
+        Returns
+        -------
+        log_domain_class_probs: (C_dom,)
+            
+        matrix_dict : dict
+            matrix_dict["joint"]: (T,S,S)
+                score transitions in joint probability calculation
+            
+            matrix_dict["lam"]: float
+                insert rates
+                
+            matrix_dict["mu"]: float
+                delete rates
+            
+            matrix_dict["offset"]: float
+                1 - (lam/mu)
+            
+            (if return_all_matrices) matrix_dict["marginal"]: (2,2)
+                score transitions in marginal probability calculation
+            
+            (if return_all_matrices) matrix_dict["conditional"]: (T,S,S)
+                score transitions in conditional probability calculation
+        
+            (if return_all_matrices) matrix_dict["corr"]: 0
+                placeholder value
+                
+        (placeholder None)
+            
+        tkf_param_dict : dict
+            alpha, beta, gamma (and all associated values)
+        """
+        ### P(C_domain) self.domain_class_prob_logits
+        log_domain_class_probs = self.log_domain_class_probs #(C_dom,)
+        domain_class_probs = jnp.exp( log_domain_class_probs ) #(C_dom,)
+        
+        
+        ### TKF91 top-level model
+        lam = self.param_dict['lambda'] #(C_dom,)
+        mu = self.param_dict['mu'] #(C_dom,)
+        offset = 1 - (lam /mu) #(C_dom,)
+        r_extend = self.param_dict['r_extend'] #(C_dom, C_frag)
+        
+        # only store float values, not the size 1 array
+        indel_params = {'mu': mu[0], #float
+                        'lam': lam[0], #float
+                        'offset': offset[0]} #float
+        
+        
+        ### get alpha, beta, gamma
+        # contents of tkf_param_dict ( all ArrayLike[float32], (1, T) ):
+        #   tkf_param_dict['log_alpha']
+        #   tkf_param_dict['log_one_minus_alpha']
+        #   tkf_param_dict['log_beta']
+        #   tkf_param_dict['log_one_minus_beta']
+        #   tkf_param_dict['log_gamma']
+        #   tkf_param_dict['log_one_minus_gamma']
+        #
+        # contents of approx_flags_dict ( all ArrayLike[bool], (T,) ):
+        #   tkf_param_dict['log_one_minus_alpha']
+        #   tkf_param_dict['log_beta']
+        #   tkf_param_dict['log_one_minus_gamma']
+        #   tkf_param_dict['log_gamma']
+        tkf_param_dict, _ = self.tkf_function(mu = mu, 
+                                              offset = offset,
+                                              t_array = t_array)
+        
+        # add to these dictionaries before filling out matrix
+        tkf_param_dict['log_offset'] = jnp.log(offset) #(1,)
+        tkf_param_dict['log_one_minus_offset'] = jnp.log1p(-offset) #(1,)
+        
+        # joint transition matrix
+        joint_matrix =  self.fill_joint_tkf91(tkf_param_dict) #(T, 1, S, S)
+        
+        if not return_all_matrices:
+            # contents of final matrix_dict (remove unused dim):
+            # matrix_dict['joint'] (T, S, S)
+            matrix_dict = {'joint': joint_matrix[:,0,...]}
+        
+        elif return_all_matrices:
+            # contents of final matrix_dict (remove unused dim):
+            # matrix_dict['joint'] (T, S, S)
+            # matrix_dict['conditional'] (T, S, S)
+            # matrix_dict['marginal'] (2, 2)
+            # matrix_dict['log_corr'] float
+            matrix_dict = self.return_all_matrices(offset=offset,
+                                                   joint_matrix=joint_matrix)
+            matrix_dict['joint'] = matrix_dict['joint'][:,0,...]
+            matrix_dict['joint'] = matrix_dict['conditional'][:,0,...]
+            matrix_dict['joint'] = matrix_dict['marginal'][0,...]
+            matrix_dict['log_corr'] = 0
+        
+        # add tkf92 indel parameters
+        # matrix_dict['lam'], float
+        # matrix_dict['mu'], float
+        # matrix_dict['offset'], float
+        matrix_dict = {**matrix_dict, **indel_params}
+        
+        return (log_domain_class_probs, matrix_dict, None, tkf_param_dict)
     
     
 ###############################################################################
@@ -1697,7 +1927,6 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
         param_dict = _expand_arr_in_dict(param_dict, 'r_extend', 2) #(C_dom, C_frag)
         self.param_dict = param_dict
         
-        
         # mixture probability of fragment classes
         if (self.num_domain_mixtures * self.num_fragment_mixtures) > 1:
             with open(frag_class_probs_file,'rb') as f:
@@ -1713,6 +1942,7 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
         
         assert self.log_frag_class_probs.shape[0] == self.num_domain_mixtures
         assert self.log_frag_class_probs.shape[1] == self.num_fragment_mixtures
+        
         
         ### pick tkf function
         if tkf_function_name == 'regular_tkf':

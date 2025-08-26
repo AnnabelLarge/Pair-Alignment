@@ -120,8 +120,8 @@ class FragAndSiteClasses(ModuleBase):
     
     Other methods
     --------------
-    _joint_logprob_align
-        calculate logP(anc, desc, align)
+    _get_scoring_matrices
+        get the transition and emission matrices
     
     
     Methods inherited from models.model_utils.BaseClasses.ModuleBase
@@ -486,7 +486,7 @@ class FragAndSiteClasses(ModuleBase):
                 out_dict['exchangeabilities'] : (A, A)
                 out_dict['cond_subst_logprobs_per_mixture'] : (T, C_frag, C_sites, K, A, A)
                 out_dict['joint_subst_logprobs_per_mixture'] : (T, C_frag, C_sites, K, A, A)
-                out_dict['log_fragment_class_probs'] : (C_frag,)
+                out_dict['log_fragment_class_probs'] : (C_dom, C_frag)
                 out_dict['log_site_class_probs'] : (C_frag, C_sites)
                 out_dict['log_rate_mult_probs'] : (C_frag, C_sites, K)
             
@@ -859,9 +859,9 @@ class FragAndSiteClassesLoadAll(FragAndSiteClasses):
     
     write_params
         write parameters to files
+        
+    _get_scoring_matrices
     
-    _joint_logprob_align
-        calculate logP(anc, desc, align)
     
     Methods inherited from models.model_utils.BaseClasses.ModuleBase
     -----------------------------------------------------------------

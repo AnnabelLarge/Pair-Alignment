@@ -14,11 +14,9 @@ from jax.scipy.special import logsumexp
 from models.simple_site_class_predict.transition_models import (TKF91TransitionLogprobs,
                                                                 TKF92TransitionLogprobs,
                                                                 TKF91DomainTransitionLogprobs)
-from models.simple_site_class_predict.model_functions import (get_tkf92_single_seq_marginal_transition_logprobs,
-                                                              logsumexp_with_arr_lst,
+from models.simple_site_class_predict.model_functions import (logsumexp_with_arr_lst,
                                                               log_one_minus_x,
                                                               logspace_marginalize_inf_transits,
-                                                              regular_tkf,
                                                               log_matmul)
 
 
@@ -472,7 +470,7 @@ i_to_d = logsumexp_with_arr_lst( [mx_to_my[..., 1, 2],
                                   mx_to_dd[..., 1],
                                   ii_to_mx[..., 2], 
                                   ii_to_dd] ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
-i_to_e = ii_to_ee[:, :, None, :, None] # (T, C_dom_from, 1, C_frag_from, 1)
+i_to_e = jnp.logaddexp(mx_to_ee[..., 1], ii_to_ee)[:, :, None, :, None] # (T, C_dom_from, 1, C_frag_from, 1)
 i_to_e = jnp.broadcast_to( i_to_e, i_to_m.shape ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
 ins_to_any = jnp.stack( [i_to_m, i_to_i, i_to_d, i_to_e], axis=-1 ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to, 4)
 del i_to_m, i_to_i, i_to_d, i_to_e
@@ -487,7 +485,7 @@ d_to_d = logsumexp_with_arr_lst( [mx_to_my[..., 2, 2],
                                   mx_to_dd[..., 2],
                                   dd_to_mx[..., 2],
                                   dd_to_dd] ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
-d_to_e = dd_to_ee[:, :, None, :, None] # (T, C_dom_from, 1, C_frag_from, 1)
+d_to_e = jnp.logaddexp(mx_to_ee[..., 2], dd_to_ee)[:, :, None, :, None] # (T, C_dom_from, 1, C_frag_from, 1)
 d_to_e = jnp.broadcast_to( d_to_e, d_to_m.shape ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
 del_to_any = jnp.stack( [d_to_m, d_to_i, d_to_d, d_to_e], axis=-1 ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to, 4)
 del d_to_m, d_to_i, d_to_d, d_to_e
@@ -503,6 +501,7 @@ start_to_any = start_to_any[:, None, :, None, :, :] # (T, 1, C_dom_to, 1, C_frag
 start_to_any = jnp.broadcast_to(start_to_any, match_to_any.shape)  # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to, 4)
 del s_to_e
 
+# the transition matrix in LOG SPACE
 transit_mat = jnp.stack( [match_to_any, ins_to_any, del_to_any, start_to_any], axis=-2 ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to, 4, 4)
 
 

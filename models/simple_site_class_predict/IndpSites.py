@@ -524,8 +524,10 @@ class IndpSites(ModuleBase):
             out = self.transitions_module( t_array = t_array,
                                            return_all_matrices = return_all_matrices,
                                            sow_intermediates = sow_intermediates )
-            _, all_transit_matrices, approx_flags_dict = out
-        
+            all_transit_matrices = out[1]
+            approx_flags_dict = out[2]
+            del out
+            
         
         ###########################################################
         ### build log-transformed equilibrium distribution; get   #
