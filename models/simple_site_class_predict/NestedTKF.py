@@ -244,13 +244,11 @@ class NestedTKF(FragAndSiteClasses):
         
         out['log_domain_class_probs'] :  ArrayLike, (C_dom,)
         out['dom_joint_transit_mat'] :  ArrayLike, (T, S_from, S_to)
+        out['frag_marginal_transit_mat'] :  ArrayLike, (C_dom, C_frag_to, C_frag_from, 2, 2)
         
         out['lam_dom'] :  float 
         out['mu_dom'] :  float 
         out['offset_dom'] :  float
-        
-        if return_all_matrices:
-            out['frag_marginal_transit_mat'] :  ArrayLike, (C_dom, C_frag_to, C_frag_from, 2, 2)
             
         """
         # fragment
@@ -300,6 +298,7 @@ class NestedTKF(FragAndSiteClasses):
                'r_frag': r_frag,
                'log_domain_class_probs': log_domain_class_probs,
                'dom_joint_transit_mat': dom_joint_transit_mat,
+               'dom_marginal_transit_mat': dom_marginal_transit_mat,
                'lam_dom': lam_dom,
                'mu_dom': mu_dom,
                'offset_dom': offset_dom}
@@ -342,82 +341,52 @@ class NestedTKF(FragAndSiteClasses):
 
         log_one_minus_z_t = log_one_minus_x( log_z_t ) #(T,)
         log_one_minus_z_0 = log_one_minus_x( log_z_0 ) #float
-
-
+ 
+    
         ### create T_mat_{MIDS, MIDE} to modify later
         # multiply any -> M by (1 - z_t)
         mask = jnp.concatenate( [jnp.ones(  (T, S, 1), dtype = bool),
                                  jnp.zeros( (T, S, 3), dtype=bool )], axis=2 )
         log_T_mat = jnp.where(mask, 
-                          dom_joint_transit_mat + log_one_minus_z_t[:,None,None], 
-                          dom_joint_transit_mat) #(T, S_from, S_to)
+                              dom_joint_transit_mat + log_one_minus_z_t[:,None,None], 
+                              dom_joint_transit_mat) #(T, S_from, S_to)
         del mask
-
+        
         # multiply any ->ID by (1 - z_0)
         mask = jnp.concatenate( [jnp.zeros( (T, S, 1), dtype = bool),
                                  jnp.ones(  (T, S, 2), dtype = bool),
                                  jnp.zeros( (T, S, 1), dtype = bool)], axis=2 )
-        log_T_mat = jnp.where(mask, log_T_mat + log_one_minus_z_0, log_T_mat) #(T, S_from, S_to)
+        log_T_mat = jnp.where(mask, 
+                              log_T_mat + log_one_minus_z_0, 
+                              log_T_mat) #(T, S_from, S_to)
         del mask
-
+        
 
         ### get U_{MIDS, AB}
         #   M: 0
         #   I: 1
         #   D: 2
         # S/E: 3
-
-        # U_{M,A} = z_t \tau_{M,M} + z_0 \tau_{M,I}
-        log_u_m_a = jnp.logaddexp( log_z_t + dom_joint_transit_mat[:, 0, 0],
-                                   log_z_0 + dom_joint_transit_mat[:, 0, 1] ) #(T,)
-
-        # U_{I,A} = z_t \tau_{I,I} + z_0 \tau_{I,I}
-        log_u_i_a = jnp.logaddexp( log_z_t + dom_joint_transit_mat[:, 1, 1],
-                                   log_z_0 + dom_joint_transit_mat[:, 1, 1] ) #(T,)
-
-        # U_{D,A} = z_t \tau_{D,D} + z_0 \tau_{D,I}
-        log_u_d_a = jnp.logaddexp( log_z_t + dom_joint_transit_mat[:, 2, 2],
-                                   log_z_0 + dom_joint_transit_mat[:, 2, 1] ) #(T,)
-
-        # U_{S,A} = z_t \tau_{S,M} + z_0 \tau_{S,I}
-        log_u_s_a = jnp.logaddexp( log_z_t + dom_joint_transit_mat[:, 3, 0],
-                                   log_z_0 + dom_joint_transit_mat[:, 3, 1] ) #(T,)
-
-        # concatenate all into a column
-        log_u_mids_a = jnp.stack([log_u_m_a, log_u_i_a, log_u_d_a, log_u_s_a], axis=1) #(T, 4)
-        del log_u_m_a, log_u_i_a, log_u_d_a, log_u_s_a
-
+        
+        # U_{any,A} = z_t \tau_{any, M} + z_0 \tau_{any, I}
+        log_u_mids_a_pt1 = dom_joint_transit_mat[..., 0] + log_z_t[:, None] #(T, 4)
+        log_u_mids_a_pt2 = dom_joint_transit_mat[..., 1] + log_z_0 #(T, 4)
+        log_u_mids_a = jnp.logaddexp( log_u_mids_a_pt1, log_u_mids_a_pt2 ) #(T, 4)
+        del log_u_mids_a_pt1, log_u_mids_a_pt2
+        
         # U_{MIDS, D} = z_0 \tau_{MIDS,D}
-        log_u_mids_b = log_z_0 + dom_joint_transit_mat[..., 2] #(T, 4)
+        log_u_mids_b = dom_joint_transit_mat[..., 2] + log_z_0 #(T, 4)
 
         # final mat
         log_u_mids_ab = jnp.stack([log_u_mids_a, log_u_mids_b], axis=2) #(T, 4, 2)
         del log_u_mids_a, log_u_mids_b
 
 
-        ### get U_{AB, MIDS} from already-created log_T_mat
-        # U_{A, MIDE} = T_mat_{M, any}
-        # U_{B, MIDE} = T_mat_{D, any}
-        log_u_ab_mide = log_T_mat[:, [0,2], :] #(T, 2, 4)
-
-
-        ### get U_{AB, AB}
-        # U_{A, AB} = U_{M,AB}
-        log_u_a_ab = log_u_mids_ab[:,0,:] #(T, 2)
-
-        # U_{B, A} = z_t \tau_{D,M} + z_0 \tau_{DI}
-        log_u_b_a = jnp.logaddexp( log_z_t + dom_joint_transit_mat[:, 2, 0],
-                                   log_z_0 + dom_joint_transit_mat[:, 2, 1] ) #(T,)
-
-        # U_{B, B} = U_{D,B}
-        log_u_b_b = log_u_mids_ab[:,2,1] #(T,)
-
-        # create the full matrix from parts
-        log_u_b_ab = jnp.stack([log_u_b_a, log_u_b_b], axis=1) #(T, 2)
-        log_u_ab_ab = jnp.stack([log_u_a_ab, log_u_b_ab], axis=1) #(T, 2, 2)
-        del log_u_b_a, log_u_b_b, log_u_a_ab, log_u_b_ab
-
-
+        ### get U_{AB, MIDS}, U_{AB, AB} from already-created log_T_mat
+        log_u_ab_mide = log_T_mat[:, [0, 2], :] #(T, 2, 4)
+        log_u_ab_ab = log_u_mids_ab[:, [0, 2], :] #(T, 2, 2)
+        
+        
         ### T_{MIDS, MIDE} = U_{MIDS, MIDE} + U_{MIDS,AB} * (I-U_{AB,AB})^-1 * U_{AB,MIDE}
         # modifying matrix: U_{MIDS,AB} * (I-U_{AB,AB})^-1 * U_{AB,MIDE}
         log_inv_arg = logspace_marginalize_inf_transits( log_u_ab_ab ) #(T, 2, 2)
@@ -426,8 +395,6 @@ class NestedTKF(FragAndSiteClasses):
         modifier = log_matmul( log_A = mod_first_half, 
                                log_B = log_u_ab_mide ) #(T, 4, 4)
         log_T_mat = jnp.logaddexp( log_T_mat, modifier ) #(T, S_from, S_to)
-        del log_inv_arg, mod_first_half, modifier, log_u_mids_ab, log_u_ab_mide, log_u_ab_ab
-        del log_one_minus_z_0, log_one_minus_z_t, log_z_0, log_z_t
         
         return log_T_mat #(T, S_from, S_to)
     
@@ -496,6 +463,7 @@ class NestedTKF(FragAndSiteClasses):
                                            frag_marginal_transit_mat,
                                            r_frag,
                                            log_T_mat):
+        
         """
         all the tansitions needed for the final joint transition matrix
         
@@ -511,8 +479,11 @@ class NestedTKF(FragAndSiteClasses):
         frag_tkf_params_dict : dict
         frag_joint_transit_mat : ArrayLike, (T, C_dom, C_frag_from, C_frag_to, S_from, S_to)
         frag_marginal_transit_mat : ArrayLike, (C_dom, C_frag_from, C_frag_to, 2, 2)
-        r_frag : ArrayLike, (C_dom, C_frag)
         log_T_mat : ArrayLike (T, S_from, S_to)
+        
+        r_frag : ArrayLike, (C_dom, C_frag)
+            THIS VALUE IN PROB SPACE!!!
+        
         
         Returns: dict
         --------------
@@ -535,6 +506,8 @@ class NestedTKF(FragAndSiteClasses):
         out['ss_to_ii'] : ArrayLike, (T, C_dom_to, C_frag_to)
         out['ss_to_dd'] : ArrayLike, (T, C_dom_to, C_frag_to)
         """
+        mask_indels = (self.num_domain_mixtures == 1)
+        
         
         ##############################################
         ### Precompute some values that get reused   #
@@ -644,13 +617,15 @@ class NestedTKF(FragAndSiteClasses):
                      log_T_mat[:,1,1][:, None, None, None, None] +
                      start_single_seq_frag_g[None, None, :, None, :] ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
 
-        # if extending the domain and/or fragment, add probabilities from MARGINAL transitions of fragment-level mixture model
-        prev_values = jnp.transpose( jnp.diagonal(ii_to_ii, axis1=1, axis2=2), (0, 3, 1, 2) ) #(T, C_dom, C_frag_from, C_frag_to)
-        new_values = jnp.logaddexp( prev_values, frag_marginal_transit_mat[..., 0,0] ) #(T, C_dom, C_frag_from, C_frag_to)
-        
-        idx = jnp.arange(self.num_domain_mixtures)
-        ii_to_ii = ii_to_ii.at[:, idx, idx, ...].set(new_values) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
-        del prev_values, new_values, idx
+        if not mask_indels:
+            # if extending the domain and/or fragment, add probabilities from 
+            #   MARGINAL transitions of fragment-level mixture model
+            prev_values = jnp.transpose( jnp.diagonal(ii_to_ii, axis1=1, axis2=2), (0, 3, 1, 2) ) #(T, C_dom, C_frag_from, C_frag_to)
+            new_values = jnp.logaddexp( prev_values, frag_marginal_transit_mat[..., 0,0] ) #(T, C_dom, C_frag_from, C_frag_to)
+            
+            idx = jnp.arange(self.num_domain_mixtures)
+            ii_to_ii = ii_to_ii.at[:, idx, idx, ...].set(new_values) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
+            del prev_values, new_values, idx
 
 
         ### II -> MY, DD, EE
@@ -686,13 +661,15 @@ class NestedTKF(FragAndSiteClasses):
                      log_T_mat[:,2,2][:, None, None, None, None] +
                      start_single_seq_frag_g[None, None, :, None, :] ) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
 
-        # if extending the domain and/or fragment, add probabilities from MARGINAL transitions of fragment-level mixture model
-        prev_values = jnp.transpose( jnp.diagonal(dd_to_dd, axis1=1, axis2=2), (0, 3, 1, 2) ) #(T, C_dom, C_frag_from, C_frag_to)
-        new_values = jnp.logaddexp( prev_values, frag_marginal_transit_mat[..., 0,0] ) #(T, C_dom, C_frag_from, C_frag_to)
-
-        idx = jnp.arange(self.num_domain_mixtures)
-        dd_to_dd = dd_to_dd.at[:, idx, idx, ...].set(new_values) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
-        del prev_values, new_values, idx
+        if not mask_indels:
+            # if extending the domain and/or fragment, add probabilities 
+            # from MARGINAL transitions of fragment-level mixture model
+            prev_values = jnp.transpose( jnp.diagonal(dd_to_dd, axis1=1, axis2=2), (0, 3, 1, 2) ) #(T, C_dom, C_frag_from, C_frag_to)
+            new_values = jnp.logaddexp( prev_values, frag_marginal_transit_mat[..., 0,0] ) #(T, C_dom, C_frag_from, C_frag_to)
+    
+            idx = jnp.arange(self.num_domain_mixtures)
+            dd_to_dd = dd_to_dd.at[:, idx, idx, ...].set(new_values) # (T, C_dom_from, C_dom_to, C_frag_from, C_frag_to)
+            del prev_values, new_values, idx
 
 
         ### DD -> MY, II, EE
@@ -726,7 +703,7 @@ class NestedTKF(FragAndSiteClasses):
         # start_pair_frag_g: (T, C_dom_to, C_frag_to, (S_to \in MID) )
         #          ss_to_my: (T, C_dom_to, C_frag_to, (S_to \in MID) )
         ss_to_my = log_T_mat[:,3,0][:,None, None, None] + start_pair_frag_g #(T, C_dom_to, C_frag_to, (S_to \in MID) )
-
+        
         #  log_T_mat[:,3,1]: (T,        1,         1)
         # start_pair_frag_g: (T, C_dom_to, C_frag_to)
         #          ss_to_ii: (T, C_dom_to, C_frag_to)
@@ -989,6 +966,10 @@ class NestedTKF(FragAndSiteClasses):
             raw_joint_logT_mat = jnp.ones( (T, S, S) ) * jnp.finfo(jnp.float32).min # (T, S_from, S_to)
             raw_joint_logT_mat = raw_joint_logT_mat.at[:, 3, 0].set(0.0)
             raw_joint_logT_mat = raw_joint_logT_mat.at[:, 0, 3].set(0.0)
+            
+            # replace the top-level TKF91 S->E transition with fragment-level TKF92 S->E transition
+            new_val = out_dict['frag_joint_transit_mat'][:, 0, 0, 0, 3, 3]
+            raw_joint_logT_mat = raw_joint_logT_mat.at[:, 3, 3].set(new_val)
         
         joint_transit_entries = self._retrieve_joint_transition_entries( log_domain_class_probs = out_dict['log_domain_class_probs'],
                                                                         log_frag_class_probs = out_dict['log_frag_class_probs'],
@@ -1017,6 +998,10 @@ class NestedTKF(FragAndSiteClasses):
                 raw_marg_logT_mat = jnp.ones( (T, 2, 2) ) * jnp.finfo(jnp.float32).min # (T, S_from, S_to)
                 raw_marg_logT_mat = raw_joint_logT_mat.at[:, 1, 0].set(0.0)
                 raw_marg_logT_mat = raw_joint_logT_mat.at[:, 0, 1].set(0.0)
+                
+                # replace the top-level TKF91 S->E transition with fragment-level TKF92 S->E transition
+                new_val = out_dict['frag_marginal_transit_mat'][:, 0, 0, 0, 1, 1]
+                raw_marg_logT_mat = raw_marg_logT_mat.at[:, 1, 1].set(new_val)
                 
             marginal_transit_mat = self._build_marginal_nested_tkf_matrix( log_domain_class_probs = out_dict['log_domain_class_probs'],
                                                                         log_frag_class_probs = out_dict['log_frag_class_probs'],
