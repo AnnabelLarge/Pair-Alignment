@@ -430,7 +430,7 @@ class NestedTKF(FragAndSiteClasses):
         log_one_minus_z_0 = log_one_minus_x( log_z_0 ) #float
 
         # multiply any -> M by (1 - z_t)
-        log_T_mat = dom_marginal_transit_mat.at[:, :, 0].add( log_one_minus_z_0 ) #(2, 2)
+        log_T_mat = dom_marginal_transit_mat.at[:, 0].add( log_one_minus_z_0 ) #(2, 2)
         
         
         ### get modifying matrix
@@ -995,13 +995,13 @@ class NestedTKF(FragAndSiteClasses):
             
             elif C_dom == 1:
                 # WARNING: will this trigger numerical instabilities...?
-                raw_marg_logT_mat = jnp.ones( (T, 2, 2) ) * jnp.finfo(jnp.float32).min # (T, S_from, S_to)
-                raw_marg_logT_mat = raw_joint_logT_mat.at[:, 1, 0].set(0.0)
-                raw_marg_logT_mat = raw_joint_logT_mat.at[:, 0, 1].set(0.0)
+                raw_marg_logT_mat = jnp.ones( (2, 2) ) * jnp.finfo(jnp.float32).min # (T, S_from, S_to)
+                raw_marg_logT_mat = raw_marg_logT_mat.at[1, 0].set(0.0)
+                raw_marg_logT_mat = raw_marg_logT_mat.at[0, 1].set(0.0)
                 
                 # replace the top-level TKF91 S->E transition with fragment-level TKF92 S->E transition
-                new_val = out_dict['frag_marginal_transit_mat'][:, 0, 0, 0, 1, 1]
-                raw_marg_logT_mat = raw_marg_logT_mat.at[:, 1, 1].set(new_val)
+                new_val = out_dict['frag_marginal_transit_mat'][0, 0, 0, 1, 1]
+                raw_marg_logT_mat = raw_marg_logT_mat.at[1, 1].set(new_val)
                 
             marginal_transit_mat = self._build_marginal_nested_tkf_matrix( log_domain_class_probs = out_dict['log_domain_class_probs'],
                                                                         log_frag_class_probs = out_dict['log_frag_class_probs'],
