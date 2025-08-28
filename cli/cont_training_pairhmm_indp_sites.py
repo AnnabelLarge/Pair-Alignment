@@ -367,29 +367,30 @@ def cont_training_pairhmm_indp_sites(args,
     
     ### un-transform parameters and write to numpy arrays
     # if using one branch length per sample, write arrays with the test set
-    if t_array_for_all_samples is not None:
-        best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
-                                          t_array = t_array_for_all_samples,
-                                          prefix = '',
-                                          out_folder = args.out_arrs_dir,
-                                          write_time_static_objs = True,
-                                          method = pairhmm_instance.write_params )
-        
-    elif t_array_for_all_samples is None:
-        t_arr = test_dset.times
-        
-        pt_id = 0
-        for i in tqdm( range(0, t_arr.shape[0], args.batch_size) ):
-            batch_t = jnp.array( t_arr[i : (i + args.batch_size)] )
-            batch_prefix = f'test-set_pt{pt_id}'
+    if args.save_arrs:
+        if t_array_for_all_samples is not None:
             best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
-                                              t_array = batch_t,
-                                              prefix = batch_prefix,
+                                              t_array = t_array_for_all_samples,
+                                              prefix = '',
                                               out_folder = args.out_arrs_dir,
-                                              write_time_static_objs = (pt_id==0),
+                                              write_time_static_objs = True,
                                               method = pairhmm_instance.write_params )
             
-            pt_id += 1
+        elif t_array_for_all_samples is None:
+            t_arr = test_dset.times
+            
+            pt_id = 0
+            for i in tqdm( range(0, t_arr.shape[0], args.batch_size) ):
+                batch_t = jnp.array( t_arr[i : (i + args.batch_size)] )
+                batch_prefix = f'test-set_pt{pt_id}'
+                best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
+                                                  t_array = batch_t,
+                                                  prefix = batch_prefix,
+                                                  out_folder = args.out_arrs_dir,
+                                                  write_time_static_objs = (pt_id==0),
+                                                  method = pairhmm_instance.write_params )
+                
+                pt_id += 1
         
     
 

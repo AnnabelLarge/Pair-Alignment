@@ -825,11 +825,11 @@ class IndpSites(ModuleBase):
                     offs_max_val = self.transitions_module.offs_max_val #float
                     mu_offset_logits = self.transitions_module.tkf_mu_offset_logits #(2,)
                 
-                    mu = bound_sigmoid(x = mu_offset_logits[0],
+                    mu = bound_sigmoid(x = mu_offset_logits[0,0],
                                        min_val = mu_min_val,
                                        max_val = mu_max_val).item() #float
                     
-                    offset = bound_sigmoid(x = mu_offset_logits[1],
+                    offset = bound_sigmoid(x = mu_offset_logits[0,1],
                                              min_val = offs_min_val,
                                              max_val = offs_max_val).item() #float
                     lam = mu * (1 - offset)  #float

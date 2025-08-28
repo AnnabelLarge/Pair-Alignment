@@ -31,8 +31,8 @@
         "gradients": false,
         "optimizer": false
     },
-    "save_arrs": true,
-    "save_per_sample_losses": true,
+    "save_arrs": false,
+    "save_per_sample_losses": false,
     "norm_reported_loss_by": "desc_len",
     "checkpoint_freq_during_training": 0,
 

@@ -1498,7 +1498,7 @@ class TKF92TransitionLogprobs(TKF91TransitionLogprobs):
                                               (self.num_domain_mixtures, self.num_fragment_mixtures),
                                               jnp.float32) #(C_dom, C_frag)
         elif self.num_fragment_mixtures == 1:
-            self.frag_class_prob_logits = jnp.ones( self.num_domain_mixtures, 1 ) #(C_dom, C_frag)
+            self.frag_class_prob_logits = jnp.ones( (self.num_domain_mixtures, 1) ) #(C_dom, C_frag)
         
         
         ### decide tkf function

@@ -19,7 +19,7 @@ from dloaders.init_dataloader import init_dataloader
 
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update("jax_debug_infs", True)
-jax.config.update("jax_enable_x64", True)
+# jax.config.update("jax_enable_x64", True)
 
 
 def main():
@@ -89,8 +89,7 @@ def main():
     
     # UNCOMMENT TO RUN IN SPYDER IDE
     top_level_args.task = 'train'
-    top_level_args.configs = 'CONFIG_train_fragment_site_class_model.json'
-    # top_level_args.configs = 'CONFIG_eval_nested_tkf.json'
+    top_level_args.configs = 'example_config_indp_sites_model.json'
     top_level_args.load_dset_pkl = None
     
     
