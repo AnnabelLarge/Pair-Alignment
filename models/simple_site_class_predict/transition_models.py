@@ -357,7 +357,7 @@ class TKF91TransitionLogprobs(ModuleBase):
         ### initialize logits for mu, offset
         self.tkf_mu_offset_logits = self.param('tkf_mu_offset_logits',
                                                nn.initializers.normal(),
-                                               (C_dom,2),
+                                               (1,2),
                                                jnp.float32) #(C_dom, 2)
         
         
