@@ -589,8 +589,18 @@ class IndpSites(ModuleBase):
         ################################
         ### suppress all unused dims   #
         ################################
+        # indel model outputs, if TKF91
+        if self.indel_model_type == 'tkf91':
+            breakpoint()
+            all_transit_matrices['joint'] = all_transit_matrices['joint'][:,0,...] # (T, S, S)
+    
+            if return_all_matrices:
+                all_transit_matrices['conditional'] = all_transit_matrices['conditional'][:,0,...] # (T, S, S)
+                all_transit_matrices['marginal'] = all_transit_matrices['marginal'][0,...] # (S, S)
+                all_transit_matrices['log_corr'] = all_transit_matrices['log_corr'][0,0] # float
+                
         # indel model outputs, if TKF92
-        if self.indel_model_type == 'tkf92':
+        elif self.indel_model_type == 'tkf92':
             all_transit_matrices['joint'] = all_transit_matrices['joint'][:,0,0,0,...] # (T, S, S)
     
             if return_all_matrices:
