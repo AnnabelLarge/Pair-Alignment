@@ -1,17 +1,17 @@
 {
-    "training_wkdir": "RESULTS",
+    "training_wkdir": "RESULTS_train_frag-mix",
     "rng_seednum": 0,
 
     "data_dir": "example_data",
     "train_dset_splits": ["sevenSamp"],
-    "test_dset_splits": ["sevenSamp"],
+    "test_dset_splits": ["sevenSamp"],    
     "toss_alignments_longer_than": null,
-    "bos_eos_as_match": false,
+    "chunk_length": 512,
     "batch_size": 7,
     "emission_alphabet_size": 20,
     "gap_idx": 43,
 
-    "num_epochs": 3,
+    "num_epochs": 100,
     "optimizer_config": {
         "init_value": 0.005,
         "peak_value": 0.005,
@@ -22,7 +22,8 @@
     },
     "early_stop_cond1_atol": 1e-3,
     "early_stop_cond2_gap": 3,
-    "patience": 10,
+    "patience": 100,
+    "checkpoint_freq_during_training": 0,
     "update_grads": true,
 
     "interms_for_tboard": {
@@ -34,15 +35,14 @@
     "save_arrs": true,
     "save_per_sample_losses": true,
     "norm_reported_loss_by": "desc_len",
-    "checkpoint_freq_during_training": 0,
 
-    "pred_model_type": "pairhmm_indp_sites",
+    "pred_model_type": "pairhmm_frag_and_site_classes",
     "pred_config": {
         "load_all": false,
 
         "num_domain_mixtures": 1,
-        "num_fragment_mixtures": 1,
-        "num_site_mixtures": 2,
+        "num_fragment_mixtures": 2,
+        "num_site_mixtures": 3,
         "k_rate_mults": 4,
 
         "subst_model_type": "f81",
@@ -50,10 +50,9 @@
         "norm_rate_matrix": true,
         "norm_rate_mults": true,
 
-        "indel_model_type": "tkf92",
-        "tkf_function": "switch_tkf",
+        "tkf_function": "regular_tkf",
 
         "times_from": "t_per_sample"
-        }
+    }
     
 }

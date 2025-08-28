@@ -308,7 +308,8 @@ def _load_aligned_mats(data_dir,
     
     ### pairHMM: concatenate zero-padding matrix; toss negative nine-padding matrix
     elif pred_model_type in ['pairhmm_indp_sites',
-                             'pairhmm_frag_and_site_classes']:
+                             'pairhmm_frag_and_site_classes',
+                             'pairhmm_nested_tkf']:
         zero_padded_mat = np.concatenate([gapped_seqs, alignment[...,None]], axis=-1) # (B, L, 3)
         neg_nine_padded_mat = None
     
@@ -477,7 +478,7 @@ class FullLenDset(Dataset):
             prefixes of the datasets to include
         
         pred_model_type : ['pairhmm_indp_sites', 'pairhmm_frag_and_site_classes', 
-                           'feedforward', 'neural_hmm']
+                           'pairhmm_nested_tkf', 'feedforward', 'neural_hmm']
             what the broad classification of the model is; changes behaviors here
         
         use_scan_fns : bool

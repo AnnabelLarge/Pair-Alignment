@@ -508,10 +508,11 @@ class FeedforwardTrainingWrapper(TrainingWrapper):
         self.write_approx_dict_fn = lambda *args, **kwargs: None
         self.optional_outputs_writer = write_optional_outputs_during_training
 
-class FragAndSiteClassesTrainingWrapper(TrainingWrapper):
+class TransitMixesTrainingWrapper(TrainingWrapper):
     def _model_specific_inits(self):
         # check model type again
-        assert self.args.pred_model_type == 'pairhmm_frag_and_site_classes'
+        assert self.args.pred_model_type in ['pairhmm_frag_and_site_classes',
+                                             'pairhmm_nested_tkf']
         
         # continue init
         self.seqlen_bin_fn = lambda *args, **kwargs: None

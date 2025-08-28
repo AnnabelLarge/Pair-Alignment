@@ -5,8 +5,8 @@ Created on Tue Jun 24 15:07:29 2025
 
 @author: annabel
 """
+from jax import numpy as jnp
 import numpy as np
-
 
 def init_time_array(args):
     ### init from geometric grid, like in cherryML
@@ -24,7 +24,7 @@ def init_time_array(args):
         # make sure it's small times -> large times
         t_array.sort(reverse=False)
         
-        return np.array(t_array)
+        return jnp.array(t_array)
     
     
     ### read grid of times from flat text file
@@ -40,7 +40,7 @@ def init_time_array(args):
         # make sure it's small times -> large times
         t_array.sort(reverse=False)
         
-        return np.array(t_array)
+        return jnp.array(t_array)
     
     
     ### figure out time quantization per sample... later

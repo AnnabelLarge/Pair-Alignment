@@ -59,8 +59,8 @@ def init_full_len_dset( args: Namespace,
             
     ### enforce defaults: markovian alignment algorithms
     elif pred_model_type in ['pairhmm_frag_and_site_classes',
+                             'pairhmm_nested_tkf',
                              'neural_hmm']:
-        
         # enforce defaults about emission alphabet size
         if argparse_obj.pred_config['subst_model_type'] == 'hky85':
             emission_alphabet_size = 4
@@ -68,7 +68,8 @@ def init_full_len_dset( args: Namespace,
             emission_alphabet_size = 20
         
         # regular pairhmm doesn't use scan functions
-        if pred_model_type == 'pairhmm_frag_and_site_classes':
+        if pred_model_type in ['pairhmm_frag_and_site_classes',
+                               'pairhmm_nested_tkf']:
             argparse_obj.use_scan_fns = False
     
     

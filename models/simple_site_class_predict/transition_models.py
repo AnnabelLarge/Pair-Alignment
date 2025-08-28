@@ -18,12 +18,14 @@ originals:
 'GeomLenTransitionLogprobs',
 'TKF91TransitionLogprobs',
 'TKF92TransitionLogprobs',
+'TKF91DomainTransitionLogprobs',
 
 loading from files:
 --------------------
 'GeomLenTransitionLogprobsFromFile',
 'TKF91TransitionLogprobsFromFile',
 'TKF92TransitionLogprobsFromFile',
+'TKF91DomainTransitionLogprobsFromFile',
 
 """
 # jumping jax and leaping flax
@@ -752,8 +754,10 @@ class TKF91TransitionLogprobsFromFile(TKF91TransitionLogprobs):
         # read file
         # lam and mu should be (C_dom, )
         with open(in_file,'rb') as f:
-            self.param_dict = _expand_vals_in_dict(pickle.load(f), 1) 
+            param_dict = _expand_vals_in_dict(pickle.load(f), 1) 
                 
+        self.param_dict = {k: jnp.array(v) for k,v in param_dict.items()}
+        
         err = f'KEYS SEEN: {self.param_dict.keys()}'
         assert 'lambda' in self.param_dict.keys(), err
         assert 'mu' in self.param_dict.keys(), err
@@ -1207,6 +1211,8 @@ class TKF91DomainTransitionLogprobsFromFile(TKF91DomainTransitionLogprobs):
         # tkf parameters
         with open(tkf_params_file,'rb') as f:
             param_dict = pickle.load(f)
+        
+        param_dict = {k: jnp.array(v) for k,v in param_dict.items()}
         
         err = f'KEYS SEEN: {param_dict.keys()}'
         assert 'lambda' in param_dict.keys(), err
@@ -1924,6 +1930,8 @@ class TKF92TransitionLogprobsFromFile(TKF92TransitionLogprobs):
         # tkf parameters
         with open(tkf_params_file,'rb') as f:
             param_dict = pickle.load(f)
+        
+        param_dict = {k: jnp.array(v) for k,v in param_dict.items()}
         
         err = f'KEYS SEEN: {param_dict.keys()}'
         assert 'lambda' in param_dict.keys(), err

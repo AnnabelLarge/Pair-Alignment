@@ -26,27 +26,32 @@
     "update_grads": true,
 
     "interms_for_tboard": {
-        "finalpred_sow_outputs": true,
-        "forward_pass_outputs": true,
-        "gradients": true
+        "finalpred_sow_outputs": false,
+        "forward_pass_outputs": false,
+        "gradients": false,
+        "optimizer": false
     },
     "save_arrs": true,
     "save_per_sample_losses": true,
     "norm_reported_loss_by": "desc_len",
+    "checkpoint_freq_during_training": 0,
 
     "pred_model_type": "pairhmm_frag_and_site_classes",
     "pred_config": {
         "load_all": false,
-        "num_mixtures": 2,
-        "random_init_exchanges": true,
+
+        "num_domain_mixtures": 1,
+        "num_fragment_mixtures": 2,
+        "num_site_mixtures": 3,
+        "k_rate_mults": 4,
 
         "subst_model_type": "f81",
-        "k_rate_mults": 3,
         "indp_rate_mults": false,
         "norm_rate_matrix": true,
         "norm_rate_mults": true,
 
         "indel_model_type": "tkf92",
+        "tkf_function": "switch_tkf",
 
         "times_from": "geometric",
         "t_grid_center": 0.03,

@@ -15,7 +15,9 @@ def init_pairhmm_indp_sites( seq_shapes,
                              tx, 
                              model_init_rngkey,
                              pred_config,
-                             tabulate_file_loc
+                             tabulate_file_loc,
+                             *args,
+                             **kwargs
                              ):
     """
     for independent site classses over substitution models
@@ -59,24 +61,35 @@ def init_pairhmm_indp_sites( seq_shapes,
 
 
     
-def init_pairhmm_frag_and_site_classes( seq_shapes, 
-                                        dummy_t_array,
-                                        tx, 
-                                        model_init_rngkey,
-                                        pred_config,
-                                        tabulate_file_loc
-                                        ):
+def init_pairhmm_transit_mixes( pred_model_type,
+                                seq_shapes, 
+                                dummy_t_array,
+                                tx, 
+                                model_init_rngkey,
+                                pred_config,
+                                tabulate_file_loc
+                                ):
     """
-    for pairHMM using latent fragment and site classses
+    for pairHMM using mixtures of domains, mixtures of fragments
     """
-    if not pred_config['load_all']:
+    if (pred_model_type == 'pairhmm_frag_and_site_classes') and (not pred_config['load_all']):
         from models.simple_site_class_predict.FragAndSiteClasses import FragAndSiteClasses as model
+        name = 'FragAndSiteClasses'
         
-    elif pred_config['load_all']:
+    elif (pred_model_type == 'pairhmm_frag_and_site_classes') and (pred_config['load_all']):
         from models.simple_site_class_predict.FragAndSiteClasses import FragAndSiteClassesLoadAll as model
+        name = 'FragAndSiteClasses'
+    
+    elif (pred_model_type == 'pairhmm_nested_tkf') and (not pred_config['load_all']):
+        from models.simple_site_class_predict.NestedTKF import NestedTKF as model
+        name = 'NestedTKF'
+        
+    elif (pred_model_type == 'pairhmm_nested_tkf') and (pred_config['load_all']):
+        from models.simple_site_class_predict.NestedTKF import NestedTKFLoadAll as model
+        name = 'NestedTKF'
     
     pairhmm_instance = model(config = pred_config,
-                             name = 'FragAndSiteClasses')
+                             name = name)
     
     
     ###################################

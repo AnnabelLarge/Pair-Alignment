@@ -118,7 +118,8 @@ def pairhmm_frag_and_site_classes_fill_with_default_values(args):
     num_domain_mixtures is automatically 1
     """
     general_fill_with_default_values(args)
-    args.pred_config['num_domain_mixtures'] = 1
+    if args.pred_model_type == 'pairhmm_frag_and_site_classes':
+        args.pred_config['num_domain_mixtures'] = 1
 
 
 #########################################################
@@ -143,8 +144,7 @@ def feedforward_share_top_level_args(args):
     args.desc_dec_config['in_alph_size'] = args.in_alph_size
     args.desc_dec_config['seq_padding_idx'] = args.seq_padding_idx
     
-    
-    
+
 def neural_hmm_share_top_level_args(args):
     general_share_top_level_args(args)
     

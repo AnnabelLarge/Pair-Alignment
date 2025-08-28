@@ -1,0 +1,66 @@
+{
+    "training_wkdir": "RESULTS_eval_nested_tkf",
+    "rng_seednum": 0,
+
+    "data_dir": "example_data",
+    "train_dset_splits": ["sevenSamp"],
+    "test_dset_splits": ["sevenSamp"],  
+    "toss_alignments_longer_than": null,
+    "chunk_length": 512,
+    "batch_size": 7,
+    "emission_alphabet_size": 20,
+    "gap_idx": 43,
+
+    "num_epochs": 1,
+    "optimizer_config": {
+        "init_value": 1e-10,
+        "peak_value": 1e-10,
+        "end_value": 1e-10,
+        "warmup_steps": 0,
+        "weight_decay": 0,
+        "every_k_schedule": 1
+    },
+    "early_stop_cond1_atol": 1e-3,
+    "early_stop_cond2_gap": 3,
+    "patience": 1000,
+    "update_grads": false,
+
+    "interms_for_tboard": {
+        "finalpred_sow_outputs": false,
+        "forward_pass_outputs": false,
+        "gradients": false,
+        "optimizer": false
+    },
+    "save_arrs": true,
+    "save_per_sample_losses": true,
+    "norm_reported_loss_by": "desc_len",
+    "checkpoint_freq_during_training": 0,
+
+    "pred_model_type": "pairhmm_nested_tkf",
+    "pred_config": {
+        "load_all": true,
+
+        "num_domain_mixtures": 1,
+        "num_fragment_mixtures": 2,
+        "num_site_mixtures": 3,
+        "k_rate_mults": 4,
+
+        "subst_model_type": "f81",
+        "indp_rate_mults": false,
+        "norm_rate_matrix": true,
+        "norm_rate_mults": true,
+
+        "tkf_function": "regular_tkf",
+
+        "filenames": {"equl_dist": "./RESULTS_train_frag-mix/out_arrs/PARAMS-MAT_test-set_pt0_equilibriums-per-site-class.npy",
+                      "site_class_probs": "./RESULTS_train_frag-mix/out_arrs/PARAMS-MAT_test-set_pt0_site_class_probs.npy",
+                      "frag_class_probs": "./RESULTS_train_frag-mix/out_arrs/PARAMS-MAT_test-set_pt0_frag_class_probs.npy",
+                      "rate_mults": "./RESULTS_train_frag-mix/out_arrs/PARAMS-MAT_test-set_pt0_rate_multipliers.npy",
+                      "rate_mult_probs": "./RESULTS_train_frag-mix/out_arrs/PARAMS-MAT_test-set_pt0_rate_mult_probs.npy",
+                      "top_level_tkf_params_file": "./RESULTS_train_frag-mix/out_arrs/PARAMS-DICT_test-set_pt0_tkf92_indel_params.pkl",
+                      "tkf_params_file": "./RESULTS_train_frag-mix/out_arrs/PARAMS-DICT_test-set_pt0_tkf92_indel_params.pkl"},
+
+        "times_from": "t_per_sample"
+    }
+    
+}

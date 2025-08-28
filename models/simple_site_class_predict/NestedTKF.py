@@ -1326,11 +1326,11 @@ class NestedTKF(FragAndSiteClasses):
                 offs_max_val = self.domain_transitions_module.offs_max_val #float
                 mu_offset_logits = self.domain_transitions_module.tkf_mu_offset_logits #(2,)
             
-                mu_dom = bound_sigmoid(x = mu_offset_logits[0],
+                mu_dom = bound_sigmoid(x = mu_offset_logits[0,0],
                                     min_val = mu_min_val,
                                     max_val = mu_max_val).item() #float
                 
-                offset_dom = bound_sigmoid(x = mu_offset_logits[1],
+                offset_dom = bound_sigmoid(x = mu_offset_logits[0,1],
                                           min_val = offs_min_val,
                                           max_val = offs_max_val).item() #float
                 lam_dom = mu_dom * (1 - offset_dom)  #float
@@ -1400,7 +1400,7 @@ class NestedTKF(FragAndSiteClasses):
 
 
 
-class NestedTKFFromFile(NestedTKF):
+class NestedTKFLoadAll(NestedTKF):
     """
     NestedTKF, but load params from files
     

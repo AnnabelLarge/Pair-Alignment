@@ -43,16 +43,16 @@ from utils.train_eval_utils import (setup_training_dir,
                                     timers,
                                     write_final_eval_results,
                                     record_postproc_time_table,
-                                    pigz_compress_tensorboard_file)
+                                    pigz_compress_tensorboard_file)  
 
 # specific to training this model
 from utils.edit_argparse import pairhmm_frag_and_site_classes_fill_with_default_values as fill_with_default_values
 from utils.edit_argparse import pairhmms_share_top_level_args as share_top_level_args
-from models.simple_site_class_predict.initializers import init_pairhmm_frag_and_site_classes as init_pairhmm
-from train_eval_fns.TrainingWrapper import FragAndSiteClassesTrainingWrapper as TrainingWrapper
-from train_eval_fns.frag_and_site_classes_training_fns import ( train_one_batch,
-                                                                eval_one_batch,
-                                                                final_eval_wrapper )
+from models.simple_site_class_predict.initializers import init_pairhmm_transit_mixes as init_pairhmm
+from train_eval_fns.TrainingWrapper import TransitMixesTrainingWrapper as TrainingWrapper
+from train_eval_fns.transit_mixes_training_fns import ( train_one_batch,
+                                                        eval_one_batch,
+                                                        final_eval_wrapper )
 
 def _save_to_pickle(out_file, obj):
     with open(out_file, 'wb') as g:
@@ -63,14 +63,25 @@ def _save_trainstate(out_file, tstate_obj):
     _save_to_pickle(out_file, model_state_dict)
     
     
-def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
+def cont_training_pairhmm_transit_mixes(args, 
+                              dataloader_dict,
+                              new_training_wkdir,
+                              prev_model_ckpts_dir,
+                              tstate_to_load):
     ###########################################################################
     ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES   #########################
     ###########################################################################
-    err = (f"{args.pred_model_type} is not pairhmm_frag_and_site_classes; "+
-           f"using the wrong training script")
-    assert args.pred_model_type == 'pairhmm_frag_and_site_classes', err
+    err = (f"Pred model type: {args.pred_model_type}; "+
+           f"this is the training script for pairHMM with mixtures of transit classes!")
+    assert args.pred_model_type in ['pairhmm_frag_and_site_classes', 'pairhmm_nested_tkf'], err
     del err
+    
+    
+    # vvv___DIFFERENT FROM ORIGINAL TRAINING CODE___vvv
+    
+    prev_pairhmm_savemodel_filename = prev_model_ckpts_dir + '/'+ tstate_to_load
+    
+    # ^^^___DIFFERENT FROM ORIGINAL TRAINING CODE___^^^
     
     
     ### edit the argparse object in-place
@@ -85,6 +96,15 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
     ###########################################################################
     ### 1: SETUP   ############################################################
     ###########################################################################
+    
+    # vvv___DIFFERENT FROM ORIGINAL TRAINING CODE___vvv
+    
+    assert args.training_wkdir != new_training_wkdir, 'pick a new training directory'
+    args.training_wkdir = new_training_wkdir
+    
+    # ^^^___DIFFERENT FROM ORIGINAL TRAINING CODE___^^^
+
+    
     ### initial setup of misc things
     # setup the working directory (if not done yet) and this run's sub-directory
     setup_training_dir(args)
@@ -97,34 +117,22 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
     
     # create a new logfile
     with open(args.logfile_name,'w') as g:
-        # disabled training
-        if not args.update_grads:
-            g.write('DEBUG MODE: DISABLING GRAD UPDATES\n\n')
-            
         # standard header
-        g.write(f'PairHMM TKF92 with latent site and fragment classes\n')
+        g.write( f'PairHMM TKF92 with mixtures of transit classes: {args.pred_model_type}\n' )
         g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )
-        g.write( f'Indel model: TKF92\n' )
-                
-        g.write( (f'  - Number of latent site and fragment classes: '+
-                  f'{args.pred_config["num_site_mixtures"]}\n' +
-                  f'  - Possible substitution rate multipliers: ' +
-                  f'{args.pred_config["k_rate_mults"]}\n')
-                )
+        g.write( f'Indel model: TKF92\n\n' )
         
+        g.write( f'Number of domain mixes: {args.pred_config["num_domain_mixtures"]}\n' )
+        g.write( f'Number of fragment mixes: {args.pred_config["num_fragment_mixtures"]}\n' )
+        g.write( f'Number of site mixes: {args.pred_config["num_site_mixtures"]}\n' )
+        g.write( f'Number of rate multipliers: {args.pred_config["k_rate_mults"]}\n' )
+                
         # note if rates are independent
         if args.pred_config['indp_rate_mults']:
-            possible_rates =  args.pred_config['k_rate_mults']
-            g.write( (f'  - Rates are independent of site class label: '+
-                      f'( P(k | c) = P(k) ); {possible_rates} possible '+
-                      f'rate multipliers\n' )
-                    )
+            g.write( f'  - Rates are independent of site class label: ( P(k | c) = P(k) )\n' )
                     
         elif not args.pred_config['indp_rate_mults']:
-            possible_rates = args.pred_config['num_site_mixtures'] * args.pred_config['k_rate_mults']
-            g.write( ( f'  - Rates depend on class labels ( P(k | c) ); '+
-                       f'{possible_rates} possible rate multipliers\n' )
-                    )
+            g.write( f'  - Rates depend on class labels\n' )
         
         # how to normalize reported metrics (usually by descendant length)
         g.write(f'  - When reporting, normalizing losses by: {args.norm_reported_loss_by}\n')
@@ -194,15 +202,28 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
     seq_shapes = [largest_aligns,
                   dummy_t_for_each_sample]
     
-    out = init_pairhmm( seq_shapes = seq_shapes, 
+    out = init_pairhmm( pred_model_type = args.pred_model_type,
+                        seq_shapes = seq_shapes, 
                         dummy_t_array = dummy_t_array_for_all_samples,
                         tx = tx, 
                         model_init_rngkey = model_init_rngkey,
                         pred_config = args.pred_config,
                         tabulate_file_loc = args.model_ckpts_dir)
-    pairhmm_trainstate, pairhmm_instance = out
-    del out, dummy_t_array_for_all_samples, dummy_t_for_each_sample
-    del seq_shapes
+    blank_tstate, pairhmm_instance = out
+    del out
+    
+    
+    # vvv___DIFFERENT FROM ORIGINAL TRAINING CODE___vvv
+    # load values
+    with open(prev_pairhmm_savemodel_filename, 'rb') as f:
+        state_dict = pickle.load(f)
+        
+    pairhmm_trainstate = flax.serialization.from_state_dict( blank_tstate, 
+                                                             state_dict )
+    
+    del blank_tstate, state_dict, prev_pairhmm_savemodel_filename
+    
+    # ^^^___DIFFERENT FROM ORIGINAL TRAINING CODE___^^^
     
     
     ### part+jit training function
@@ -400,3 +421,4 @@ def train_pairhmm_frag_and_site_classes(args, dataloader_dict: dict):
             os.remove(file_path)
         except FileNotFoundError:
             pass  # File might have been deleted already
+    

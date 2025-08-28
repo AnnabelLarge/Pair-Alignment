@@ -35,21 +35,21 @@ from utils.train_eval_utils import (jit_compile_determine_alignlen_bin,
 # specific to this model
 from utils.edit_argparse import pairhmm_frag_and_site_classes_fill_with_default_values as fill_with_default_values
 from utils.edit_argparse import pairhmms_share_top_level_args as share_top_level_args
-from models.simple_site_class_predict.initializers import init_pairhmm_frag_and_site_classes as init_pairhmm
-from train_eval_fns.frag_and_site_classes_training_fns import ( eval_one_batch,
-                                                                final_eval_wrapper )
+from models.simple_site_class_predict.initializers import init_pairhmm_transit_mixes as init_pairhmm
+from train_eval_fns.transit_mixes_training_fns import ( eval_one_batch,
+                                                        final_eval_wrapper )
 
 
-def eval_pairhmm_frag_and_site_classes( args, 
-                                        dataloader_dict: dict,
-                                        training_argparse ):
+def eval_pairhmm_transit_mixes( args, 
+                                dataloader_dict: dict,
+                                training_argparse ):
     ###########################################################################
     ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES   #########################
     ###########################################################################
     # final where model pickles, previous argparses are
-    err = (f"{training_argparse.pred_model_type} is not pairhmm_frag_and_site_classes; "+
-           f"using the wrong eval script")
-    assert training_argparse.pred_model_type == 'pairhmm_frag_and_site_classes', err
+    err = (f"Pred model type: {args.pred_model_type}; "+
+           f"this is the eval script for pairHMM with mixtures of transit classes!")
+    assert args.pred_model_type in ['pairhmm_frag_and_site_classes', 'pairhmm_nested_tkf'], err
     del err
         
     prev_model_ckpts_dir = f'{os.getcwd()}/{args.training_wkdir}/model_ckpts'
@@ -82,32 +82,21 @@ def eval_pairhmm_frag_and_site_classes( args,
         g.write( f'Loading from {training_argparse.training_wkdir} to eval new data\n' )
         
         # standard header
-        g.write(f'PairHMM TKF92 with latent site and fragment classes\n')
-        g.write( f'Substitution model: {training_argparse.pred_config["subst_model_type"]}\n' )
-        g.write( f'Indel model: TKF92\n' )
-                
-        g.write( (f'  - Number of latent site and fragment classes: '+
-                  f'{training_argparse.pred_config["num_site_mixtures"]}\n' +
-                  f'  - Possible substitution rate multipliers: ' +
-                  f'{training_argparse.pred_config["k_rate_mults"]}\n')
-                )
+        g.write( f'PairHMM TKF92 with mixtures of transit classes: {args.pred_model_type}\n' )
+        g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )
+        g.write( f'Indel model: TKF92\n\n' )
         
+        g.write( f'Number of domain mixes: {args.pred_config["num_domain_mixtures"]}\n' )
+        g.write( f'Number of fragment mixes: {args.pred_config["num_fragment_mixtures"]}\n' )
+        g.write( f'Number of site mixes: {args.pred_config["num_site_mixtures"]}\n' )
+        g.write( f'Number of rate multipliers: {args.pred_config["k_rate_mults"]}\n' )
+                
         # note if rates are independent
-        if training_argparse.pred_config['indp_rate_mults']:
-            possible_rates =  training_argparse.pred_config['k_rate_mults']
-            g.write( (f'  - Rates are independent of site class label: '+
-                      f'( P(k | c) = P(k) ); {possible_rates} possible '+
-                      f'rate multipliers\n' )
-                    )
+        if args.pred_config['indp_rate_mults']:
+            g.write( f'  - Rates are independent of site class label: ( P(k | c) = P(k) )\n' )
                     
-        elif not training_argparse.pred_config['indp_rate_mults']:
-            possible_rates = (training_argparse.pred_config['num_domain_mixtures'] *
-                              training_argparse.pred_config['num_fragment_mixtures'] *
-                              training_argparse.pred_config['num_site_mixtures'] *
-                              training_argparse.pred_config['k_rate_mults'] )
-            g.write( ( f'  - Rates depend on class labels ( P(k | c) ); '+
-                       f'{possible_rates} possible rate multipliers\n' )
-                    )
+        elif not args.pred_config['indp_rate_mults']:
+            g.write( f'  - Rates depend on class labels\n' )
         
         # how to normalize reported metrics (usually by descendant length)
         g.write(f'  - When reporting, normalizing losses by: {args.norm_reported_loss_by}\n')
@@ -163,7 +152,8 @@ def eval_pairhmm_frag_and_site_classes( args,
     seq_shapes = [largest_aligns,
                   dummy_t_for_each_sample]
     
-    out = init_pairhmm( seq_shapes = seq_shapes, 
+    out = init_pairhmm( pred_model_type = args.pred_model_type,
+                        seq_shapes = seq_shapes, 
                         dummy_t_array = dummy_t_array_for_all_samples,
                         tx = tx, 
                         model_init_rngkey = jax.random.key(0),

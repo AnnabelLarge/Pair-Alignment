@@ -111,31 +111,22 @@ def cont_training_pairhmm_indp_sites(args,
     
     # create a new logfile
     with open(args.logfile_name,'w') as g:
+        # standard header
         g.write( f'PairHMM with independent site classes over emissions\n' )
         g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )
-        g.write( f'Indel model: {args.pred_config.get("indel_model_type","None")}\n' )
-        g.write( (f'  - Number of site classes for emissions: '+
-                  f'{args.pred_config["num_site_mixtures"]}\n' +
-                  f'  - Possible substitution rate multipliers: ' +
-                  f'{args.pred_config["k_rate_mults"]}\n')
-                )
+        g.write( f'Indel model: {args.pred_config.get("indel_model_type","None")}\n\n' )
         
+        g.write( f'Number of domain mixes: 1\n' )
+        g.write( f'Number of fragment mixes: 1\n' )
+        g.write( f'Number of site mixes: {args.pred_config["num_site_mixtures"]}\n' )
+        g.write( f'Number of rate multipliers: {args.pred_config["k_rate_mults"]}\n' )
+                
         # note if rates are independent
         if args.pred_config['indp_rate_mults']:
-            possible_rates =  args.pred_config['k_rate_mults']
-            g.write( (f'  - Rates are INDEPENDENT FROM other mixtures: '+
-                      f'( P(k | c) = P(k) ); {possible_rates} possible '+
-                      f'rate multipliers\n' )
-                    )
+            g.write( f'  - Rates are independent of site class label: ( P(k | c) = P(k) )\n' )
                     
         elif not args.pred_config['indp_rate_mults']:
-            possible_rates = (args.pred_config['num_domain_mixtures'] *
-                              args.pred_config['num_fragment_mixtures'] *
-                              args.pred_config['num_site_mixtures'] *
-                              args.pred_config['k_rate_mults'] )
-            g.write( ( f'  - Rates depend on other mixtures ( P(k | c) ); '+
-                       f'{possible_rates} possible rate multipliers\n' )
-                    )
+            g.write( f'  - Rates depend on class labels\n' )
         
         # how to normalize reported metrics (usually by descendant length)
         if args.pred_config["indel_model_type"] is not None:

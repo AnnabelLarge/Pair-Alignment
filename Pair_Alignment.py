@@ -19,7 +19,7 @@ from dloaders.init_dataloader import init_dataloader
 
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update("jax_debug_infs", True)
-# jax.config.update("jax_enable_x64", True)
+jax.config.update("jax_enable_x64", True)
 
 
 def main():
@@ -53,51 +53,45 @@ def main():
                    'validate_neuraltkf_config',
                    'batched_validate_neuraltkf_config']
     
-    parser.add_argument('-task',
-                        type=str,
-                        required=True,
-                        choices = valid_tasks,
-                        help=f'What do you want to do? Pick from: {valid_tasks}')
+    # parser.add_argument('-task',
+    #                     type=str,
+    #                     required=True,
+    #                     choices = valid_tasks,
+    #                     help=f'What do you want to do? Pick from: {valid_tasks}')
     
-    parser.add_argument('-configs',
-                        type = str,
-                        required=True,
-                        help='Load configs from file or folder of files, in json format.')
+    # parser.add_argument('-configs',
+    #                     type = str,
+    #                     required=True,
+    #                     help='Load configs from file or folder of files, in json format.')
     
-    # optional: might have pre-processed some dataloaders
-    parser.add_argument('-load_dset_pkl',
-                        type = str,
-                        default=None,
-                        help='name of the pre-computed pytorch dataset pickle object')
+    # # optional: might have pre-processed some dataloaders
+    # parser.add_argument('-load_dset_pkl',
+    #                     type = str,
+    #                     default=None,
+    #                     help='name of the pre-computed pytorch dataset pickle object')
     
-    # only needed when continuing training
-    parser.add_argument('-new_training_wkdir',
-                        type = str,
-                        help='FOR CONTINUE_TRAIN OPTION; Name for a new training working dir')
+    # # only needed when continuing training
+    # parser.add_argument('-new_training_wkdir',
+    #                     type = str,
+    #                     help='FOR CONTINUE_TRAIN OPTION; Name for a new training working dir')
     
-    parser.add_argument('-prev_model_ckpts_dir',
-                        type = str,
-                        help='FOR CONTINUE_TRAIN OPTION; Path to previous trainstate, argparse object')
+    # parser.add_argument('-prev_model_ckpts_dir',
+    #                     type = str,
+    #                     help='FOR CONTINUE_TRAIN OPTION; Path to previous trainstate, argparse object')
     
-    parser.add_argument('-tstate_to_load',
-                        type = str,
-                        help='FOR CONTINUE_TRAIN OPTION; The suffix (not including file extension) of the tstate object to load')
+    # parser.add_argument('-tstate_to_load',
+    #                     type = str,
+    #                     help='FOR CONTINUE_TRAIN OPTION; The suffix (not including file extension) of the tstate object to load')
   
     # parse the arguments
     top_level_args = parser.parse_args()
     
     
     # UNCOMMENT TO RUN IN SPYDER IDE
-    # top_level_args.task = 'continue_train'
-    # top_level_args.configs = 'CONFIG.json'
-    # top_level_args.new_training_wkdir = 'CONTINUE_TRAIN'
-    # top_level_args.prev_model_ckpts_dir = 'RESULTS/model_ckpts'
-    # top_level_args.tstate_to_load = 'BEST'
-    # top_level_args.load_dset_pkl = None
-    
-    # top_level_args.task = 'train'
-    # top_level_args.configs = 'example_config_neural_hmm.json'
-    # top_level_args.load_dset_pkl = None
+    top_level_args.task = 'train'
+    top_level_args.configs = 'CONFIG_train_fragment_site_class_model.json'
+    # top_level_args.configs = 'CONFIG_eval_nested_tkf.json'
+    top_level_args.load_dset_pkl = None
     
     
     ### helper functions 
@@ -150,13 +144,14 @@ def main():
             from dloaders.CountsDset import jax_collator as collate_fn
             
         elif pred_model_type in ['pairhmm_frag_and_site_classes',
-                                      'neural_hmm',
-                                      'feedforward']:
+                                 'pairhmm_nested_tkf',
+                                 'neural_hmm',
+                                 'feedforward']:
             from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
             from dloaders.FullLenDset import jax_collator as collate_fn
             
-            if pred_model_type == 'pairhmm_frag_and_site_classes':
-                from cli.train_pairhmm_frag_and_site_classes import train_pairhmm_frag_and_site_classes as train_fn
+            if pred_model_type in ['pairhmm_frag_and_site_classes', 'pairhmm_nested_tkf']:
+                from cli.train_pairhmm_transit_mixes import train_pairhmm_transit_mixes as train_fn
                 
             elif pred_model_type == 'neural_hmm':
                 from cli.train_neural_hmm import train_neural_hmm as train_fn
@@ -203,13 +198,14 @@ def main():
             from dloaders.CountsDset import jax_collator as collate_fn
             
         elif pred_model_type in ['pairhmm_frag_and_site_classes',
-                                      'neural_hmm',
-                                      'feedforward']:
+                                 'pairhmm_nested_tkf',
+                                 'neural_hmm',
+                                 'feedforward']:
             from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
             from dloaders.FullLenDset import jax_collator as collate_fn
             
-            if pred_model_type == 'pairhmm_frag_and_site_classes':
-                from cli.train_pairhmm_frag_and_site_classes import train_pairhmm_frag_and_site_classes as train_fn
+            if pred_model_type in ['pairhmm_frag_and_site_classes', 'pairhmm_nested_tkf']:
+                from cli.train_pairhmm_transit_mixes import train_pairhmm_transit_mixes as train_fn
                 
             elif pred_model_type == 'neural_hmm':
                 from cli.train_neural_hmm import train_neural_hmm as train_fn
@@ -259,13 +255,14 @@ def main():
             from dloaders.CountsDset import jax_collator as collate_fn
         
         elif pred_model_type in ['pairhmm_frag_and_site_classes',
-                                      'neural_hmm',
-                                      'feedforward']:
+                                 'pairhmm_nested_tkf',
+                                 'neural_hmm',
+                                 'feedforward']:
             from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
             from dloaders.FullLenDset import jax_collator as collate_fn
             
-            if pred_model_type == 'pairhmm_frag_and_site_classes':
-                from cli.cont_training_pairhmm_frag_and_site_classes import cont_training_pairhmm_frag_and_site_classes as cont_train_fn
+            if pred_model_type in ['pairhmm_frag_and_site_classes', 'pairhmm_nested_tkf']:
+                from cli.cont_training_pairhmm_transit_mixes import cont_training_pairhmm_transit_mixes as cont_train_fn
                 
             elif pred_model_type == 'neural_hmm':
                 from cli.cont_training_neural_hmm import cont_training_neural_hmm as cont_train_fn
@@ -318,13 +315,14 @@ def main():
             from dloaders.CountsDset import jax_collator as collate_fn
 
         elif pred_model_type in ['pairhmm_frag_and_site_classes',
+                                 'pairhmm_nested_tkf',
                                  'neural_hmm',
                                  'feedforward']:
             from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
             from dloaders.FullLenDset import jax_collator as collate_fn
 
-            if pred_model_type == 'pairhmm_frag_and_site_classes':
-                from cli.eval_pairhmm_frag_and_site_classes import eval_pairhmm_frag_and_site_classes as eval_fn
+            if pred_model_type in ['pairhmm_frag_and_site_classes', 'pairhmm_nested_tkf']:
+                from cli.eval_pairhmm_transit_mixes import eval_pairhmm_transit_mixes as eval_fn
 
             elif pred_model_type == 'neural_hmm':
                 from cli.eval_neural_hmm import eval_neural_hmm as eval_fn
@@ -383,13 +381,14 @@ def main():
             from dloaders.CountsDset import jax_collator as collate_fn
 
         elif pred_model_type in ['pairhmm_frag_and_site_classes',
+                                 'pairhmm_nested_tkf',
                                  'neural_hmm',
                                  'feedforward']:
             from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
             from dloaders.FullLenDset import jax_collator as collate_fn
 
-            if pred_model_type == 'pairhmm_frag_and_site_classes':
-                from cli.eval_pairhmm_frag_and_site_classes import eval_pairhmm_frag_and_site_classes as eval_fn
+            if pred_model_type in ['pairhmm_frag_and_site_classes', 'pairhmm_nested_tkf']:
+                from cli.eval_pairhmm_transit_mixes import eval_pairhmm_transit_mixes as eval_fn
 
             elif pred_model_type == 'neural_hmm':
                 from cli.eval_neural_hmm import eval_neural_hmm as eval_fn
@@ -491,13 +490,12 @@ def main():
         
         # import correct wrappers, dataloader initializers
         if first_args.pred_model_type == 'pairhmm_indp_sites':
-            from cli.train_pairhmm_indp_sites import train_pairhmm_indp_sites as train_fn
             from dloaders.init_counts_dset import init_counts_dset as init_datasets
 
         elif first_args.pred_model_type in ['pairhmm_frag_and_site_classes',
+                                            'pairhmm_nested_tkf',
                                             'neural_hmm',
                                             'feedforward']:
-            from cli.train_pairhmm_frag_and_site_classes import train_pairhmm_frag_and_site_classes as train_fn
             from dloaders.init_full_len_dset import init_full_len_dset as init_datasets
             
         del first_config_file, first_args

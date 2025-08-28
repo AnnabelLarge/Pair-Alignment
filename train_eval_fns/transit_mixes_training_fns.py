@@ -307,20 +307,20 @@ def final_eval_wrapper(dataloader,
 
 
 
-def label_class_posteriors(batch, 
-                            t_array,
-                            pairhmm_trainstate,  
-                            pairhmm_instance,
-                            max_align_len,
-                            **kwargs):
-    raise NotImplementedError('redo this')
-    batch_aligned_mats = batch[1]
-    clipped_aligned_mats = batch_aligned_mats[:, :max_align_len, :]
-    del batch
+# def label_class_posteriors(batch, 
+#                             t_array,
+#                             pairhmm_trainstate,  
+#                             pairhmm_instance,
+#                             max_align_len,
+#                             **kwargs):
+#     raise NotImplementedError('redo this')
+#     batch_aligned_mats = batch[1]
+#     clipped_aligned_mats = batch_aligned_mats[:, :max_align_len, :]
+#     del batch
     
-    out_tup = pairhmm_trainstate.apply_fn( variables = pairhmm_trainstate.params,
-                                        aligned_inputs = clipped_aligned_mats,
-                                        t_array = t_array,
-                                        method=pairhmm_instance.get_class_posterior_marginals )
+#     out_tup = pairhmm_trainstate.apply_fn( variables = pairhmm_trainstate.params,
+#                                         aligned_inputs = clipped_aligned_mats,
+#                                         t_array = t_array,
+#                                         method=pairhmm_instance.get_class_posterior_marginals )
 
-    return out_tup
+#     return out_tup

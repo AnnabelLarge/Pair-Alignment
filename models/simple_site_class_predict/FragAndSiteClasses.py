@@ -843,6 +843,12 @@ class FragAndSiteClasses(ModuleBase):
                     g.write(f'transition rate, tv: {tv}')
                 del key, arr
                 
+            ### equilibrium distribution (BEFORE marginalizing over site clases)
+            equl_dist = np.exp(out['log_equl_dist_per_mixture']) #(C_tr, C_sites, A)
+            key = f'{prefix}_equilibriums-per-site-class'
+            write_matrix_to_npy( out_folder, equl_dist, key )
+            maybe_write_matrix_to_ascii( out_folder, equl_dist, key )
+            del key
                 
             ####################################################
             ### extract transition paramaters, intermediates   # 
@@ -861,13 +867,13 @@ class FragAndSiteClasses(ModuleBase):
                 mu_max_val = self.transitions_module.mu_max_val #float
                 offs_min_val = self.transitions_module.offs_min_val #float
                 offs_max_val = self.transitions_module.offs_max_val #float
-                mu_offset_logits = self.transitions_module.tkf_mu_offset_logits #(2,)
+                mu_offset_logits = self.transitions_module.tkf_mu_offset_logits #(1,2)
             
-                mu = bound_sigmoid(x = mu_offset_logits[0],
+                mu = bound_sigmoid(x = mu_offset_logits[0,0],
                                    min_val = mu_min_val,
                                    max_val = mu_max_val).item() #float
                 
-                offset = bound_sigmoid(x = mu_offset_logits[1],
+                offset = bound_sigmoid(x = mu_offset_logits[0,1],
                                          min_val = offs_min_val,
                                          max_val = offs_max_val).item() #float
                 lam = mu * (1 - offset)  #float

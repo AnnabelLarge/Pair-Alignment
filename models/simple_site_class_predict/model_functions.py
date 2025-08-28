@@ -2051,8 +2051,8 @@ def joint_only_forward(aligned_inputs,
             start_any, 
             curr_state_idx[:, None, None],  # shape (B, 1)
             axis=-1
-        ) 
-        tr = jnp.squeeze(tr).T# (C_curr, B)
+        )
+        tr = tr[...,0].T # (C_curr, B)
 
     # carry value; 
     init_alpha = e + tr # (T, C, B) or (C, B)
@@ -2102,7 +2102,8 @@ def joint_only_forward(aligned_inputs,
                 
                 transit_ps = jnp.take_along_axis(joint_logprob_transit, ps_idx, axis=3)  # (B, C_prev, C_curr, 1, S_curr)
                 transit_ps_cs = jnp.take_along_axis(transit_ps, cs_idx, axis=4)  # (B, C_prev, C_curr, 1, 1)
-                tr_per_class = jnp.squeeze(transit_ps_cs, axis=(3,4)).transpose(1, 2, 0) #(C_prev, C_curr, B) 
+                transit_ps_cs = transit_ps_cs[:,:,:,0,0] # (B, C_prev, C_curr)
+                tr_per_class = jnp.transpose(transit_ps_cs, (1, 2, 0)) #(C_prev, C_curr, B) 
                 to_add = logsumexp(in_carry[:, None, :] + tr_per_class, axis=0) #(C_curr, B) # this line causes nan gradients
                 
             return e + to_add #(T, C_curr, B) or (C_curr, B)
@@ -2120,7 +2121,8 @@ def joint_only_forward(aligned_inputs,
                 sliced = joint_logprob_transit[:, :, -1, :, -1]  # (B, C_prev, S_prev)
                 ps_idx = (ps - 1)[:, None, None]  # (B, 1, 1)
                 gathered = jnp.take_along_axis(sliced, ps_idx, axis=2)  # (B, C_prev, 1)
-                tr_per_class = jnp.squeeze(gathered, axis=2).T  # (C_prev, B)
+                gathered = gathered[:,:,0] #(B, C_prev)
+                tr_per_class = gathered.T  # (C_prev, B)
                  
             return tr_per_class + in_carry #(T, C, B) or (C, B)
         
@@ -2288,8 +2290,8 @@ def all_loglikes_forward(aligned_inputs,
             curr_state_idx[:, None, None],  # shape (B, 1)
             axis=-1
         ) 
-        joint_tr = jnp.squeeze(joint_tr).T# (C_curr, B)
-    
+        joint_tr = joint_tr[...,0].T #(C_curr, B)
+        
     # carry value
     init_joint_alpha = joint_e + joint_tr # (T, C, B) or (C, B)
     del joint_e, joint_tr, start_any
@@ -2417,7 +2419,8 @@ def all_loglikes_forward(aligned_inputs,
                 cs_idx = (curr_state - 1)[:, None, None, None, None] #(B, 1, 1, 1, 1)
                 transit_ps = jnp.take_along_axis(joint_logprob_transit, ps_idx, axis=3)  # (B, C_prev, C_curr, 1, S_curr)
                 transit_ps_cs = jnp.take_along_axis(transit_ps, cs_idx, axis=4)  # (B, C_prev, C_curr, 1, 1)
-                joint_tr_per_class = jnp.squeeze(transit_ps_cs, axis=(3,4)).transpose(1, 2, 0) #(C_prev, C_curr, B) 
+                transit_ps_cs = transit_ps_cs[:,:,:,0,0] # (B, C_prev, C_curr)
+                joint_tr_per_class = jnp.transpose(transit_ps_cs, (1, 2, 0)) #(C_prev, C_curr, B) 
                 to_add = logsumexp(joint_carry[:, None, :] + joint_tr_per_class, axis=0) #(C_curr, B)
                          
             joint_out = joint_e + to_add #(T, C_curr, B) or (C_curr, B)
@@ -2452,7 +2455,8 @@ def all_loglikes_forward(aligned_inputs,
                 sliced = joint_logprob_transit[:, :, -1, :, -1]  # (B, C_prev, S_prev)
                 ps_idx = (prev_state - 1)[:, None]  # (B, 1)
                 gathered = jnp.take_along_axis(sliced, ps_idx[:, None, :], axis=2)  # (B, C_prev, 1)
-                joint_tr_per_class = jnp.squeeze(gathered, axis=2).T  # (C_prev, B)
+                gathered = gathered[:,:,0]# (B, C_prev)
+                joint_tr_per_class = gathered.T  # (C_prev, B)
             
             joint_out = joint_tr_per_class + joint_carry #(T,C,B) or (C,B)
             
