@@ -287,10 +287,16 @@ def rate_matrix_from_exch_equl(exchangeabilities: ArrayLike,
     
     # normalize (true by default)
     if norm:
-        diags = jnp.diagonal(subst_rate_mat, axis1=-2, axis2=-1) # (B, L_align, A) 
-        norm_factor = -jnp.sum(diags * equilibrium_distributions, axis=-1)[...,None,None] #(B, L_align, 1, 1)
-        subst_rate_mat = subst_rate_mat / norm_factor # (B, L_align, A, A) 
-    
+        idx = jnp.arange(A)
+        diags = subst_rate_mat[:, :, idx, idx] #(B, L_align, A)
+        del idx
+        
+        norm_factor = -jnp.sum( jnp.multiply(diags, equilibrium_distributions), axis=-1 ) #(B, L_align)
+        del diags
+        
+        norm_factor = norm_factor[..., None, None] #(B, L_align, 1, 1)
+        subst_rate_mat = subst_rate_mat / norm_factor # (B, L_align, A, A)
+        
     return subst_rate_mat
 
 def logprob_gtr( exch_upper_triag_values,

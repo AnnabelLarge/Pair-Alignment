@@ -315,12 +315,14 @@ class TestSubsRateMatrixConstruction(unittest.TestCase):
             (LG rate matrix, from cherryML repo)
         """
         true = construct_lg_rate_matrix(req_files_path = self.req_files_path) #(A,A)
+        A = true.shape[0]
         
         # equlibrium distribution
         config = {'num_domain_mixtures': 1,
                   'num_fragment_mixtures': 1,
                   'num_site_mixtures': 1,
                   'k_rate_mults': 1,
+                  'emission_alphabet_size': A,
                   'filenames': {'equl_dist': f'{self.req_files_path}/LG08_equl_dist.npy'}}
         my_equl_fn = EqulDistLogprobsFromFile(config=config,
                                               name = 'equl_fn')
@@ -338,6 +340,7 @@ class TestSubsRateMatrixConstruction(unittest.TestCase):
                   'num_site_mixtures': 1,
                   'k_rate_mults': 1,
                   'norm_rate_matrix': True,
+                  'emission_alphabet_size': A,
                   'filenames': {'rate_mult': None,
                                 'exch': f'{self.req_files_path}/LG08_exchangeability_vec.npy'}}
         my_mod = GTRLogprobsFromFile(config=config,
@@ -371,12 +374,14 @@ class TestSubsRateMatrixConstruction(unittest.TestCase):
             ground truth (LG rate matrix, from cherryML repo)
         """
         true = construct_lg_rate_matrix(req_files_path = self.req_files_path) #(A,A)
+        A = true.shape[0]
         
         # equlibrium distribution
         config = {'num_domain_mixtures': 1,
                   'num_fragment_mixtures': 1,
                   'num_site_mixtures': 1,
                   'k_rate_mults': 1,
+                  'emission_alphabet_size': A,
                   'filenames': {'equl_dist': f'{self.req_files_path}/LG08_equl_dist.npy'}}
         my_equl_fn = EqulDistLogprobsFromFile(config=config,
                                               name = 'equl_fn')
@@ -394,6 +399,7 @@ class TestSubsRateMatrixConstruction(unittest.TestCase):
                   'num_site_mixtures': 1,
                   'k_rate_mults': 1,
                   'norm_rate_matrix': True,
+                  'emission_alphabet_size': A,
                   'filenames': {'rate_mult': None,
                                 'exch': f'{self.req_files_path}/LG08_exchangeability_R.npy'}}
         my_mod = GTRLogprobsFromFile(config=config,

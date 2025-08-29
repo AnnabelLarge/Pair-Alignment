@@ -232,10 +232,16 @@ def rate_matrix_from_exch_equl(exchangeabilities: ArrayLike,
     
     # normalize (true by default)
     if norm:
-        diag = jnp.diagonal(subst_rate_mat, axis1=-2, axis2=-1) # (C_tr, C_s, A )
-        norm_factor = -jnp.multiply( diag, equilibrium_distributions ).sum(-1) #(C_tr, C_s)
-        subst_rate_mat = subst_rate_mat / ( norm_factor[...,None,None] )  # (C_tr, C_s, A, A)
-    
+        idx = jnp.arange(A)
+        diags = subst_rate_mat[:, :, idx, idx] #(C_tr, C_s, A)
+        del idx
+        
+        norm_factor = -jnp.sum( jnp.multiply(diags, equilibrium_distributions), axis=-1 ) #(C_tr, C_s)
+        del diags
+        
+        norm_factor = norm_factor[..., None, None] #(C_tr, C_s, 1, 1)
+        subst_rate_mat = subst_rate_mat / norm_factor # (C_tr, C_s, A, A) 
+        
     return subst_rate_mat # (C_tr, C_s, A, A)
 
 def scale_rate_matrix(subst_rate_mat: ArrayLike,
