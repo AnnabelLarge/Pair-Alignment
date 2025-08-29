@@ -591,7 +591,6 @@ class IndpSites(ModuleBase):
         ################################
         # indel model outputs, if TKF91
         if self.indel_model_type == 'tkf91':
-            breakpoint()
             all_transit_matrices['joint'] = all_transit_matrices['joint'][:,0,...] # (T, S, S)
     
             if return_all_matrices:

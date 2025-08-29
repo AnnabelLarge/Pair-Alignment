@@ -432,4 +432,4 @@ def test_feedforward_model_is_causal(config_file):
 if __name__ == '__main__':
     import os
     
-    test_feedforward_model_is_causal('CONFIG_ffwd_cnn_two-blocks.json')
+    test_feedforward_model_is_causal('CONFIG_ffwd_cnn.json')
