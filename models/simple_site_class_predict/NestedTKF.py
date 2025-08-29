@@ -569,18 +569,21 @@ class NestedTKF(FragAndSiteClasses):
         #  log_T_mat[:,0,0]: (T,          1,           1,        1,         1,                1,              1 )
         # start_pair_frag_g: (T,          1,           1, C_dom_to, C_frag_to,                1, (S_to \in MID) )
         #          mx_to_my: (T, C_dom_from, C_frag_from, C_dom_to, C_frag_to, (S_from \in MID), (S_to \in MID) )
-        mx_to_my = ( end_pair_frag_f[:, :, : None, None, :, None] +
+        mx_to_my = ( end_pair_frag_f[:, :, :, None, None, :, None] +
                      log_T_mat[:,0,0][:, None, None, None, None, None, None] +
                      start_pair_frag_g[:, None, None, :, :, None, :] ) #(T, C_dom_from, C_frag_from, C_dom_to, C_frag_to, (S_from \in MID), (S_to \in MID) )
         
         # if extending the domain and/or fragment, add probabilities from JOINT transitions of fragment-level mixture model
-        prev_values = jnp.transpose(jnp.diagonal(mx_to_my, axis1=1, axis2=3), (0, 5, 1, 2, 3, 4) )  #(T, C_dom, C_frag_from, C_frag_to, (S_from \in MID), (S_to \in MID) )
-        new_values = jnp.logaddexp(prev_values, frag_joint_transit_mat[..., 0:3, 0:3]) #(T, C_dom, C_frag_from, C_frag_to, (S_from \in MID), (S_to \in MID) )
-        
         idx = jnp.arange(self.num_domain_mixtures)
-        mx_to_my = mx_to_my.at[:, idx, :, idx, :, :, :].set(new_values) #(T, C_dom_from, C_frag_from, C_dom_to, C_frag_to, (S_from \in MID), (S_to \in MID) )
         
-        del prev_values, new_values, idx
+        # note: advanced indexing moves C_dom to first axis position
+        prev_values = mx_to_my[:, idx, :, idx, :, :, :] #(C_dom, T, C_frag_from, C_frag_to, (S_from \in MID), (S_to \in MID) )
+        to_add = jnp.transpose( frag_joint_transit_mat[:, idx, :, :, 0:3, 0:3], (1, 0, 2, 3, 4, 5) ) #(C_dom, T, C_frag_from, C_frag_to, (S_from \in MID), (S_to \in MID) )
+        new_values = jnp.logaddexp( prev_values, to_add )  #(C_dom, T, C_frag_from, C_frag_to, (S_from \in MID), (S_to \in MID) )
+        del prev_values, to_add
+        
+        mx_to_my = mx_to_my.at[:, idx, :, idx, :, :, :].set(new_values) #(T, C_dom_from, C_frag_from, C_dom_to, C_frag_to, (S_from \in MID), (S_to \in MID) )
+        del new_values
 
 
         ### MX -> II, DD, EE
@@ -619,12 +622,16 @@ class NestedTKF(FragAndSiteClasses):
         if not mask_indels:
             # if extending the domain and/or fragment, add probabilities from 
             #   MARGINAL transitions of fragment-level mixture model
-            prev_values = jnp.transpose( jnp.diagonal(ii_to_ii, axis1=1, axis2=3), (0, 3, 1, 2) ) #(T, C_dom, C_frag_from, C_frag_to)
-            new_values = jnp.logaddexp( prev_values, frag_marginal_transit_mat[..., 0,0] ) #(T, C_dom, C_frag_from, C_frag_to)
-            
             idx = jnp.arange(self.num_domain_mixtures)
+
+            # note: advanced indexing moves C_dom to first axis position
+            prev_values = ii_to_ii[:, idx, :, idx, :] #(C_dom, T, C_frag_from, C_frag_to)
+            to_add = frag_marginal_transit_mat[idx, :, :, 0, 0][:, None, :, :] #(C_dom, 1, C_frag_from, C_frag_to )
+            new_values = jnp.logaddexp( prev_values, to_add )  #(C_dom, T, C_frag_from, C_frag_to )
+            del prev_values, to_add
+            
             ii_to_ii = ii_to_ii.at[:, idx, :, idx, :].set(new_values) # (T, C_dom_from, C_frag_from, C_dom_to, C_frag_to)
-            del prev_values, new_values, idx
+            del new_values
 
 
         ### II -> MY, DD, EE
@@ -661,14 +668,18 @@ class NestedTKF(FragAndSiteClasses):
                      start_single_seq_frag_g[None, None, None, :, :] ) # (T, C_dom_from, C_frag_from, C_dom_to, C_frag_to)
 
         if not mask_indels:
-            # if extending the domain and/or fragment, add probabilities 
-            # from MARGINAL transitions of fragment-level mixture model
-            prev_values = jnp.transpose( jnp.diagonal(dd_to_dd, axis1=1, axis2=3), (0, 3, 1, 2) ) #(T, C_dom, C_frag_from, C_frag_to)
-            new_values = jnp.logaddexp( prev_values, frag_marginal_transit_mat[..., 0,0] ) #(T, C_dom, C_frag_from, C_frag_to)
-    
+            # if extending the domain and/or fragment, add probabilities from 
+            #   MARGINAL transitions of fragment-level mixture model
             idx = jnp.arange(self.num_domain_mixtures)
+
+            # note: advanced indexing moves C_dom to first axis position
+            prev_values = dd_to_dd[:, idx, :, idx, :] #(C_dom, T, C_frag_from, C_frag_to)
+            to_add = frag_marginal_transit_mat[idx, :, :, 0, 0][:, None, :, :] #(C_dom, 1, C_frag_from, C_frag_to )
+            new_values = jnp.logaddexp( prev_values, to_add )  #(C_dom, T, C_frag_from, C_frag_to )
+            del prev_values, to_add
+            
             dd_to_dd = dd_to_dd.at[:, idx, :, idx, :].set(new_values) # (T, C_dom_from, C_frag_from, C_dom_to, C_frag_to)
-            del prev_values, new_values, idx
+            del new_values
 
 
         ### DD -> MY, II, EE
@@ -836,7 +847,7 @@ class NestedTKF(FragAndSiteClasses):
         # reshape and return
         T = transit_mat.shape[0]
         C_dom = transit_mat.shape[1]
-        C_frag = transit_mat.shape[3]
+        C_frag = transit_mat.shape[2]
         S = transit_mat.shape[-1]
         transit_mat = jnp.reshape( transit_mat, (T, C_dom*C_frag, C_dom*C_frag, S, S ) ) # (T, C_dom_from*C_frag_from, C_dom_to*C_frag_to, 4, 4)
         
@@ -902,14 +913,18 @@ class NestedTKF(FragAndSiteClasses):
                      log_T_mat[0,0] +
                      start_single_seq_frag_g[None, None, :, :] ) #(C_dom_from, C_frag_from, C_dom_to, C_frag_to )
         
-        # if extending the domain and/or fragment, add probabilities from MARGINAL transitions of fragment-level mixture model
-        prev_values = jnp.transpose(jnp.diagonal(mx_to_my, axis1=0, axis2=2), (2, 0, 1) )  #(C_dom, C_frag_from, C_frag_to )
-        new_values = jnp.logaddexp(prev_values, frag_marginal_transit_mat[...,0,0]) #(C_dom, C_frag_from, C_frag_to )
-
+        # if extending the domain and/or fragment, add probabilities from 
+        #   MARGINAL transitions of fragment-level mixture model
         idx = jnp.arange(self.num_domain_mixtures)
-        mx_to_my = mx_to_my.at[idx, :, idx, :].set(new_values) #(C_dom_from, C_frag_from, C_dom_to, C_frag_to )
         
-        del prev_values, new_values, idx
+        # note: advanced indexing moves C_dom to first axis position
+        prev_values = mx_to_my[idx, :, idx, :] #(C_dom, C_frag_from, C_frag_to)
+        to_add = frag_marginal_transit_mat[idx, :, :, 0, 0] #(C_dom, C_frag_from, C_frag_to)
+        new_values = jnp.logaddexp( prev_values, to_add )  #(C_dom, C_frag_from, C_frag_to )
+        del prev_values, to_add
+        
+        mx_to_my = mx_to_my.at[idx, :, idx, :].set(new_values) # (C_dom_from, C_frag_from, C_dom_to, C_frag_to)
+        del new_values
         
         
         ### All other transitions: emit/emit -> EE, SS -> emit/emit
@@ -930,7 +945,7 @@ class NestedTKF(FragAndSiteClasses):
         
         # reshape and return
         C_dom = transit_mat.shape[0]
-        C_frag = transit_mat.shape[2]
+        C_frag = transit_mat.shape[1]
         S = transit_mat.shape[-1]
         transit_mat = jnp.reshape( transit_mat, (C_dom*C_frag, C_dom*C_frag, S, S ) ) # (C_dom_from*C_frag_from, C_dom_to*C_frag_to, 2, 2)
         

@@ -8,6 +8,8 @@ Created on Tue Aug 26 13:27:12 2025
 """
 import jax
 from jax import numpy as jnp
+
+import numpy as np
 import numpy.testing as npt
 import unittest
 

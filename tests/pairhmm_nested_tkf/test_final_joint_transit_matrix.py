@@ -8,6 +8,8 @@ Created on Tue Aug 26 19:27:42 2025
 import jax
 jax.config.update("jax_enable_x64", True)
 from jax import numpy as jnp
+
+import numpy as np
 import numpy.testing as npt
 import unittest
 
@@ -134,17 +136,17 @@ class TestFinalJointTransitMatrix(unittest.TestCase):
                         for c_frag_to in range(C_frag):
                             ### M -> any
                             # M -> M
-                            val = true_joint_entries['mx_to_my'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, 0, 0]
+                            val = true_joint_entries['mx_to_my'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 0, 0]
                             true[t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 0, 0] = val
                             
                             # M -> I
-                            val = ( true_joint_entries['mx_to_my'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, 0, 1] +
-                                    true_joint_entries['mx_to_ii'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, 0] )
+                            val = ( true_joint_entries['mx_to_my'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 0, 1] +
+                                    true_joint_entries['mx_to_ii'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 0] )
                             true[t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 0, 1] = val
                             
                             # M -> D
-                            val = ( true_joint_entries['mx_to_my'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, 0, 2] +
-                                    true_joint_entries['mx_to_dd'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, 0] )
+                            val = ( true_joint_entries['mx_to_my'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 0, 2] +
+                                    true_joint_entries['mx_to_dd'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 0] )
                             true[t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 0, 2] = val
                             
                             # M -> E
@@ -154,22 +156,22 @@ class TestFinalJointTransitMatrix(unittest.TestCase):
                             
                             ### I -> any
                             # I -> M
-                            val = ( true_joint_entries['mx_to_my'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, 1, 0] +
-                                    true_joint_entries['ii_to_my'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, 0] )
+                            val = ( true_joint_entries['mx_to_my'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 1, 0] +
+                                    true_joint_entries['ii_to_my'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 0] )
                             true[t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 1, 0] = val
                             
                             # I -> I
-                            val = ( true_joint_entries['mx_to_my'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, 1, 1] +
-                                   true_joint_entries['mx_to_ii'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, 1] +
-                                   true_joint_entries['ii_to_my'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, 1] +
-                                    true_joint_entries['ii_to_ii'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to] )
+                            val = ( true_joint_entries['mx_to_my'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 1, 1] +
+                                   true_joint_entries['mx_to_ii'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 1] +
+                                   true_joint_entries['ii_to_my'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 1] +
+                                    true_joint_entries['ii_to_ii'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to] )
                             true[t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 1, 1] = val
                             
                             # I -> D
-                            val = ( true_joint_entries['mx_to_my'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, 1, 2] +
-                                   true_joint_entries['mx_to_dd'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, 1] +
-                                   true_joint_entries['ii_to_my'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, 2] +
-                                    true_joint_entries['ii_to_dd'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to] )
+                            val = ( true_joint_entries['mx_to_my'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 1, 2] +
+                                   true_joint_entries['mx_to_dd'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 1] +
+                                   true_joint_entries['ii_to_my'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 2] +
+                                    true_joint_entries['ii_to_dd'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to] )
                             true[t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 1, 2] = val
                             
                             # I -> E
@@ -180,22 +182,22 @@ class TestFinalJointTransitMatrix(unittest.TestCase):
                             
                             ### D -> any
                             # D -> M
-                            val = ( true_joint_entries['mx_to_my'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, 2, 0] +
-                                    true_joint_entries['dd_to_my'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, 0] )
+                            val = ( true_joint_entries['mx_to_my'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 2, 0] +
+                                    true_joint_entries['dd_to_my'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 0] )
                             true[t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 2, 0] = val
                             
                             # D -> I
-                            val = ( true_joint_entries['mx_to_my'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, 2, 1] +
-                                   true_joint_entries['mx_to_ii'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, 2] +
-                                   true_joint_entries['dd_to_my'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, 1] +
-                                    true_joint_entries['dd_to_ii'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to] )
+                            val = ( true_joint_entries['mx_to_my'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 2, 1] +
+                                   true_joint_entries['mx_to_ii'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 2] +
+                                   true_joint_entries['dd_to_my'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 1] +
+                                    true_joint_entries['dd_to_ii'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to] )
                             true[t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 2, 1] = val
                             
                             # D -> D
-                            val = ( true_joint_entries['mx_to_my'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, 2, 2] +
-                                   true_joint_entries['mx_to_dd'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, 2] +
-                                   true_joint_entries['dd_to_my'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, 2] +
-                                    true_joint_entries['dd_to_dd'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to] )
+                            val = ( true_joint_entries['mx_to_my'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 2, 2] +
+                                   true_joint_entries['mx_to_dd'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 2] +
+                                   true_joint_entries['dd_to_my'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 2] +
+                                    true_joint_entries['dd_to_dd'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to] )
                             true[t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, 2, 2] = val
                             
                             # D -> E

@@ -8,6 +8,7 @@ Created on Tue Aug 26 13:27:12 2025
 """
 import jax
 from jax import numpy as jnp
+import numpy as np
 import numpy.testing as npt
 import unittest
 
@@ -174,7 +175,7 @@ class TestJointTransitMatixEntries(unittest.TestCase):
                                          (lam_frag[c_dom_to] / mu_frag[c_dom_to]) *
                                          np.exp(log_frag_class_probs)[c_dom_to, c_frag_to] )
                                 
-                                pred = pred_joint_entries['mx_to_ii'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, i] 
+                                pred = pred_joint_entries['mx_to_ii'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, i] 
                                 npt.assert_allclose( np.log(true), pred,
                                                      rtol = THRESHOLD,
                                                      atol = 0 )
@@ -186,7 +187,7 @@ class TestJointTransitMatixEntries(unittest.TestCase):
                                          (lam_frag[c_dom_to] / mu_frag[c_dom_to]) *
                                          np.exp(log_frag_class_probs)[c_dom_to, c_frag_to] )
                                 
-                                pred = pred_joint_entries['mx_to_dd'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, i] 
+                                pred = pred_joint_entries['mx_to_dd'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, i] 
                                 npt.assert_allclose( np.log(true), pred,
                                                      rtol = THRESHOLD,
                                                      atol = 0 )
@@ -207,7 +208,7 @@ class TestJointTransitMatixEntries(unittest.TestCase):
                                              np.exp(log_domain_class_probs)[c_dom_to] * 
                                              np.exp(frag_joint_transit_mat)[t, c_dom_to, c_frag_from, c_frag_to, 3, j] ) # this contains w_{m,g}
                                     
-                                    pred = pred_joint_entries['mx_to_my'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, i, j] 
+                                    pred = pred_joint_entries['mx_to_my'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, i, j] 
                                     
                                     if c_dom_from == c_dom_to:
                                         true += np.exp(frag_joint_transit_mat)[t, c_dom_to, c_frag_from, c_frag_to, i, j]
@@ -244,7 +245,7 @@ class TestJointTransitMatixEntries(unittest.TestCase):
                                 true += to_add
                                 del to_add
                             
-                            pred = pred_joint_entries['ii_to_ii'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to] 
+                            pred = pred_joint_entries['ii_to_ii'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to] 
                             npt.assert_allclose( np.log(true), pred,
                                                  rtol = THRESHOLD,
                                                  atol = 0 )
@@ -257,7 +258,7 @@ class TestJointTransitMatixEntries(unittest.TestCase):
                                       (lam_frag[c_dom_to] / mu_frag[c_dom_to]) *
                                       np.exp(log_frag_class_probs)[c_dom_to, c_frag_to] )
                             
-                            pred = pred_joint_entries['ii_to_dd'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to] 
+                            pred = pred_joint_entries['ii_to_dd'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to] 
                             npt.assert_allclose( np.log(true), pred,
                                                  rtol = THRESHOLD,
                                                  atol = 0 )
@@ -280,7 +281,7 @@ class TestJointTransitMatixEntries(unittest.TestCase):
                                           np.exp(log_domain_class_probs)[c_dom_to] * 
                                           np.exp(frag_joint_transit_mat)[t, c_dom_to, c_frag_from, c_frag_to, 3, j] ) # this contains w_{m,g}
                                 
-                                pred = pred_joint_entries['ii_to_my'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, j] 
+                                pred = pred_joint_entries['ii_to_my'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, j] 
                                 
                                 npt.assert_allclose( np.log(true), pred,
                                                      rtol = THRESHOLD,
@@ -314,7 +315,7 @@ class TestJointTransitMatixEntries(unittest.TestCase):
                                 true += to_add
                                 del to_add
                             
-                            pred = pred_joint_entries['dd_to_dd'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to] 
+                            pred = pred_joint_entries['dd_to_dd'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to] 
                             npt.assert_allclose( np.log(true), pred,
                                                  rtol = THRESHOLD,
                                                  atol = 0 )
@@ -327,7 +328,7 @@ class TestJointTransitMatixEntries(unittest.TestCase):
                                       (lam_frag[c_dom_to] / mu_frag[c_dom_to]) *
                                       np.exp(log_frag_class_probs)[c_dom_to, c_frag_to] )
                             
-                            pred = pred_joint_entries['dd_to_ii'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to] 
+                            pred = pred_joint_entries['dd_to_ii'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to] 
                             npt.assert_allclose( np.log(true), pred,
                                                  rtol = THRESHOLD,
                                                  atol = 0 )
@@ -350,7 +351,7 @@ class TestJointTransitMatixEntries(unittest.TestCase):
                                           np.exp(log_domain_class_probs)[c_dom_to] * 
                                           np.exp(frag_joint_transit_mat)[t, c_dom_to, c_frag_from, c_frag_to, 3, j] ) # this contains w_{m,g}
                                 
-                                pred = pred_joint_entries['dd_to_my'][t, c_dom_from, c_dom_to, c_frag_from, c_frag_to, j] 
+                                pred = pred_joint_entries['dd_to_my'][t, c_dom_from, c_frag_from, c_dom_to, c_frag_to, j] 
                                 
                                 npt.assert_allclose( np.log(true), pred,
                                                      rtol = THRESHOLD,
