@@ -30,6 +30,7 @@ class CNNSeqEmb(SeqEmbBase):
     initial_embed_module (callable): module for initial projection to hidden dim
     first_block_module (callable): first CNN block
     subsequent_block_module (callable): subsequent CNN blocks, if desired
+    embedding_which (str): ancestor or descendant
     causal (bool): true if working with the descendant sequence; false otherwise
     config (dict): config to pass to each subsequent module
     name (str): "ANCESTOR EMBEDDER" or "DESCENDANT EMBEDDER"
@@ -38,9 +39,11 @@ class CNNSeqEmb(SeqEmbBase):
     config will have:
     =================
     hidden_dim (int): length of the embedded vector
+
     kern_size_lst (list): list of kernel sizes 
       >> these are 1D convolutions, so each elem will be a one-element 
          list of integers: [int]
+
     dropout (float = 0.0): dropout rate
     
     automatically added:
@@ -106,7 +109,6 @@ class CNNSeqEmb(SeqEmbBase):
         # datamat is (B, L, H)
         # padding_mask is (B, L)
         datamat, padding_mask = self.initial_embed(datamat, 
-                                                   training)
         
         if sow_intermediates:
             self.sow_histograms_scalars(mat = datamat,  

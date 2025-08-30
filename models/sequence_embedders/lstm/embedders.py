@@ -27,17 +27,22 @@ class LSTMSeqEmb(SeqEmbBase):
     initial_embed_module (callable): module for initial projection to hidden dim
     first_block_module (callable): first LSTM block
     subsequent_block_module (callable): subsequent LSTM blocks, if desired
+    embedding_which (str): ancestor or descendant
     config (dict): config to pass to each subsequent module
     name (str): "ANCESTOR EMBEDDER" or "DESCENDANT EMBEDDER"
     
     
     config will have:
     =================
+    n_layers (int): number of LSTM layers
+    
     hidden_dim (int): length of the embedded vector
     
     padding_idx (int = 0): padding token
+    
     in_alph_size (int = 23): <pad>, <bos>, <eos>, then all alphabet 
                                   (20 for amino acids, 4 for DNA)
+                                  
     dropout (float = 0.0): dropout rate
     
     
@@ -57,6 +62,7 @@ class LSTMSeqEmb(SeqEmbBase):
     initial_embed_module: callable
     first_block_module: callable
     subsequent_block_module: callable
+    embedding_which: str
     causal: bool
     config: dict
     name: str
@@ -74,9 +80,10 @@ class LSTMSeqEmb(SeqEmbBase):
         ### setup layers
         # first module projects (B,L) -> (B,L,H)
         name = f'{self.name} 0/initial embed'
-        self.initial_embed = self.initial_embed_module(config = self.config,
-                                                  causal = self.causal,
-                                                  name = name)
+        self.initial_embed = self.initial_embed_module(embedding_which = self.embedding_which,
+                                                       config = self.config,
+                                                       causal = self.causal,
+                                                       name = name)
         del name
         
         # second module does the first sequence embedding: (B,L,H) -> (B,L,H)
@@ -108,7 +115,14 @@ class LSTMSeqEmb(SeqEmbBase):
         
         
         ### initial embedding: (B,L) -> (B,L,H)
+        # datamat is (B, L, H)
+        # padding_mask is (B, L)
         datamat, padding_mask = self.initial_embed(datamat)
+        
+        if sow_intermediates:
+            self.sow_histograms_scalars(mat = datamat,  
+                                        label = f'{self.name} 0/after initial embed', 
+                                        which=['scalars']) 
         
         
         ### first LSTM: (B, L, H) -> (B, L, H)
@@ -211,15 +225,15 @@ class LSTMSeqEmb(SeqEmbBase):
         seqs = kwargs['seqs']
         rng_key = kwargs['rng_key']
         params_for_apply = kwargs['params_for_apply']
-        seq_emb_trainstate = kwargs['seq_emb_trainstate']
-        sow_outputs = kwargs['sow_outputs']
+        tstate = kwargs['tstate']
+        sow_intermediates = kwargs['sow_intermediates']
         
         # embed the sequence
-        (out_carry, out_embeddings), out_aux_dict = seq_emb_trainstate.apply_fn(variables = params_for_apply,
+        (out_carry, out_embeddings), out_aux_dict = tstate.apply_fn(variables = params_for_apply,
                                                                    datamat = seqs,
                                                                    training = True,
-                                                                   sow_intermediates = sow_outputs,
-                                                                   mutable = ['histograms','scalars'] if sow_outputs else [],
+                                                                   sow_intermediates = sow_intermediates,
+                                                                   mutable = ['histograms','scalars'] if sow_intermediates else [],
                                                                    rngs={'dropout': rng_key})
         
         # pack up all the auxilary data 
@@ -240,15 +254,15 @@ class LSTMSeqEmb(SeqEmbBase):
     
     def apply_seq_embedder_in_eval(self,
                                    seqs,
-                                   final_trainstate,
-                                   sow_outputs,
+                                   tstate,
+                                   sow_intermediates,
                                    **kwargs):
         # embed the ancestor seq
-        (out_carry, out_embeddings), out_aux_dict = final_trainstate.apply_fn(variables = final_trainstate.params,
+        (out_carry, out_embeddings), out_aux_dict = tstate.apply_fn(variables = tstate.params,
                                                                  datamat = seqs,
                                                                  training = False,
-                                                                 sow_intermediates = sow_outputs,
-                                                                 mutable = ['histograms','scalars'] if sow_outputs else [])
+                                                                 sow_intermediates = sow_intermediates,
+                                                                 mutable = ['histograms','scalars'] if sow_intermediates else [])
         
         # pack up all the auxilary data 
         metrics_dict_name = f'{self.embedding_which}_layer_metrics'

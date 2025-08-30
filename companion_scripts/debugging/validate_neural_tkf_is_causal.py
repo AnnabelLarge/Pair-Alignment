@@ -487,9 +487,12 @@ def test_neural_tkf_model_is_causal(config_file):
 if __name__ == '__main__':
     import os
     
-    mydir = 'dry_runs'
+    test_neural_tkf_model_is_causal('example_config_neural_hmm_lstm.json')
+    
+    
+    # mydir = 'dry_runs'
 
-    for file in os.listdir(mydir):
-        if file.startswith('CONFIG') and file.endswith('.json'):
-            path = f'{mydir}/{file}'
-            test_neural_tkf_model_is_causal(path)
+    # for file in os.listdir(mydir):
+    #     if file.startswith('CONFIG') and file.endswith('.json'):
+    #         path = f'{mydir}/{file}'
+    #         test_neural_tkf_model_is_causal(path)
