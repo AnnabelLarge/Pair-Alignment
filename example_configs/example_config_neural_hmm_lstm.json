@@ -46,17 +46,17 @@
     "anc_enc_config": {"initial_embed_module": "EmbeddingWithPadding",
                        "first_block_module": "BidirecLSTMLayer",
                        "subsequent_block_module": "BidirecLSTMLayerWithDropoutBefore",
-                       "n_layers": 1,
+                       "n_layers": 2,
                        "hidden_dim": 4,
-                       "dropout": 0.0},
+                       "dropout": 0.20},
 
     "desc_model_type": "lstm",
     "desc_dec_config": {"initial_embed_module": "EmbeddingWithPadding",
                        "first_block_module": "UnidirecLSTMLayer",
                        "subsequent_block_module": "UnidirecLSTMLayerWithDropoutBefore",
-                       "n_layers": 1,
+                       "n_layers": 2,
                        "hidden_dim": 4,
-                       "dropout": 0.0},
+                       "dropout": 0.20},
 
     "pred_model_type": "neural_hmm",
     "pred_config": {
