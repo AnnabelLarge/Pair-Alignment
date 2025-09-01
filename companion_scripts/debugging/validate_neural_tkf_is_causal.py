@@ -487,7 +487,7 @@ def test_neural_tkf_model_is_causal(config_file):
 if __name__ == '__main__':
     import os
     
-    test_neural_tkf_model_is_causal('example_config_neural_hmm_lstm.json')
+    test_neural_tkf_model_is_causal('example_config_neural_hmm_mamba.json')
     
     
     # mydir = 'dry_runs'

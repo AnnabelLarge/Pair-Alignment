@@ -451,7 +451,7 @@ class UnidirecMambaModule(ModuleBase):
     def setup(self):
         ### parse the config
         # required
-        self.in_alph_size = self.config.["in_alph_size"]
+        self.in_alph_size = self.config["in_alph_size"]
         self.expansion_factor = self.config["expansion_factor"] # E
         self.hidden_dim = self.config["hidden_dim"]
         
@@ -580,19 +580,19 @@ class BidirecMambaModule(ModuleBase):
     def setup(self):
         ### parse the config
         # required
+        self.in_alph_size = self.config["in_alph_size"]
         self.expansion_factor = self.config["expansion_factor"] # E
         self.hidden_dim = self.config["hidden_dim"]
         
         # optional
         self.padding_idx = self.config.get("seq_padding_idx", 0)
-        self.in_alph_size = self.config.get("in_alph_size", 23)
         self.tie_in_proj = self.config.get("tie_in_proj", False)
         self.tie_gate = self.config.get("tie_gate", False)
         
         # !!! keep as-is
         self.act_type = 'silu'
         self.act_fn = nn.silu
-        self.merge_how == 'concat'
+        self.merge_how = 'concat'
         self.merge_fn = lambda a, b: jnp.concatenate([a, b], axis=-1)
         self.complement = False # not relevant for protein models
         
@@ -694,10 +694,3 @@ class BidirecMambaModule(ModuleBase):
                             kernel_init=nn.initializers.lecun_normal()) (datamat)
         
         return datamat
-
-
-
-
-
-# def l2_norm(params, alpha = 1.):
-#     return alpha * jnp.sum (jnp.array ([jnp.sum(x*x) for x in jax.tree_util.tree_leaves(params)]))

@@ -49,6 +49,24 @@ class MambaSeqEmb(SeqEmbBase):
     sow_intermediates: if you want to capture intermediates for debugging
     
     
+    config should contain:
+    ======================
+    - in_alph_size
+    - num_blocks
+    - expansion_factor
+    - hidden_dim
+    
+    optional:
+    ---------
+    - ssm_hidden_features: int, default=16
+    - dt_rank: {'auto', int}, default='auto'
+    - dt_proj: bool, default=True
+    - ssm_shift_conv_size: int, default=3
+    - dt_min: float, default=0.001
+    - dt_max: float, default=0.1
+    - (bidirect) tie_in_proj: bool, default=False
+    - (bidirect) tie_gate: bool, default=False
+    
     outputs:
     ========
     datamat (altered matrix): position-specific encodings for all 
@@ -58,6 +76,7 @@ class MambaSeqEmb(SeqEmbBase):
     initial_embed_module: callable
     first_block_module: callable
     subsequent_block_module: callable
+    embedding_which: str
     causal: bool
     config: dict
     name: str
@@ -66,7 +85,8 @@ class MambaSeqEmb(SeqEmbBase):
     def setup(self):
         # first module projects (B,L) -> (B,L,H)
         name = f'{self.name} 0/initial embed'
-        self.initial_embed = self.initial_embed_module(config = self.config,
+        self.initial_embed = self.initial_embed_module(embedding_which = self.embedding_which,
+                                                       config = self.config,
                                                        causal = self.causal,
                                                        name = name)
         del name
@@ -98,7 +118,7 @@ class MambaSeqEmb(SeqEmbBase):
         datamat, padding_mask = self.initial_embed(datamat)
         
         
-        ### first convolution: (B, L, H) -> (B, L, H)
+        ### first mamba block: (B, L, H) -> (B, L, H)
         datamat = self.first_block(datamat = datamat,
                                    padding_mask = padding_mask,
                                    sow_intermediates = sow_intermediates, 

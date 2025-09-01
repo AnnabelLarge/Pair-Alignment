@@ -26,7 +26,7 @@ from models.sequence_embedders.mamba.model_parts import (UnidirecMambaModule,
 ###############################################################################
 ### Mamba in one direction   ##################################################
 ###############################################################################
-class UnidirectResidualMambaLayer(ModuleBase):
+class UnidirectMamba(ModuleBase):
     """
     Full Mamba residual block (using UnidirecMambaModule)
     Using pre-norm structure, similar to a pre-norm transformer
@@ -76,20 +76,24 @@ class UnidirectResidualMambaLayer(ModuleBase):
     
     
     def __call__(self, 
-                 datamat,
-                 padding_mask, 
+                 datamat, #(B, L, H)
+                 padding_mask,  #(B, L)
                  sow_intermediates:bool, 
                  training:bool):
+        B = datamat.shape[0]
+        L = datamat.shape[1]
+        
+        # mask padding tokens of input
+        padding_mask = jnp.broadcast_to( padding_mask[...,None], datamat.shape ) #(B, L, H)
+        datamat = jnp.multiply(datamat, padding_mask) #(B, L, H)
+        
+        # skip connection
         skip = datamat
         
-        ### norm
-        datamat = self.norm(datamat,
-                            mask=padding_mask)
         
-        # manually mask again, because norm leaves NaNs
-        datamat = jnp.where( padding_mask,
-                            datamat,
-                            0)
+        ### norm
+        datamat = self.norm(datamat) #(B, L, H)
+        datamat = jnp.multiply(datamat, padding_mask) #(B, L, H)
         
         # record
         if sow_intermediates:
@@ -186,11 +190,11 @@ class UnidirectMambaWithFeedforward(ModuleBase):
         
         # dense layers (in final feedforward)
         self.first_feedforward_dense = nn.Dense(self.hidden_dim,
-                                                kernel_init = kernel_init,
+                                                kernel_init = self.kernel_init,
                                                 use_bias=True)
         
         self.second_feedforward_dense = nn.Dense(self.hidden_dim,
-                                                 kernel_init = kernel_init,
+                                                 kernel_init = self.kernel_init,
                                                  use_bias=True)
     
     
@@ -204,6 +208,9 @@ class UnidirectMambaWithFeedforward(ModuleBase):
                  padding_mask, 
                  sow_intermediates:bool, 
                  training:bool):
+        B = datamat.shape[0]
+        L = datamat.shape[1]
+        
         ################
         ### mamba part #
         ################
@@ -225,13 +232,10 @@ class UnidirectMambaWithFeedforward(ModuleBase):
         
         
         ### Norm
-        datamat = self.norm(datamat,
-                            mask=padding_mask)
-        
-        # manually mask again, because norm leaves NaNs
-        datamat = jnp.where( padding_mask,
-                            datamat,
-                            0)
+        # mask padding tokens of input
+        padding_mask = jnp.broadcast_to( padding_mask[...,None], datamat.shape ) #(B, L, H)
+        datamat = self.norm(datamat) #(B, L, H)
+        datamat = jnp.multiply(datamat, padding_mask) #(B, L, H)
         
         if sow_intermediates:
             label = f'{self.name}/after second {self.norm_type}Norm'
@@ -242,9 +246,11 @@ class UnidirectMambaWithFeedforward(ModuleBase):
         
         
         ### feedforward: dense -> relu -> dense
-        datamat = self.first_feedforward_dense(datamat)
+        datamat = self.first_feedforward_dense(datamat) #(B, L, H)
         
-        datamat = self.act(datamat)
+        datamat = self.act(datamat) #(B, L, H)
+        datamat = jnp.multiply(datamat, padding_mask) #(B, L, H)
+        
         if sow_intermediates:
             label = f'{self.name}/in feedforward, after {self.act_type}'
             self.sow_histograms_scalars(mat = datamat, 
@@ -252,16 +258,15 @@ class UnidirectMambaWithFeedforward(ModuleBase):
                                         which=['scalars'])
             del label
         
-        datamat = self.second_feedforward_dense(datamat)
+        datamat = self.second_feedforward_dense(datamat) #(B, L, H)
         
         
         ### dropout and residual add
-        # dropout
         datamat = self.dropout_layer(datamat,
-                                     deterministic = not training)
+                                     deterministic = not training) #(B, L, H)
         
-        # add
-        datamat = skip + datamat
+        datamat = skip + datamat #(B, L, H)
+        datamat = jnp.multiply(datamat, padding_mask) #(B, L, H)
         
         if sow_intermediates:
             label = f'{self.name}/after feedforward half'
@@ -278,9 +283,7 @@ class UnidirectMambaWithFeedforward(ModuleBase):
 ###############################################################################
 ### Mamba in both directions   ################################################
 ###############################################################################
-# TODO: if I want do have rms norm apply to L and H dimensions here, could
-#       try that... but would have to flesh out these blocks more
-class BidirectResidualMambaLayer(UnidirectResidualMambaLayer):
+class BidirectMamba(UnidirectMamba):
     """
     Full Mamba residual block (using BidirecMambaModule)
     
