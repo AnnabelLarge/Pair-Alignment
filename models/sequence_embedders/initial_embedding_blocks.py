@@ -9,10 +9,9 @@ Created on Wed Sep 18 15:22:44 2024
 modules to project (B, L) -> (B, L, H), before sending to main architecture
 
 """
-# general python
 from typing import Callable, Optional, Any, Dict
 
-# flaxy and jaxy
+import flax
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
@@ -57,7 +56,115 @@ class PlaceholderEmbedding(nn.Module):
         # padding_mask is (B, L)
         return (datamat, padding_mask)
     
+class EmbeddingWithPadding(ModuleBase):
+    """
+    replicated torch's embedding function, with padding_idx option 
     
+    doesn't really matter if it's causal or not; keeping here to preserve trace
+    
+    configs have (at minimum):
+    --------------------------
+    hidden_dim (int): length of the embedded vector
+    padding_idx (int = 0): padding token
+    args.in_alph_size (int): <pad>, <bos>, <eos>, then all alphabet 
+                                  (20 for amino acids, 4 for DNA)
+                              
+    """
+    embedding_which: str
+    config: Dict
+    name: str
+    causal: Optional[Any] = None
+    
+    def setup(self):
+        # unpack config
+        self.features = self.config['hidden_dim'] #H
+        self.vocab_size = self.config['in_alph_size']
+        self.seq_padding_idx = self.config.get('seq_padding_idx', 0)
+        
+        # layers to use
+        self.initial_embedding = nn.Embed(num_embeddings = self.vocab_size, 
+                                          features = self.features)
+        
+        
+    def __call__(self, 
+                 datamat: jnp.array,  #(B, L)
+                 training: Optional[Any] = None):
+        B = datamat.shape[0]
+        L = datamat.shape[1]
+        final_shape = (B, L, self.features)
+        
+        # padding mask
+        padding_mask = (datamat != self.seq_padding_idx) #(B, L)
+        padding_mask_expanded = jnp.broadcast_to(padding_mask[..., None], final_shape) # (B, L, H)
+        
+        # embed: (B,L) -> (B, L, H)
+        datamat = self.initial_embedding(datamat) # (B, L, H)
+        datamat = jnp.multiply(datamat, padding_mask_expanded) # (B, L, H)
+        
+        # datamat is (B, L, H)
+        # padding_mask is (B, L)
+        return (datamat, padding_mask)
+
+
+class FakeEmbeddingWithPadding(ModuleBase):
+    """
+    same as EmbeddingWithPadding, but output a one-hot encoding                        
+    """
+    config: Dict
+    name: str
+    embedding_which: Optional[str] = None
+    causal: Optional[Any] = None
+    
+    def setup(self):
+        # unpack config
+        self.features = self.config['hidden_dim'] #H
+        self.vocab_size = self.config['in_alph_size']
+        self.seq_padding_idx = self.config.get('seq_padding_idx', 0)
+        
+        # layers to use
+        self.initial_embedding = nn.Embed(num_embeddings = self.vocab_size, 
+                                          features = self.features)
+        
+        # embedding matrix
+        n = min(self.vocab_size, self.features)
+        W = jnp.zeros( (self.vocab_size, self.features) ) #(A, H)
+        W = W.at[jnp.arange(n), jnp.arange(n)].set(1.0)
+        W = W.at[self.seq_padding_idx, :].set(0.0)
+        self.one_hot_matrix = W
+        
+        
+    def __call__(self, 
+                 datamat: jnp.array,  #(B, L)
+                 *arg,
+                 **kwargs):
+        B = datamat.shape[0]
+        L = datamat.shape[1]
+        final_shape = (B, L, self.features)
+        
+        ### reshape padding mask
+        padding_mask = (datamat != self.seq_padding_idx) #(B, L)
+        padding_mask_expanded = jnp.broadcast_to(padding_mask[..., None], final_shape) # (B, L, H)
+        
+        
+        ### embedding
+        # custom weight matrix
+        params = self.initial_embedding.variables.get("params", {})
+        if len(params) > 0:
+            params = params.unfreeze()
+        
+        params["embedding"] = self.one_hot_matrix
+        frozen_params = flax.core.freeze(params)
+    
+        # Apply embedding with overridden matrix
+        datamat = self.initial_embedding.apply({"params": frozen_params}, 
+                                               datamat) # (B, L, H)
+        datamat = jnp.multiply(datamat, padding_mask_expanded) # (B, L, H)
+        
+        # datamat is (B, L, H)
+        # padding_mask is (B, L)
+        return (datamat, padding_mask)
+
+
 class OneHotEmb(SeqEmbBase):
     """
     Only one-hot encoding
@@ -120,56 +227,6 @@ class OneHotEmb(SeqEmbBase):
                                     raw_one_hot.shape) #(B, L, in_alph_size)
         one_hot_final = raw_one_hot * seq_mask  #(B, L, in_alph_size)
         return one_hot_final, padding_mask
-
-class EmbeddingWithPadding(ModuleBase):
-    """
-    replicated torch's embedding function, with padding_idx option 
-    
-    doesn't really matter if it's causal or not; keeping here to preserve trace
-    
-    configs have (at minimum):
-    --------------------------
-    hidden_dim (int): length of the embedded vector
-    padding_idx (int = 0): padding token
-    args.in_alph_size (int): <pad>, <bos>, <eos>, then all alphabet 
-                                  (20 for amino acids, 4 for DNA)
-                              
-    """
-    embedding_which: str
-    config: Dict
-    name: str
-    causal: Optional[Any] = None
-    
-    def setup(self):
-        # unpack config
-        self.features = self.config['hidden_dim'] #H
-        self.vocab_size = self.config['in_alph_size']
-        self.seq_padding_idx = self.config.get('seq_padding_idx', 0)
-        
-        # layers to use
-        self.initial_embedding = nn.Embed(num_embeddings = self.vocab_size, 
-                                          features = self.features)
-        
-        
-    def __call__(self, 
-                 datamat: jnp.array,  #(B, L)
-                 training: Optional[Any] = None):
-        B = datamat.shape[0]
-        L = datamat.shape[1]
-        final_shape = (B, L, self.features)
-        
-        # padding mask
-        padding_mask = (datamat != self.seq_padding_idx) #(B, L)
-        padding_mask_expanded = jnp.broadcast_to(padding_mask[..., None], final_shape) # (B, L, H)
-        
-        # embed: (B,L) -> (B, L, H)
-        datamat = self.initial_embedding(datamat) # (B, L, H)
-        datamat = jnp.multiply(datamat, padding_mask_expanded) # (B, L, H)
-        
-        # datamat is (B, L, H)
-        # padding_mask is (B, L)
-        return (datamat, padding_mask)
-
 
 
 class TAPEEmbedding(ModuleBase):
@@ -251,7 +308,6 @@ class TAPEEmbedding(ModuleBase):
         # datamat is (B, L, H)
         # padding_mask is (B, L)
         return (out, padding_mask)
-
 
 
 class ConvEmbedding(ModuleBase):
