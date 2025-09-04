@@ -82,15 +82,19 @@ def create_seq_model_tstate(embedding_which,
     
     ### CNN (only one block type: ConvnetBlock)
     elif model_type == 'cnn':
-        # import blocks to use (only one type)
-        from models.sequence_embedders.cnn.blocks_fns import ConvnetBlock
+        # import blocks to use 
+        from models.sequence_embedders.cnn import blocks_fns
+        first_block_module = getattr(blocks_fns, 
+                                     model_config["first_block_module"])
+        subsequent_block_module = getattr(blocks_fns,
+                                          model_config["subsequent_block_module"])
         
         # initialize
         from models.sequence_embedders.cnn.embedders import CNNSeqEmb
         seq_model_instance = CNNSeqEmb(embedding_which = embedding_which.lower(),
                                         initial_embed_module = initial_embed_module,                          
-                                        first_block_module = ConvnetBlock,
-                                        subsequent_block_module = ConvnetBlock,
+                                        first_block_module = first_block_module,
+                                        subsequent_block_module = subsequent_block_module,
                                         causal = causal,
                                         config = model_config,
                                         name =f'CNN {model_name_suffix}')

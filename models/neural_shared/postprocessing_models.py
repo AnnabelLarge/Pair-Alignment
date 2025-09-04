@@ -386,4 +386,3 @@ class FeedforwardPostproc(SelectMask):
         datamat = self._mask_padding_tokens( x=datamat,
                                              mask=padding_mask ) #(B, L, layer_sizes[-1])
         return datamat  #(B, L, layer_sizes[-1])
-    
