@@ -89,7 +89,7 @@ def main():
     
     # # UNCOMMENT TO RUN IN SPYDER IDE
     # top_level_args.task = 'train'
-    # top_level_args.configs = 'example_config_neural_hmm_mamba.json'
+    # top_level_args.configs = 'example_config_ffwd_cnn.json'
     # top_level_args.load_dset_pkl = None
     
     

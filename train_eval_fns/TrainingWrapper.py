@@ -375,7 +375,6 @@ class TrainingWrapper:
                 model_state_dict = flax.serialization.to_state_dict(trainstate_objs[i])
                 pickle.dump(model_state_dict, g)    
     
-    # COME BACK HERE
     def _maybe_checkpoint( self,
                            epoch_idx,
                            batch_idx,

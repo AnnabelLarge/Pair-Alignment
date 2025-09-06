@@ -1,0 +1,70 @@
+{
+    "training_wkdir": "RESULTS",
+    "rng_seednum": 99,
+
+    "data_dir": "example_data",
+    "train_dset_splits": ["twoSamp"],
+    "test_dset_splits": ["twoSamp"],
+    "toss_alignments_longer_than": null,
+    "batch_size": 2,
+    "chunk_length": 512,
+    "emission_alphabet_size": 20,
+    "norm_reported_loss_by": "desc_len",
+    "gap_idx": 43,
+
+    "num_epochs": 10,
+    "optimizer_config": {
+        "init_value": 0.05,
+        "peak_value": 0.05,
+        "end_value": 0.05,
+        "warmup_steps": 0,
+        "weight_decay": 0,
+        "every_k_schedule": 1
+    },
+    "early_stop_cond1_atol": 1e-3,
+    "early_stop_cond2_gap": 0.5,
+    "patience": 10,
+    "update_grads": true,
+    "use_scan_fns": false,
+
+    "interms_for_tboard": {
+        "encoder_sow_outputs": false,
+        "ancestor_embeddings": false,
+        "decoder_sow_outputs": false,
+        "descendant_embeddings": false,
+        "finalpred_sow_outputs": false,
+        "gradients": false,
+        "weights": false,
+        "optimizer": false,
+        "forward_pass_outputs": true,
+        "final_logprobs": true
+    },
+    "save_arrs": true,
+    "save_per_sample_losses": true,
+    "checkpoint_freq_during_training": 1000,
+
+    "anc_model_type": "cnn",
+    "anc_enc_config": {"initial_embed_module": "EmbeddingWithPadding",
+                       "hidden_dim": 100,
+                       "kern_size_lst": [16],
+                       "dropout": 0.0},
+
+    "desc_model_type": "cnn",
+    "desc_dec_config": {"initial_embed_module": "EmbeddingWithPadding",
+                       "hidden_dim": 100,
+                       "kern_size_lst": [8],
+                       "dropout": 0.0},
+    
+    "pred_model_type": "feedforward",
+    "pred_config": {
+        "postproc_model_type": "feedforward",
+        "use_bias": true,
+        "use_anc_emb": true,
+        "use_desc_emb": true,
+        "use_prev_align_info": true,
+        "layer_sizes": [100],
+        "dropout": 0.0,
+        "t_per_sample": true 
+    }
+    
+}

@@ -85,9 +85,9 @@ def create_seq_model_tstate(embedding_which,
         # import blocks to use 
         from models.sequence_embedders.cnn import blocks_fns
         first_block_module = getattr(blocks_fns, 
-                                     model_config["first_block_module"])
+                                     model_config.get("first_block_module", "ConvnetBlock") )
         subsequent_block_module = getattr(blocks_fns,
-                                          model_config["subsequent_block_module"])
+                                          model_config.get("subsequent_block_module", "ConvnetBlock") )
         
         # initialize
         from models.sequence_embedders.cnn.embedders import CNNSeqEmb

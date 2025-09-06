@@ -1,0 +1,29 @@
+{
+    "training_wkdir": "RESULTS_ffwd_CNN",
+    "eval_wkdir": "EVAL_ffwd_CNN",
+
+    "data_dir": "example_data",
+    "test_dset_splits": ["twoSamp"],
+    "toss_alignments_longer_than": null,
+    "batch_size": 2,
+    "chunk_length": 512,
+    "emission_alphabet_size": 20,
+    "norm_reported_loss_by": "desc_len",
+    "gap_idx": 43,
+    "use_scan_fns": false,
+
+    "interms_for_tboard": {
+        "encoder_sow_outputs": false,
+        "ancestor_embeddings": false,
+        "decoder_sow_outputs": false,
+        "descendant_embeddings": false,
+        "finalpred_sow_outputs": false,
+        "gradients": false,
+        "weights": false,
+        "optimizer": false,
+        "final_logprobs": true,
+        "forward_pass_outputs": true
+    },
+    "save_arrs": true,
+    "save_per_sample_losses": true
+}

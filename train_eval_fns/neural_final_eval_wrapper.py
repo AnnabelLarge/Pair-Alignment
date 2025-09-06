@@ -68,7 +68,6 @@ def final_eval_wrapper(dataloader,
     if tboard_writer:
         final_stats_for_tboard = dict()
     
-    
     for batch_idx, batch in tqdm( enumerate(dataloader), total=len(dataloader) ): 
         ##########################
         ### run model on a batch #
@@ -220,14 +219,12 @@ def final_eval_wrapper(dataloader,
             
             if return_forward_pass_outputs:
                 for key in eval_metrics.keys():
-                    # scoring matrices for neural TKF models
                     if key.startswith('scormat_'):
                         value_to_save = eval_metrics[key]
                         add_to_out_dict(value_to_write = value_to_save, 
                                         flag = return_forward_pass_outputs,
                                         file_suffix = key.replace('scormat_','').upper())
                         
-                    # TODO: outputs from feedforward prediction head
             
             if 'anc_attn_weights' in eval_metrics.keys():
                 add_to_out_dict(value_to_write = eval_metrics['anc_attn_weights'], 

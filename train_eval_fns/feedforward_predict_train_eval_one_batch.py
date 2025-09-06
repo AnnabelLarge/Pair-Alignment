@@ -743,8 +743,8 @@ def eval_one_batch(batch,
 
     write_optional_outputs(value_to_save = final_logits,
                            flag = return_final_logprobs,
-                           varname_to_write = 'final_logits')
-
+                           varname_to_write = 'scormat_final_logits')
+    
     # always returned from out_dict:
     #     - loss; float
     #     - batch_ave_perpl; float
@@ -763,6 +763,6 @@ def eval_one_batch(batch,
     #     - desc_attn_weights 
     #     - final_ancestor_embeddings
     #     - final_descendant_embeddings
-    #     - final_logits (i.e. BEFORE log_softmax)
+    #     - scormat_final_logits (i.e. BEFORE log_softmax)
          
     return out_dict

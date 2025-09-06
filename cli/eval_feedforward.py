@@ -52,9 +52,9 @@ def eval_feedforward( args,
     ###########################################################################
     ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES   #########################
     ###########################################################################
-    err = (f"{args.pred_model_type} is not feedforward; "+
+    err = (f"{training_argparse.pred_model_type} is not feedforward; "+
            f"using the wrong training script")
-    assert args.pred_model_type == 'feedforward', err
+    assert training_argparse.pred_model_type == 'feedforward', err
     del err
     
     # model param filenames
@@ -65,11 +65,12 @@ def eval_feedforward( args,
                                 decoder_save_model_filename,
                                 finalpred_save_model_filename]
     
-    fill_with_default_values(args)
-    enforce_valid_defaults(args)
-    share_top_level_args(args)
-    
-    
+    fill_with_default_values(training_argparse)
+    enforce_valid_defaults(training_argparse)
+    share_top_level_args(training_argparse)
+
+    args.seq_padding_idx = training_argparse.seq_padding_idx
+
     
     ###########################################################################
     ### 1: SETUP   ############################################################
@@ -152,7 +153,7 @@ def eval_feedforward( args,
     out = create_all_tstates( seq_shapes = seq_shapes, 
                               tx = tx, 
                               model_init_rngkey = jax.random.key(0),
-                              tabulate_file_loc = training_argparse.model_ckpts_dir,
+                              tabulate_file_loc = args.model_ckpts_dir,
                               anc_model_type = training_argparse.anc_model_type, 
                               desc_model_type = training_argparse.desc_model_type, 
                               pred_model_type = training_argparse.pred_model_type, 
@@ -193,15 +194,9 @@ def eval_feedforward( args,
                   'weights': False,
                   'ancestor_embeddings': False,
                   'descendant_embeddings': False,
-                  'forward_pass_outputs': args.save_scoremats}
+                  "final_logprobs": args.interms_for_tboard['final_logprobs'],
+                  'forward_pass_outputs': args.interms_for_tboard['forward_pass_outputs']}
     extra_args_for_eval = dict()
-    
-    # if this is a transformer model, will have extra arguments for eval funciton
-    extra_args_for_eval = dict()
-    if (args.anc_model_type == 'transformer' and args.desc_model_type == 'transformer'):
-        flag = (args.anc_enc_config.get('output_attn_weights',False) or 
-                args.desc_dec_config.get('output_attn_weights',False))
-        extra_args_for_eval['output_attn_weights'] = flag
 
     parted_eval_fn = partial( eval_one_batch,
                               all_model_instances = all_model_instances,
@@ -232,7 +227,7 @@ def eval_feedforward( args,
                                              jitted_determine_alignlen_bin = jitted_determine_alignlen_bin,
                                              eval_fn_jitted = eval_fn_jitted,
                                              out_alph_size = training_argparse.out_alph_size, 
-                                             save_arrs = args.save_scoremats,
+                                             save_arrs = args.save_arrs,
                                              save_per_sample_losses = args.save_per_sample_losses,
                                              interms_for_tboard = no_returns, 
                                              logfile_dir = args.logfile_dir,
@@ -245,7 +240,7 @@ def eval_feedforward( args,
         new_outfile = f'{args.model_ckpts_dir}/{all_save_model_filenames[i]}'
         new_outfile = new_outfile.replace('.pkl',f'_BEST.pkl')
         with open(new_outfile, 'wb') as g:
-            model_state_dict = flax.serialization.to_state_dict(trainstate_objs[i])
+            model_state_dict = flax.serialization.to_state_dict(best_trainstates[i])
             pickle.dump(model_state_dict, g)   
     
     # output average losses

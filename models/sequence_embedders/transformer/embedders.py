@@ -107,8 +107,7 @@ class TransfSeqEmb(SeqEmbBase):
         ### initial embedding: (B,L) -> (B,L,H)
         # datamat is (B, L, H)
         # padding_mask is (B, L)
-        datamat, padding_mask = self.initial_embed(datamat, 
-                                                   training)
+        datamat, padding_mask = self.initial_embed(datamat, training)
         
         if sow_intermediates:
             self.sow_histograms_scalars(mat = datamat,  
