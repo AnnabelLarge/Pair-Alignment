@@ -386,3 +386,38 @@ class FeedforwardPostproc(SelectMask):
         datamat = self._mask_padding_tokens( x=datamat,
                                              mask=padding_mask ) #(B, L, layer_sizes[-1])
         return datamat  #(B, L, layer_sizes[-1])
+
+
+class KroneckerDelta(SelectMask):
+    """
+    use this in debugging to project concatenated one-hot embeddings to full
+      combination of amino acid pairs: 2A -> A*A
+    """
+    config: dict
+    name: str
+    
+    def setup(self):
+        self.in_alph_size = self.config['in_alph_size']
+    
+    @nn.compact
+    def __call__(self, 
+                 anc_emb: Optional[jnp.array] = None,
+                 desc_causal_emb: Optional[jnp.array] = None,
+                 padding_mask: Optional[jnp.array] = None,
+                 *args,
+                 **kwargs):
+        B = anc_emb.shape[0]
+        L = anc_emb.shape[1]
+        A = self.in_alph_size
+
+        # crop back to in_alph_size
+        anc_emb = anc_emb[..., :A] #(B, L, A)
+        anc_emb = self._mask_padding_tokens( anc_emb, padding_mask ) #(B, L, A)
+        desc_causal_emb = desc_causal_emb[..., :A] #(B, L, A)
+        desc_causal_emb = self._mask_padding_tokens( desc_causal_emb, padding_mask ) #(B, L, A)
+        
+        # outer product
+        outer = jnp.einsum('blx, bly -> blxy', anc_emb, desc_causal_emb) #(B, L, A, A)
+        outer = jnp.reshape( outer, (B, L, A*A) ) #(B, L, A*A)
+        return outer
+    

@@ -70,6 +70,10 @@ class ConvnetBlock(ModuleBase):
     name: str
     
     def setup(self):
+        if not self.causal:
+            # kernel width has to be odd, in order for this filter to be centered
+            assert self.kern_size % 2 > 0
+        
         ### unpack from config
         self.hidden_dim = self.config['hidden_dim']
         self.dropout = self.config.get('dropout', 0.0)
@@ -243,7 +247,6 @@ class FakeConvnetBlock(ModuleBase):
         datamat = jnp.where( datamat > 0,
                              1.0,
                              0.0 ) #(B, L, H)
-        
         return datamat
     
     def kernel_fn(self,
