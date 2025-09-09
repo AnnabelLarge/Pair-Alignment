@@ -132,7 +132,7 @@ class FeedforwardPredict(ModuleBase):
         logprob_perSamp_perPos = -optax.softmax_cross_entropy_with_integer_labels(logits = final_logits, 
                                                                                   labels = true_out) # (B, L)
         logprob_perSamp_perPos = jnp.multiply( logprob_perSamp_perPos, padding_mask ) #(B, L)
-        logprob_perSamp = logprob_perSamp_perPos.sum(axis=-1) #(B, L)
+        logprob_perSamp = logprob_perSamp_perPos.sum(axis=-1) #(B, )
         
         
         ### accuracy
