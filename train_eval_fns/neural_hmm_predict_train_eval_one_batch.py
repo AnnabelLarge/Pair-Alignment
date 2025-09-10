@@ -289,6 +289,7 @@ def train_one_batch(batch,
         # corr: (T,B) or (B,)
         # approx_flags_dict: a dictionary of things (see model code)
         # subs_model_params: a dictionary of things (see model code)
+        #   > most importantly, this contained rate_multiplier!
         # indel_model_params: a dictionary of things (see model code)
         forward_pass_scoring_matrices, pred_sow_dict = out
         del out, mut
@@ -300,24 +301,31 @@ def train_one_batch(batch,
         
         ### evaluate loglike of true alignments
         # this calculates sum of logprob over length of alignment
-        logprob_perSamp_perTime = finalpred_trainstate.apply_fn( variables = finalpred_params,
-                                                         logprob_emit_match = forward_pass_scoring_matrices['logprob_emit_match'], 
-                                                         logprob_emit_indel = forward_pass_scoring_matrices['logprob_emit_indel'],
-                                                         logprob_transits = forward_pass_scoring_matrices['logprob_transits'],
-                                                         corr = forward_pass_scoring_matrices['corr'],
-                                                         true_out = true_out,
-                                                         padding_idx = seq_padding_idx,
-                                                         method = 'neg_loglike_in_scan_fn') #(T,B) or (B,)
+        #
+        # loss dict has:
+        # logprob_perSamp_perTime; (T,B) or (B,)
+        # rate_multiplier_sum, total_seen_toks; floats
+        # if returning intermediates: tr, e; (T, B, L) or (B, L)
+        loss_dict = finalpred_trainstate.apply_fn( variables = finalpred_params,
+                                                   logprob_emit_match = forward_pass_scoring_matrices['logprob_emit_match'], 
+                                                   logprob_emit_indel = forward_pass_scoring_matrices['logprob_emit_indel'],
+                                                   logprob_transits = forward_pass_scoring_matrices['logprob_transits'],
+                                                   rate_multiplier = forward_pass_scoring_matrices['subs_model_params']['rate_multiplier'],
+                                                   corr = forward_pass_scoring_matrices['corr'],
+                                                   true_out = true_out,
+                                                   padding_idx = seq_padding_idx,
+                                                   return_result_before_sum = False,
+                                                   method = 'neg_loglike_in_scan_fn') 
         
         # final loss calculation; possibly logsumexp across timepoints
         out = finalpred_trainstate.apply_fn( variables = finalpred_params,
-                                             logprob_perSamp_perTime = logprob_perSamp_perTime,
+                                             loss_dict = loss_dict,
                                              length_for_normalization_for_reporting = length_for_normalization_for_reporting,
                                              t_array = times_for_matrices,
                                              padding_idx = seq_padding_idx,
                                              method = 'evaluate_loss_after_scan' )
         loss, aux_dict = out
-        del out, logprob_perSamp_perTime  
+        del out, loss_dict  
         
         
         ### return EVERYTHING
@@ -650,6 +658,7 @@ def eval_one_batch(batch,
     # corr: (T,B) or (B,)
     # approx_flags_dict: a dictionary of things (see model code)
     # subs_model_params: a dictionary of things (see model code)
+    #   > most importantly, this contained rate_multiplier!
     # indel_model_params: a dictionary of things (see model code)
     forward_pass_scoring_matrices, pred_sow_dict = out
     del mut, out
@@ -661,24 +670,31 @@ def eval_one_batch(batch,
     
     ### evaluate loglike of true alignments
     # this calculates sum of logprob over length of alignment
-    logprob_perSamp_perTime = finalpred_trainstate.apply_fn( variables = finalpred_trainstate.params,
-                                                     logprob_emit_match = forward_pass_scoring_matrices['logprob_emit_match'], 
-                                                     logprob_emit_indel = forward_pass_scoring_matrices['logprob_emit_indel'],
-                                                     logprob_transits = forward_pass_scoring_matrices['logprob_transits'],
-                                                     corr = forward_pass_scoring_matrices['corr'],
-                                                     true_out = true_out,
-                                                     padding_idx = seq_padding_idx,
-                                                     method = 'neg_loglike_in_scan_fn') #(T,B) or (B,)
+    #
+    # loss dict has:
+    # logprob_perSamp_perTime; (T,B) or (B,)
+    # rate_multiplier_sum, total_seen_toks; floats
+    # if returning intermediates: tr, e; (T, B, L) or (B, L)
+    loss_dict = finalpred_trainstate.apply_fn( variables = finalpred_trainstate.params,
+                                               logprob_emit_match = forward_pass_scoring_matrices['logprob_emit_match'], 
+                                               logprob_emit_indel = forward_pass_scoring_matrices['logprob_emit_indel'],
+                                               logprob_transits = forward_pass_scoring_matrices['logprob_transits'],
+                                               rate_multiplier = forward_pass_scoring_matrices['subs_model_params']['rate_multiplier'],
+                                               corr = forward_pass_scoring_matrices['corr'],
+                                               true_out = true_out,
+                                               padding_idx = seq_padding_idx,
+                                               return_result_before_sum = False,
+                                               method = 'neg_loglike_in_scan_fn') 
      
     # final loss calculation; possibly logsumexp across timepoints
     out = finalpred_trainstate.apply_fn( variables = finalpred_trainstate.params,
-                                         logprob_perSamp_perTime = logprob_perSamp_perTime,
+                                         loss_dict = loss_dict,
                                          length_for_normalization_for_reporting = length_for_normalization_for_reporting,
                                          t_array = times_for_matrices,
                                          padding_idx = seq_padding_idx,
                                          method = 'evaluate_loss_after_scan' )
     loss, loss_fn_dict = out
-    del out, logprob_perSamp_perTime  
+    del out, loss_dict  
     
     
     ### evaluate metrics

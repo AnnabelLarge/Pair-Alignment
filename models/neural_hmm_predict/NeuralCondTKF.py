@@ -56,6 +56,7 @@ class NeuralCondTKF(ModuleBase):
         self.times_from : str
         self.subst_model_type : str
         self.exponential_dist_param : float
+        self.rate_multiplier_regularization_rate : float
         self.transitions_postproc_config : dict
         self.emissions_postproc_config : dict
         
@@ -97,12 +98,12 @@ class NeuralCondTKF(ModuleBase):
         global_or_local_dict = self.config['global_or_local']
         
         # optional
-        transitions_postproc_model_type = self.config.get('transitions_postproc_model_type', None)
-        self.transitions_postproc_model_type = transitions_postproc_model_type
-        emissions_postproc_model_type = self.config.get('emissions_postproc_model_type', None)
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1.)
+        self.rate_multiplier_regularization_rate = self.config.get('rate_mult_regular_rate', 0.0)
         self.transitions_postproc_config = self.config.get('transitions_postproc_config', dict() )
         self.emissions_postproc_config = self.config.get('emissions_postproc_config', dict() )
+        self.transitions_postproc_model_type = self.config.get('transitions_postproc_model_type', None)
+        emissions_postproc_model_type = self.config.get('emissions_postproc_model_type', None)
         
         # handle time
         if times_from =='t_per_sample':
@@ -119,7 +120,7 @@ class NeuralCondTKF(ModuleBase):
                                     'feedforward': FeedforwardPostproc,
                                     None: lambda *args, **kwargs: lambda *args, **kwargs: None}
         
-        transitions_postproc_module = postproc_module_registry[transitions_postproc_model_type]
+        transitions_postproc_module = postproc_module_registry[self.transitions_postproc_model_type]
         emissions_postproc_module = postproc_module_registry[emissions_postproc_model_type]
         
         
@@ -186,7 +187,7 @@ class NeuralCondTKF(ModuleBase):
         ###########################################
         # postprocess the concatenated embeddings
         self.postproc_trans =  transitions_postproc_module(config = self.transitions_postproc_config,
-                                             name = f'{self.name}/{transitions_postproc_model_type}_to_trans_module')
+                                             name = f'{self.name}/{self.transitions_postproc_model_type}_to_trans_module')
         
         if self.indel_model_type == 'tkf91':
             if global_or_local_dict['tkf_rates'].lower() == 'global':
@@ -330,6 +331,7 @@ class NeuralCondTKF(ModuleBase):
                               logprob_emit_match: jnp.array, 
                               logprob_emit_indel: jnp.array,
                               logprob_transits: jnp.array,
+                              rate_multiplier: jnp.array,
                               corr: jnp.array,
                               true_out: jnp.array,
                               gap_idx: int=43,
@@ -411,8 +413,7 @@ class NeuralCondTKF(ModuleBase):
                                                 padding_idx = padding_idx,
                                                 start_idx = start_idx,
                                                 end_idx = end_idx),
-                           0
-                           )
+                           0 )
         
         # insert positions: score with descendant tok
         e = e + jnp.where( curr_state == 2,
@@ -423,8 +424,7 @@ class NeuralCondTKF(ModuleBase):
                                         padding_idx = padding_idx,
                                         start_idx = start_idx,
                                         end_idx = end_idx),
-                           0
-                           )
+                           0 )
         # conditional logprob, so don't score "emissions" from ancestor tokens
         
         ### final logprob(sequences)
@@ -433,26 +433,33 @@ class NeuralCondTKF(ModuleBase):
         logprob_perSamp_perPos_perTime = tr + e
         
         if return_result_before_sum:
-            score_to_return = logprob_perSamp_perPos_perTime
+            # if unique_time_per_sample, logprob_perSamp_perPos_perTime is (B, length_for_scan)
+            # elif not unique_time_per_sample, logprob_perSamp_perPos_perTime is (T, B, length_for_scan)
+            out = {'logprob_perSamp_perPos_perTime': logprob_perSamp_perPos_perTime} #(T, B, length_for_scan) or (B, length_for_scan)
         
         elif not return_result_before_sum:
             # take the SUM down the length to get logprob_perSamp_perTime:
             # if unique_time_per_sample, logprob_perSamp_perTime is (B)
             # elif not unique_time_per_sample, logprob_perSamp_perTime is (T, B)
-            logprob_perSamp_perTime = logprob_perSamp_perPos_perTime.sum(axis=-1)
-            score_to_return = logprob_perSamp_perTime
+            logprob_perSamp_perTime = logprob_perSamp_perPos_perTime.sum(axis=-1) #(T,B) or (B,)
+            out = {'logprob_perSamp_perTime': logprob_perSamp_perTime} #(T,B) or (B,)
         
+        # accumulate sum of rate multipliers (for later regularization)
+        out['rate_multiplier_sum'] = jnp.multiply( rate_multiplier, (curr_state != 0) ).sum() #float
+        out['total_seen_toks'] = (curr_state != 0).sum() #float
+        
+        # possible return intermediate scores (for debugging)
         if return_transit_emit:
-            return (score_to_return, tr, e)
+            out['tr'] = tr
+            out['e'] = e
         
-        elif not return_transit_emit:
-            return score_to_return
+        return out
         
     
     def evaluate_loss_after_scan(self, 
-                                 logprob_perSamp_perTime,
-                                 length_for_normalization_for_reporting,
-                                 t_array,
+                                 loss_dict: dict,
+                                 length_for_normalization_for_reporting: jnp.array,
+                                 t_array: jnp.array,
                                  padding_idx: int = 0,
                                  *args,
                                  **kwargs):
@@ -460,6 +467,8 @@ class NeuralCondTKF(ModuleBase):
         postprocessing after accumulating logprobs in a scan function
         """
         ### handle time, if needed
+        logprob_perSamp_perTime = loss_dict['logprob_perSamp_perTime'] #(B,) or (T, B)
+
         # marginalize over time grid
         if not self.unique_time_per_sample:
             if t_array.shape[0] > 1:
@@ -484,10 +493,21 @@ class NeuralCondTKF(ModuleBase):
         elif self.unique_time_per_sample:
             logprob_perSamp = logprob_perSamp_perTime
         
-        # collect loss and intermediate values
+        
+        ### calculate loss, possibly regularize
         loss = -jnp.mean(logprob_perSamp)
+        
+        # regularization: encourage mean rate multiplier to be close to 1
+        rate_multiplier_sum = loss_dict['rate_multiplier_sum'] #float
+        total_seen_toks = loss_dict['total_seen_toks'] #float
+        mean_rate_mult = rate_multiplier_sum / total_seen_toks #float
+        loss = loss + self.rate_multiplier_regularization_rate * jnp.square( 1 - mean_rate_mult )
+        
+        
+        ### collect loss and intermediate values
         intermediate_vals = { 'sum_neg_logP': -logprob_perSamp,
-                              'neg_logP_length_normed': -logprob_perSamp/length_for_normalization_for_reporting}
+                              'neg_logP_length_normed': -logprob_perSamp/length_for_normalization_for_reporting,
+                              'mean_rate_mult': mean_rate_mult}
         
         return loss, intermediate_vals
     

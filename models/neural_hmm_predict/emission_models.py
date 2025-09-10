@@ -296,7 +296,6 @@ class LocalF81(neuralTKFModuleBase):
         """
         self.rate_mult_min_val, self.rate_mult_max_val  = self.config.get( 'rate_mult_range', 
                                                                            (0.01, 10) )
-        self.norm_rate_mult = self.config.get('norm_rate_mult', False) # this is a different default from pairHMMs
         
         # only change these when debugging
         self.use_bias = self.config.get('use_bias', True)
@@ -364,19 +363,6 @@ class LocalF81(neuralTKFModuleBase):
                                                max_val = self.rate_mult_max_val,
                                                param_name = 'rate mult.',
                                                sow_intermediates = sow_intermediates) # (B, L_align)
-            
-            if self.norm_rate_mult:
-                # for each sample, normalize all rate multipliers such that 
-                #   (1/L) \sum_l \rho_{b,l} = 1
-                # this + normalizing rate matrix ensures that average 
-                #   substitution rate is 1, which is how evolutionary time is 
-                #   measured
-                # equivalent to enforcing \sum_k w_k * \rho_k = 1 in mixture 
-                # models
-                lens = padding_mask.sum(axis=-1) #(B,)
-                sums = jnp.multiply( rate_multiplier, padding_mask ).sum(axis=-1) #(B,)
-                means = sums / lens #(B,)
-                rate_multiplier = rate_multiplier / means[:,None] # (B, L_align)
                 
         elif self.force_unit_rate_multiplier:
             final_shape = ( datamat.shape[0], datamat.shape[1] )
@@ -480,7 +466,6 @@ class GTRGlobalExchLocalRateMult(neuralTKFModuleBase):
     def setup(self):
         ### read config
         emission_alphabet_size = self.config['emission_alphabet_size']
-        self.norm_rate_mult = self.config.get('norm_rate_mult', False) # this is a different default from pairHMMs
         self.exchange_min_val, self.exchange_max_val  = self.config.get( 'exchange_range', (1e-4, 12) )
         self.rate_mult_min_val, self.rate_mult_max_val  = self.config.get( 'rate_mult_range', 
                                                                            (0.01, 10) )
@@ -522,18 +507,6 @@ class GTRGlobalExchLocalRateMult(neuralTKFModuleBase):
                                                max_val = self.rate_mult_max_val,
                                                param_name = 'rate mult.',
                                                sow_intermediates = sow_intermediates) # (B, L_align)
-            if self.norm_rate_mult:
-                # for each sample, normalize all rate multipliers such that 
-                #   (1/L) \sum_l \rho_{b,l} = 1
-                # this + normalizing rate matrix ensures that average 
-                #   substitution rate is 1, which is how evolutionary time is 
-                #   measured
-                # equivalent to enforcing \sum_k w_k * \rho_k = 1 in mixture 
-                # models
-                lens = padding_mask.sum(axis=-1) #(B,)
-                sums = jnp.multiply( rate_multiplier, padding_mask ).sum(axis=-1) #(B,)
-                means = sums / lens #(B,)
-                rate_multiplier = rate_multiplier / means[:,None] # (B, L_align)
             
         elif self.force_unit_rate_multiplier:
             final_shape = ( datamat.shape[0], datamat.shape[1] )
@@ -576,7 +549,6 @@ class GTRLocalExchLocalRateMult(neuralTKFModuleBase):
     
     def setup(self):
         emission_alphabet_size = self.config['emission_alphabet_size']
-        self.norm_rate_mult = self.config.get('norm_rate_mult', False) # this is a different default from pairHMMs
         self.exchange_min_val, self.exchange_max_val  = self.config.get( 'exchange_range', (1e-4, 12) )
         self.rate_mult_min_val, self.rate_mult_max_val  = self.config.get( 'rate_mult_range', 
                                                                            (0.01, 10) )
@@ -619,19 +591,6 @@ class GTRLocalExchLocalRateMult(neuralTKFModuleBase):
                                                max_val = self.rate_mult_max_val,
                                                param_name = 'rate mult.',
                                                sow_intermediates = sow_intermediates) # (B, L_align)
-            
-            if self.norm_rate_mult:
-                # for each sample, normalize all rate multipliers such that 
-                #   (1/L) \sum_l \rho_{b,l} = 1
-                # this + normalizing rate matrix ensures that average 
-                #   substitution rate is 1, which is how evolutionary time is 
-                #   measured
-                # equivalent to enforcing \sum_k w_k * \rho_k = 1 in mixture 
-                # models
-                lens = padding_mask.sum(axis=-1) #(B,)
-                sums = jnp.multiply( rate_multiplier, padding_mask ).sum(axis=-1) #(B,)
-                means = sums / lens #(B,)
-                rate_multiplier = rate_multiplier / means[:,None] # (B, L_align)
             
         elif self.force_unit_rate_multiplier:
             final_shape = ( datamat.shape[0], datamat.shape[1] )

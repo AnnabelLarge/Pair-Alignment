@@ -87,7 +87,9 @@
                                         "dropout": 0.20,
                                         "normalize_seq_embeddings_before_block": true},
 
-        "times_from": "t_per_sample"
+        "times_from": "t_per_sample",
+
+        "rate_multiplier_regularization_rate": 0.01
 
     }
     
