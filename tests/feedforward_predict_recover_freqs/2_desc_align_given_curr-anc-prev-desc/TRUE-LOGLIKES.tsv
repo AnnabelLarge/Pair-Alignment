@@ -1,0 +1,6 @@
+RUN	test_set_desc-align_given_curr-anc-prev-desc_loglikes
+sum_cond_loglikes	10031.516683185397
+ave_cond_loss	1433.0738118836282
+ave_cond_loss_seqlen_normed	1.6373416364081883
+cond_ece	5.1414833966892415
+cond_perplexity	5.465349988438922

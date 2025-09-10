@@ -114,7 +114,7 @@ def cont_training_feedforward(args,
     writer = SummaryWriter(args.tboard_dir)
     
     # create a new logfile
-    with open(args.logfile_name,'w') as g:
+    with open(args.logfile_name,'a') as g:
         g.write( f'Feedforward network to predict alignment-augmented descendant\n' )
         g.write( f'Ancestor sequence embedder (FULL-CONTEXT): {args.anc_model_type}\n' )
         g.write( f'Descendant sequence embedder (CAUSAL): {args.desc_model_type}\n' )

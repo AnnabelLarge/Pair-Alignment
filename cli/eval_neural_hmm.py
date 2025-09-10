@@ -85,7 +85,12 @@ def eval_neural_hmm( args,
         os.mkdir(args.model_ckpts_dir)
         
     # create a new logfile
+    commit_hash = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"],
+                                          text=True
+                                          ).strip()
     with open(args.logfile_name,'w') as g:
+        g.write(f"[{datetime.now()}] Commit: {commit_hash}\n\n")
+        
         g.write( f'Loading from {args.training_wkdir} to eval new data\n\n' )
             
         g.write(f'Neural sequence embedders with Markovian alignment assumption\n')

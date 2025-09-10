@@ -1,0 +1,72 @@
+{
+    "training_wkdir": "RESULTS",
+    "rng_seednum": 199,
+
+    "data_dir": "example_data",
+    "train_dset_splits": ["sevenSamp"],
+    "test_dset_splits": ["sevenSamp"],
+    "toss_alignments_longer_than": null,
+    "batch_size": 7,
+    "chunk_length": 512,
+    "out_alph_size": 44,
+    "in_alph_size": 23,
+    "norm_reported_loss_by": "desc_len",
+    "gap_idx": 43,
+
+    "num_epochs": 10000,
+    "optimizer_config": {
+        "init_value": 0.05,
+        "peak_value": 0.05,
+        "end_value": 0.05,
+        "warmup_steps": 0,
+        "weight_decay": 0,
+        "every_k_schedule": 1
+    },
+    "early_stop_cond1_atol": 1e-3,
+    "early_stop_cond2_gap": 0.5,
+    "patience": 10000,
+    "update_grads": true,
+    "use_scan_fns": false,
+
+    "interms_for_tboard": {
+        "encoder_sow_outputs": false,
+        "ancestor_embeddings": false,
+        "decoder_sow_outputs": false,
+        "descendant_embeddings": false,
+        "finalpred_sow_outputs": false,
+        "forward_pass_outputs": true,
+        "gradients": false,
+        "weights": false,
+        "optimizer": false,
+        "final_logprobs": true
+    },
+    "save_arrs": true,
+    "save_per_sample_losses": true,
+    "checkpoint_freq_during_training": 1000,
+
+    "anc_model_type": "cnn",
+    "anc_enc_config": {"initial_embed_module": "FakeEmbeddingWithPadding",
+                       "first_block_module": "FakeConvnetBlock",
+                       "subsequent_block_module": "FakeConvnetBlock",
+                       "hidden_dim": 23,
+                       "kern_size_lst": [5],
+                       "dropout": 0.0},
+
+    "desc_model_type": "cnn",
+    "desc_dec_config": {"initial_embed_module": "FakeEmbeddingWithPadding",
+                       "first_block_module": "FakeConvnetBlock",
+                       "subsequent_block_module": "FakeConvnetBlock",
+                       "hidden_dim": 23,
+                       "kern_size_lst": [5],
+                       "dropout": 0.0},
+
+    "pred_model_type": "feedforward",
+    "pred_config": {
+        "postproc_model_type": "kroneckerdelta",
+        "use_bias": false,
+        "use_anc_emb": true,
+        "use_desc_emb": true,
+        "use_prev_align_info": false,
+        "t_per_sample": false }
+    
+}

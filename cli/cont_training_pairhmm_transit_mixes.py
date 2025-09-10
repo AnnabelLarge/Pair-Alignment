@@ -116,7 +116,7 @@ def cont_training_pairhmm_transit_mixes(args,
     writer = SummaryWriter(args.tboard_dir)
     
     # create a new logfile
-    with open(args.logfile_name,'w') as g:
+    with open(args.logfile_name,'a') as g:
         # standard header
         g.write( f'PairHMM TKF92 with mixtures of transit classes: {args.pred_model_type}\n' )
         g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )

@@ -83,7 +83,7 @@ def train_feedforward(args, dataloader_dict: dict):
     writer = SummaryWriter(args.tboard_dir)
     
     # create a new logfile
-    with open(args.logfile_name,'w') as g:
+    with open(args.logfile_name,'a') as g:
         if not args.update_grads:
             g.write('DEBUG MODE: DISABLING GRAD UPDATES\n\n')
         

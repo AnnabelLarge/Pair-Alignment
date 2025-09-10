@@ -110,7 +110,7 @@ def cont_training_pairhmm_indp_sites(args,
     writer = SummaryWriter(args.tboard_dir)
     
     # create a new logfile
-    with open(args.logfile_name,'w') as g:
+    with open(args.logfile_name,'a') as g:
         # standard header
         g.write( f'PairHMM with independent site classes over emissions\n' )
         g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )

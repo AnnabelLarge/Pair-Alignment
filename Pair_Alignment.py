@@ -89,8 +89,8 @@ def main():
     
     # # UNCOMMENT TO RUN IN SPYDER IDE
     # top_level_args.task = 'train'
-    # top_level_args.configs = 'all_returns.json'
-    # top_level_args.load_dset_pkl = None
+    # top_level_args.configs = 'example_config_ffwd_cnn.json'
+    # top_level_args.load_dset_pkl = 'precomputed.pkl'
     
     
     ### helper functions 
@@ -103,12 +103,28 @@ def main():
             args = parser.parse_args(namespace=t_args)
         return args
     
-    # load a pre-computed dataset; make a pytorch dataloader
-    def load_dset_pkl_fn(file_to_load, 
-                      args,
-                      collate_fn):
+    # when not using counts, load a pre-computed dataset
+    def load_dset_pkl_fn(pred_model_type,
+                         file_to_load, 
+                         args,
+                         collate_fn):
         with open(file_to_load,'rb') as f:
             dset_dict = pickle.load(f)
+        
+        ### test set
+        # validate data structure using final dimension of the 
+        #   Pytorch Dataset object
+        final_dim = dset_dict['test_dset'].aligned_mat.shape[-1]
+        
+        if pred_model_type in ['pairhmm_frag_and_site_classes',
+                               'pairhmm_nested_tkf']:
+            assert final_dim == 3
+        
+        elif pred_model_type == 'neural_hmm':
+            assert final_dim == 5
+            
+        elif pred_model_type == 'feedforward':
+            assert final_dim == 4
         
         # add dataloader objects
         test_dl = init_dataloader(args = args, 
@@ -117,12 +133,29 @@ def main():
                                   collate_fn = collate_fn)
         dset_dict['test_dl'] = test_dl
         
+        
+        ### optional training set
         if 'training_dset' in dset_dict.keys():
+            # validate again
+            final_dim = dset_dict['training_dset'].aligned_mat.shape[-1]
+            
+            if pred_model_type in ['pairhmm_frag_and_site_classes',
+                                   'pairhmm_nested_tkf']:
+                assert final_dim == 3
+            
+            elif pred_model_type == 'neural_hmm':
+                assert final_dim == 5
+                
+            elif pred_model_type == 'feedforward':
+                assert final_dim == 4
+                
+            # add dataloader objects
             training_dl = init_dataloader(args = args, 
                                             shuffle = True,
                                             pytorch_custom_dset = dset_dict['training_dset'],
                                             collate_fn = collate_fn)
             dset_dict['training_dl'] = training_dl
+            
         return dset_dict
 
 
@@ -165,9 +198,10 @@ def main():
                                           training_argparse = None,
                                           include_dataloader = True)
         else:
-            dload_dict = load_dset_pkl_fn(args = args,
-                                       file_to_load = top_level_args.load_dset_pkl,
-                                       collate_fn = collate_fn)
+            dload_dict = load_dset_pkl_fn(pred_model_type = pred_model_type,
+                                          args = args,
+                                          file_to_load = top_level_args.load_dset_pkl,
+                                          collate_fn = collate_fn)
             
         # train model
         train_fn( args, dload_dict )
@@ -219,9 +253,10 @@ def main():
                                           training_argparse = None,
                                           include_dataloader = True)
         else:
-            dload_dict = load_dset_pkl_fn(args = first_args,
-                                       file_to_load = top_level_args.load_dset_pkl,
-                                       collate_fn = collate_fn)
+            dload_dict = load_dset_pkl_fn(pred_model_type = pred_model_type,
+                                          args = first_args,
+                                          file_to_load = top_level_args.load_dset_pkl,
+                                          collate_fn = collate_fn)
             
         # with this dload_dict, train using ALL config files
         for file in file_lst:
@@ -276,9 +311,10 @@ def main():
                                           training_argparse = None,
                                           include_dataloader = True )
         else:
-            dload_dict = load_dset_pkl_fn(args = args_from_training_config,
-                                       file_to_load = top_level_args.load_dset_pkl,
-                                       collate_fn = collate_fn)
+            dload_dict = load_dset_pkl_fn(pred_model_type = pred_model_type,
+                                          args = args_from_training_config,
+                                          file_to_load = top_level_args.load_dset_pkl,
+                                          collate_fn = collate_fn)
             
         # train model
         cont_train_fn( args=args_from_training_config, 
@@ -336,9 +372,10 @@ def main():
                                         training_argparse,
                                         include_dataloader = True )
         else:
-            dload_dict = load_dset_pkl_fn(args = args,
-                                       file_to_load = top_level_args.load_dset_pkl,
-                                       collate_fn = collate_fn)
+            dload_dict = load_dset_pkl_fn(pred_model_type = pred_model_type,
+                                          args = args,
+                                          file_to_load = top_level_args.load_dset_pkl,
+                                          collate_fn = collate_fn)
             
         # evaluate model
         eval_fn( args, 
@@ -402,9 +439,10 @@ def main():
                                           first_training_argparse,
                                           include_dataloader = True)
         else:
-            dload_dict_for_all = load_dset_pkl_fn(args = first_args,
-                                       file_to_load = top_level_args.load_dset_pkl,
-                                       collate_fn = collate_fn)
+            dload_dict_for_all = load_dset_pkl_fn(pred_model_type = pred_model_type,
+                                                  args = first_args,
+                                                  file_to_load = top_level_args.load_dset_pkl,
+                                                  collate_fn = collate_fn)
             
         del first_training_argparse, first_args
         
@@ -464,9 +502,10 @@ def main():
     #                                       training_argparse,
     #                                       include_dataloader = True )
     #     else:
-    #         dload_dict = load_dset_pkl_fn(args = args,
-    #                                    file_to_load = top_level_args.load_dset_pkl,
-    #                                    collate_fn = collate_fn)
+    #         dload_dict = load_dset_pkl_fn(pred_model_type = pred_model_type,
+    #                                       args = args,
+    #                                       file_to_load = top_level_args.load_dset_pkl,
+    #                                       collate_fn = collate_fn)
         
     #     # evaluate
     #     labeling_fn( args, 

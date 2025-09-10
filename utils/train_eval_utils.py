@@ -33,6 +33,8 @@ from time import process_time
 import platform
 import numpy as np
 import pandas as pd
+import subprocess
+from datetime import datetime
 
 import jax
 import jax.numpy as jnp
@@ -397,7 +399,7 @@ def setup_training_dir(args):
     
     # create logfile in the logfile_dir
     logfile_filename = f'PROGRESS.log'
-    
+        
     
     ### what to do if training directory exists
     # OPTION 1: IF TRAINING WKDIR ALREAD EXISTS, RAISE RUN TIME ERROR
@@ -425,6 +427,15 @@ def setup_training_dir(args):
     args.logfile_dir = logfile_dir
     args.logfile_name = f'{logfile_dir}/{logfile_filename}'
     args.out_arrs_dir = out_arrs_dir
+    
+    
+    ### add info about current code version
+    commit_hash = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"],
+                                          text=True
+                                          ).strip()
+    with open(args.logfile_name, "w") as g:
+        g.write(f"[{datetime.now()}] Commit: {commit_hash}\n\n")
+        
 
 def pigz_compress_tensorboard_file( args ):
     print('\n\nDONE; compressing tboard folder')
