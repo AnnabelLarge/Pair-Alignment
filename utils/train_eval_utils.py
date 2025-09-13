@@ -429,12 +429,9 @@ def setup_training_dir(args):
     args.out_arrs_dir = out_arrs_dir
     
     
-    ### add info about current code version
-    commit_hash = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"],
-                                          text=True
-                                          ).strip()
+    ### timestamp
     with open(args.logfile_name, "w") as g:
-        g.write(f"[{datetime.now()}] Commit: {commit_hash}\n\n")
+        g.write(f"Start run on: {datetime.now()}\n\n")
         
 
 def pigz_compress_tensorboard_file( args ):
