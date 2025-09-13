@@ -245,6 +245,7 @@ def _load_aligned_mats(data_dir,
         eos_locs = np.argwhere(mat[...,0] == eos_idx)
         idxes_to_keep = eos_locs[ eos_locs[:, 1] <= toss_alignments_longer_than ][:, 0]
         mat = mat[idxes_to_keep, :, :]
+        del eos_locs
         
         if len(idxes_to_keep) == 0:
             raise RuntimeError(f"no samples to keep from {split}!")
@@ -261,48 +262,39 @@ def _load_aligned_mats(data_dir,
     # D = 3
     # <bos> = 4
     # <eos> = 5
+    alignment = np.zeros(mat.shape[:2], dtype=np.int8)  # (B, L)
+    gapped_seqs = mat[...,[0,1]] # (B, L, 2)
     
-    # find match pos; (B, L)
-    gapped_seqs = mat[...,[0,1]]
-    tmp = np.where( (gapped_seqs >= 3) & (gapped_seqs <= 22), 1, 0 ).sum(axis=2) 
-    matches = np.where(tmp == 2, 1, 0)
-    del tmp
+    # matches
+    mask = ((gapped_seqs >= 3) & (gapped_seqs <= 22)).sum(axis=2) == 2
+    alignment[mask] = 1
+    del mask
     
-    # find ins pos i.e. where ancestor is gap; (B,L)
-    ins = np.where(gapped_seqs[...,0] == gap_idx, 2, 0)
+    # ins: ancestor is gap
+    alignment[gapped_seqs[..., 0] == gap_idx] = 2
     
-    # find del pos i.e. where descendant is gap; (B,L)
-    dels = np.where(gapped_seqs[...,1] == gap_idx, 3, 0)
+    # del: descendant is gap
+    alignment[gapped_seqs[..., 1] == gap_idx] = 3
     
     # bos, eos
-    bos = np.where(mat == bos_idx, 4, 0)[...,0]
-    eos = np.where(mat == eos_idx, 5, 0)[...,0]
-    
-    # categorical encoding
-    alignment = bos + eos + matches + ins + dels
+    alignment[mat[..., 0] == bos_idx] = 4
+    alignment[mat[..., 0] == eos_idx] = 5
     
     
     ### model-specific transformations, concatenation
     ### feedforward: add 20 to insert sites in descendant, toss ancestor
     if pred_model_type == 'feedforward':
-        ### zero-padded items
+        # zero-padded items
         gapped_anc = gapped_seqs[...,0] #(B, L)
         gapped_desc = gapped_seqs[...,1] #(B, L)
         
         # insert sites are where ancestor = gap char; add 20 here (in place)
         ins_pos = np.argwhere( gapped_anc == gap_idx ) #(B,)
         gapped_desc[ ins_pos[:,0], ins_pos[:,1] ] += emission_alphabet_size #(B, L, 3)
-        
-        # # move all descendant sequence tokens down (except <bos> and <pad>)
-        # # both bos and eos will be encoded with "1"
-        # gapped_desc = np.where( np.isin(gapped_desc, [0, bos_idx] ),
-        #                         gapped_desc,
-        #                         gapped_desc - 1 ) #(B, L)
-        
         zero_padded_mat = np.stack([gapped_desc, alignment], axis=-1) # (B, L, 2)
-        del gapped_anc, gapped_desc, ins_pos
+        del gapped_anc, gapped_desc, ins_pos, alignment
         
-        ### -9 padded items
+        # -9 padded items
         neg_nine_padded_mat = mat[...,[-2,-1]] # (B, L, 2)
     
     
@@ -318,7 +310,6 @@ def _load_aligned_mats(data_dir,
     elif pred_model_type == 'neural_hmm':
         zero_padded_mat = np.concatenate([gapped_seqs, alignment[...,None]], axis=-1) # (B, L, 3)
         neg_nine_padded_mat = mat[...,[-2,-1]] # (B, L, 2)
-        
         
     return zero_padded_mat, neg_nine_padded_mat, idxes_to_keep
 
