@@ -87,10 +87,11 @@ def main():
     top_level_args = parser.parse_args()
     
     
-    # UNCOMMENT TO RUN IN SPYDER IDE
-    top_level_args.task = 'train'
-    top_level_args.configs = 'example_config_nested_tkf.json'
-    top_level_args.load_dset_pkl = None
+    # # UNCOMMENT TO RUN IN SPYDER IDE
+    # top_level_args.task = 'train'
+    # top_level_args.configs = 'example_config_neural_hmm_cnn.json'
+    # top_level_args.load_dset_pkl = None
+    
     
     
     ### helper functions 
