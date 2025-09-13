@@ -79,7 +79,7 @@ def cont_training_pairhmm_transit_mixes(args,
     
     # vvv___DIFFERENT FROM ORIGINAL TRAINING CODE___vvv
     
-    prev_pairhmm_savemodel_filename = prev_model_ckpts_dir + '/'+ tstate_to_load
+    prev_pairhmm_savemodel_filename = prev_model_ckpts_dir + '/'+ f'FINAL_PRED_{tstate_to_load}.pkl'
     
     # ^^^___DIFFERENT FROM ORIGINAL TRAINING CODE___^^^
     

@@ -19,7 +19,7 @@ def subset_mat(file, idx_to_keep):
     mat = read_mat(file)
     return mat[idx_to_keep, ...]
 
-def subset(meta_df, cl, num_sampes, new_prefix):
+def subset(meta_df, cl, num_samps, new_prefix):
     # subset metadata
     sub_df = meta_df[ meta_df['clan']==cl ].iloc[0:num_samps]
     
@@ -72,18 +72,18 @@ if __name__ == '__main__':
     # CL0376: extract 40
     subset(meta_df = meta_df, 
            cl = 'CL0376', 
-           num_sampes = 40, 
+           num_samps = 40, 
            new_prefix = 'fortySamp')
     
     # CL0722: extract 8
     subset(meta_df = meta_df, 
            cl = 'CL0722', 
-           num_sampes = 8, 
+           num_samps = 8, 
            new_prefix = 'eightSamp')
     
     # CL0734: extract 2
     subset(meta_df = meta_df, 
            cl = 'CL0734', 
-           num_sampes = 2, 
+           num_samps = 2, 
            new_prefix = 'twoSamp')
     

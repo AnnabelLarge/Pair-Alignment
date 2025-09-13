@@ -34,6 +34,7 @@ from torch.utils.data import DataLoader
 
 # custom function/classes imports
 from train_eval_fns.build_optimizer import build_optimizer
+from utils.write_config import write_config
 from utils.edit_argparse import enforce_valid_defaults
 from utils.train_eval_utils import (setup_training_dir,
                                     timers,
@@ -101,6 +102,7 @@ def train_feedforward(args, dataloader_dict: dict):
     all_save_model_filenames = [encoder_save_model_filename, 
                                 decoder_save_model_filename,
                                 finalpred_save_model_filename]
+    write_config(args = args, out_dir = args.model_ckpts_dir)
     
     
     ### extract data from dataloader_dict
