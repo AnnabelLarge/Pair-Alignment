@@ -21,7 +21,6 @@
         "gradients": false,
         "weights": false,
         "optimizer": false,
-        "final_logprobs": true,
         "forward_pass_outputs": true
     },
     "save_arrs": true,

@@ -17,6 +17,7 @@ import platform
 import argparse
 import json
 from tqdm import tqdm
+from datetime import datetime
 
 # jax/flax stuff
 import jax
@@ -78,11 +79,8 @@ def eval_pairhmm_transit_mixes( args,
     finalpred_save_model_filename = args.model_ckpts_dir + '/'+ f'FINAL_PRED.pkl'
     
     # create a new logfile
-    commit_hash = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"],
-                                          text=True
-                                          ).strip()
     with open(args.logfile_name,'w') as g:
-        g.write(f"[{datetime.now()}] Commit: {commit_hash}\n\n")
+        g.write(f"{datetime.now()}\n\n")
         
         g.write( f'Loading from {training_argparse.training_wkdir} to eval new data\n' )
         
