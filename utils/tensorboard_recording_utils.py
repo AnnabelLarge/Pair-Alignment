@@ -15,7 +15,7 @@ import pandas as pd
 ### smaller functions  #
 ########################
 def flatten_convert(dictionary, 
-                    parent_key=None, 
+                    parent_key=None,
                     separator = '/'):
     items = []
     for key, value in dictionary.items():
@@ -210,7 +210,7 @@ def weight_summary_stats(all_trainstates,
             
             # add l2 norm
             l2_norm = np.linalg.norm(param_mat.reshape(-1), ord=2)
-            out_dict['{tag_prefix}/WEIGHTS/L2_norm'] = l2_norm
+            out_dict[f'{tag_prefix}/WEIGHTS/L2_norm'] = l2_norm
     
     return out_dict
             

@@ -31,16 +31,19 @@ def flatten_dict(d, parent_key="", sep="."):
 
 def count_params(file):
     # load trainstate file
-    # file = f'{d}/model_ckpts/FINAL_PRED_BEST.pkl'
     with open(file,'rb') as f:
-        param_dict = pickle.load(f)['params']['params']
+        param_dict = pickle.load(f)['params'].get('params', None)
     
-    # flatten and count
-    param_dict = flatten_dict( param_dict )
-    param_count = 0
-    for mat in param_dict.values():
-        param_count += mat.size
-    return param_count
+    if param_dict is not None:
+        # flatten and count
+        param_dict = flatten_dict( param_dict )
+        param_count = 0
+        for mat in param_dict.values():
+            param_count += mat.size
+        return param_count
+    
+    else:
+        return 0
 
 def count_params_across_model(d):
     anc_enc_params = count_params(f'{d}/model_ckpts/ANC_ENC_BEST.pkl')

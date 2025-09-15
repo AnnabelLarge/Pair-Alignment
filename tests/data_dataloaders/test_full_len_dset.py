@@ -131,8 +131,7 @@ class TestFullLenDset(unittest.TestCase):
         
         ### different formats, depending on pred model type
         # don't need indices for pairhmm inputs
-        if pred_model_type in ['pairhmm_indp_sites',
-                                'pairhmm_frag_and_site_classes']:
+        if pred_model_type == 'pairhmm_frag_and_site_classes':
             self.aligned_mats = self.aligned_mats[...,[0,1,2]]
         
         # completely different alphabet for feedforward
@@ -144,15 +143,11 @@ class TestFullLenDset(unittest.TestCase):
                     
                     # at insert position, add A to desc tok
                     if row[2] == 2:
-                        desc_tok = ( row[1] + self.A ) - 1
-                        
-                    else:
-                        # move all tokens except pad, start, and gap down by one
-                        if not np.isin( row[1], [0, 1, 43] ):
-                            desc_tok = row[1] - 1
-                        else:
-                            desc_tok = row[1]
+                        desc_tok = ( row[1] + self.A ) 
                     
+                    else:
+                        desc_tok = row[1]
+                        
                     new_mat[b, l, :] = [desc_tok, row[2], row[3], row[4]]
             
             self.aligned_mats = new_mat
@@ -196,41 +191,41 @@ class TestFullLenDset(unittest.TestCase):
     
     def test_pairhmm_with_scan(self):
         self._run( pred_model_type = 'pairhmm_frag_and_site_classes',
-                   use_scan_fns = True,
-                   t_per_sample = False )
+                    use_scan_fns = True,
+                    t_per_sample = False )
     
     def test_pairhmm_t_per_sample(self):
         self._run( pred_model_type = 'pairhmm_frag_and_site_classes',
-                   use_scan_fns = False,
-                   t_per_sample = True )
+                    use_scan_fns = False,
+                    t_per_sample = True )
     
     def test_pairhmm_with_scan_t_per_sample(self):
         self._run( pred_model_type = 'pairhmm_frag_and_site_classes',
-                   use_scan_fns = True,
-                   t_per_sample = True )
+                    use_scan_fns = True,
+                    t_per_sample = True )
     
     ##################
     ### neural TKF   #
     ##################
     def test_neural_hmm(self):
         self._run( pred_model_type = 'neural_hmm',
-                   use_scan_fns = False,
-                   t_per_sample = False )
+                    use_scan_fns = False,
+                    t_per_sample = False )
     
     def test_neural_hmm_with_scan(self):
         self._run( pred_model_type = 'neural_hmm',
-                   use_scan_fns = True,
-                   t_per_sample = False )
+                    use_scan_fns = True,
+                    t_per_sample = False )
     
     def test_neural_hmm_t_per_sample(self):
         self._run( pred_model_type = 'neural_hmm',
-                   use_scan_fns = False,
-                   t_per_sample = True )
+                    use_scan_fns = False,
+                    t_per_sample = True )
     
     def test_neural_hmm_with_scan_t_per_sample(self):
         self._run( pred_model_type = 'neural_hmm',
-                   use_scan_fns = True,
-                   t_per_sample = True )
+                    use_scan_fns = True,
+                    t_per_sample = True )
     
     
     ###################
@@ -238,23 +233,23 @@ class TestFullLenDset(unittest.TestCase):
     ###################
     def test_ff_hmm(self):
         self._run( pred_model_type = 'feedforward',
-                   use_scan_fns = False,
-                   t_per_sample = False )
+                    use_scan_fns = False,
+                    t_per_sample = False )
     
     def test_ff_hmm_with_scan(self):
         self._run( pred_model_type = 'feedforward',
-                   use_scan_fns = True,
-                   t_per_sample = False )
+                    use_scan_fns = True,
+                    t_per_sample = False )
     
     def test_ff_hmm_t_per_sample(self):
         self._run( pred_model_type = 'feedforward',
-                   use_scan_fns = False,
-                   t_per_sample = True )
+                    use_scan_fns = False,
+                    t_per_sample = True )
     
     def test_ff_hmm_with_scan_t_per_sample(self):
         self._run( pred_model_type = 'feedforward',
-                   use_scan_fns = True,
-                   t_per_sample = True )
+                    use_scan_fns = True,
+                    t_per_sample = True )
     
     
      

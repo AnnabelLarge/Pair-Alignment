@@ -530,7 +530,6 @@ def eval_one_batch(batch,
     return_anc_embs = interms_for_tboard['ancestor_embeddings']
     return_desc_embs = interms_for_tboard['descendant_embeddings']
     return_forward_pass_outputs = interms_for_tboard['forward_pass_outputs']
-    return_final_logprobs = interms_for_tboard['final_logprobs']
     del interms_for_tboard
     
     
@@ -742,7 +741,7 @@ def eval_one_batch(batch,
                            varname_to_write = 'final_descendant_embeddings')
 
     write_optional_outputs(value_to_save = final_logits,
-                           flag = return_final_logprobs,
+                           flag = return_forward_pass_outputs,
                            varname_to_write = 'scormat_final_logits')
     
     # always returned from out_dict:

@@ -71,11 +71,7 @@ def cont_training_pairhmm_indp_sites(args,
 
     # vvv___DIFFERENT FROM ORIGINAL TRAINING CODE___vvv
     
-    prev_pairhmm_savemodel_filename = prev_model_ckpts_dir + '/'+ tstate_to_load
-    # prev_argparse_obj = prev_model_ckpts_dir + '/' + f'TRAINING_ARGPARSE.pkl'
-    # with open(prev_argparse_obj,'rb') as f:
-    #     epoch_ended = pickle.load(f).epoch_idx
-    # del prev_argparse_obj, f
+    prev_pairhmm_savemodel_filename = prev_model_ckpts_dir + '/'+ f'FINAL_PRED_{tstate_to_load}.pkl'
     
     # ^^^___DIFFERENT FROM ORIGINAL TRAINING CODE___^^^
     
