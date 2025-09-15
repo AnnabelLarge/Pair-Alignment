@@ -197,7 +197,6 @@ def eval_feedforward( args,
                   'weights': False,
                   'ancestor_embeddings': False,
                   'descendant_embeddings': False,
-                  "final_logprobs": args.interms_for_tboard['final_logprobs'],
                   'forward_pass_outputs': args.interms_for_tboard['forward_pass_outputs']}
     extra_args_for_eval = dict()
 
