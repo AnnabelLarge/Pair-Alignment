@@ -7,8 +7,6 @@ Created on Sat Oct  5 14:42:28 2024
 
 These are SITE AND FRAGMENT LEVEL transition models
 
-todo: domain-level transition models (nested TKF92)
-
 
 modules:
 =========

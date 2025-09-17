@@ -262,8 +262,8 @@ class NestedTKF(FragAndSiteClasses):
         del out
 
         # unpack
-        frag_joint_transit_mat = matrix_dict['joint'] #(T, C_dom, C_frag_to, C_frag_from, S_from, S_to)
-        frag_marginal_transit_mat = matrix_dict['marginal'] #(C_dom, C_frag_to, C_frag_from, 2, 2)
+        frag_joint_transit_mat = matrix_dict['joint'] #(T, C_dom, C_frag_from, C_frag_to, S_from, S_to)
+        frag_marginal_transit_mat = matrix_dict['marginal'] #(C_dom, C_frag_from, C_frag_to, 2, 2)
         lam_frag = matrix_dict['lam'] #(C_dom,)
         mu_frag = matrix_dict['mu'] #(C_dom,)
         offset_frag = matrix_dict['offset'] #(C_dom,)
