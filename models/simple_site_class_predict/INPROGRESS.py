@@ -18,6 +18,11 @@ todo:
 [ip] start working on indexing+scoring function
     > [X] generate indices of diagonals, to scan over
 
+references:
+-----------
+lecture about wave-front parallelism
+    https://snir.cs.illinois.edu/patterns/wavefront.pdf
+
 (bonus) vectorized/rotated version of smith-waterman:
     https://github.com/spetti/SMURF/blob/main/sw_functions.py
     > this keeps the entire alignment matrix (because it's an aligner), but I
@@ -341,6 +346,8 @@ def generate_wavefront_indices_at_k(seq_lens,
     k=3: (2,1)
     
     all paths HAVE to end at (2,1)
+    
+    THEN at end position, add final transition and finish the scan
     
     
     Arguments:
