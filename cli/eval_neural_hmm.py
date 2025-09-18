@@ -191,8 +191,8 @@ def eval_neural_hmm( args,
     
     ### jit-compilations
     # manage sequence lengths
-    jitted_determine_seqlen_bin = jit_compile_determine_seqlen_bin(args)
-    jitted_determine_alignlen_bin = jit_compile_determine_alignlen_bin(args)
+    jitted_determine_seqlen_bin = jit_compile_determine_seqlen_bin(training_argparse)
+    jitted_determine_alignlen_bin = jit_compile_determine_alignlen_bin(training_argparse)
     
     # pass arguments into eval_one_batch; make a parted_eval_fn that doesn't
     #   return any intermediates
@@ -204,14 +204,14 @@ def eval_neural_hmm( args,
                   'weights': False,
                   'ancestor_embeddings': False,
                   'descendant_embeddings': False,
-                  'forward_pass_outputs': args.save_scoremats}
+                  'forward_pass_outputs': args.save_arrs}
     extra_args_for_eval = dict()
     
     # if this is a transformer model, will have extra arguments for eval funciton
     extra_args_for_eval = dict()
-    if (args.anc_model_type == 'transformer' and args.desc_model_type == 'transformer'):
-        flag = (args.anc_enc_config.get('output_attn_weights',False) or 
-                args.desc_dec_config.get('output_attn_weights',False))
+    if (training_argparse.anc_model_type == 'transformer' and training_argparse.desc_model_type == 'transformer'):
+        flag = (training_argparse.anc_enc_config.get('output_attn_weights',False) or 
+                training_argparse.desc_dec_config.get('output_attn_weights',False))
         extra_args_for_eval['output_attn_weights'] = flag
         
     parted_eval_fn = partial( eval_one_batch,
@@ -244,8 +244,8 @@ def eval_neural_hmm( args,
                                              jitted_determine_seqlen_bin = jitted_determine_seqlen_bin,
                                              jitted_determine_alignlen_bin = jitted_determine_alignlen_bin,
                                              eval_fn_jitted = eval_fn_jitted,
-                                             out_alph_size = training_argparse.out_alph_size, 
-                                             save_arrs = args.save_scoremats,
+                                             out_alph_size = None, 
+                                             save_arrs = args.save_arrs,
                                              save_per_sample_losses = args.save_per_sample_losses,
                                              interms_for_tboard = no_returns, 
                                              logfile_dir = args.logfile_dir,

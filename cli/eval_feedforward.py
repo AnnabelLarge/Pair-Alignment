@@ -197,7 +197,7 @@ def eval_feedforward( args,
                   'weights': False,
                   'ancestor_embeddings': False,
                   'descendant_embeddings': False,
-                  'forward_pass_outputs': args.interms_for_tboard['forward_pass_outputs']}
+                  'forward_pass_outputs': args.save_arrs}
     extra_args_for_eval = dict()
 
     parted_eval_fn = partial( eval_one_batch,

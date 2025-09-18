@@ -85,19 +85,19 @@ def eval_pairhmm_indp_sites(args,
         
         # standard header
         g.write( f'PairHMM with independent site classes over emissions\n' )
-        g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )
-        g.write( f'Indel model: {args.pred_config.get("indel_model_type","None")}\n\n' )
+        g.write( f'Substitution model: {training_argparse.pred_config["subst_model_type"]}\n' )
+        g.write( f'Indel model: {training_argparse.pred_config.get("indel_model_type","None")}\n\n' )
         
         g.write( f'Number of domain mixes: 1\n' )
         g.write( f'Number of fragment mixes: 1\n' )
-        g.write( f'Number of site mixes: {args.pred_config["num_site_mixtures"]}\n' )
-        g.write( f'Number of rate multipliers: {args.pred_config["k_rate_mults"]}\n' )
+        g.write( f'Number of site mixes: {training_argparse.pred_config["num_site_mixtures"]}\n' )
+        g.write( f'Number of rate multipliers: {training_argparse.pred_config["k_rate_mults"]}\n' )
                 
         # note if rates are independent
-        if args.pred_config['indp_rate_mults']:
+        if training_argparse.pred_config['indp_rate_mults']:
             g.write( f'  - Rates are independent of site class label: ( P(k | c) = P(k) )\n' )
                     
-        elif not args.pred_config['indp_rate_mults']:
+        elif not training_argparse.pred_config['indp_rate_mults']:
             g.write( f'  - Rates depend on class labels\n' )
         
         # how to normalize reported metrics (usually by descendant length)

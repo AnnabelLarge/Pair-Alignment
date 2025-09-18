@@ -48,9 +48,9 @@ def eval_pairhmm_transit_mixes( args,
     ### 0: CHECK CONFIG; IMPORT APPROPRIATE MODULES   #########################
     ###########################################################################
     # final where model pickles, previous argparses are
-    err = (f"Pred model type: {args.pred_model_type}; "+
+    err = (f"Pred model type: {training_argparse.pred_model_type}; "+
            f"this is the eval script for pairHMM with mixtures of transit classes!")
-    assert args.pred_model_type in ['pairhmm_frag_and_site_classes', 'pairhmm_nested_tkf'], err
+    assert training_argparse.pred_model_type in ['pairhmm_frag_and_site_classes', 'pairhmm_nested_tkf'], err
     del err
         
     prev_model_ckpts_dir = f'{os.getcwd()}/{args.training_wkdir}/model_ckpts'
@@ -85,20 +85,20 @@ def eval_pairhmm_transit_mixes( args,
         g.write( f'Loading from {training_argparse.training_wkdir} to eval new data\n' )
         
         # standard header
-        g.write( f'PairHMM TKF92 with mixtures of transit classes: {args.pred_model_type}\n' )
-        g.write( f'Substitution model: {args.pred_config["subst_model_type"]}\n' )
+        g.write( f'PairHMM TKF92 with mixtures of transit classes: {training_argparse.pred_model_type}\n' )
+        g.write( f'Substitution model: {training_argparse.pred_config["subst_model_type"]}\n' )
         g.write( f'Indel model: TKF92\n\n' )
         
-        g.write( f'Number of domain mixes: {args.pred_config["num_domain_mixtures"]}\n' )
-        g.write( f'Number of fragment mixes: {args.pred_config["num_fragment_mixtures"]}\n' )
-        g.write( f'Number of site mixes: {args.pred_config["num_site_mixtures"]}\n' )
-        g.write( f'Number of rate multipliers: {args.pred_config["k_rate_mults"]}\n' )
+        g.write( f'Number of domain mixes: {training_argparse.pred_config["num_domain_mixtures"]}\n' )
+        g.write( f'Number of fragment mixes: {training_argparse.pred_config["num_fragment_mixtures"]}\n' )
+        g.write( f'Number of site mixes: {training_argparse.pred_config["num_site_mixtures"]}\n' )
+        g.write( f'Number of rate multipliers: {training_argparse.pred_config["k_rate_mults"]}\n' )
                 
         # note if rates are independent
-        if args.pred_config['indp_rate_mults']:
+        if training_argparse.pred_config['indp_rate_mults']:
             g.write( f'  - Rates are independent of site class label: ( P(k | c) = P(k) )\n' )
                     
-        elif not args.pred_config['indp_rate_mults']:
+        elif not training_argparse.pred_config['indp_rate_mults']:
             g.write( f'  - Rates depend on class labels\n' )
         
         # how to normalize reported metrics (usually by descendant length)
@@ -155,7 +155,7 @@ def eval_pairhmm_transit_mixes( args,
     seq_shapes = [largest_aligns,
                   dummy_t_for_each_sample]
     
-    out = init_pairhmm( pred_model_type = args.pred_model_type,
+    out = init_pairhmm( pred_model_type = training_argparse.pred_model_type,
                         seq_shapes = seq_shapes, 
                         dummy_t_array = dummy_t_array_for_all_samples,
                         tx = tx, 
@@ -176,7 +176,7 @@ def eval_pairhmm_transit_mixes( args,
     
     ### part+jit functions
     # manage sequence lengths
-    jitted_determine_alignlen_bin = jit_compile_determine_alignlen_bin(args)
+    jitted_determine_alignlen_bin = jit_compile_determine_alignlen_bin(training_argparse)
     
     no_outputs = {k: False for k in training_argparse.interms_for_tboard.keys()}
     parted_eval_fn = partial( eval_one_batch,
