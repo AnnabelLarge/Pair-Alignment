@@ -2173,7 +2173,7 @@ def joint_only_forward(aligned_inputs,
     
         
 def _log_space_dot_prod_helper(alpha,
-                              marginal_logprob_transit):
+                               marginal_logprob_transit):
     """
     a helper used in all_loglikes_forward
     """
