@@ -258,7 +258,7 @@ def eval_neural_hmm( args,
         new_outfile = f'{args.model_ckpts_dir}/{all_save_model_filenames[i]}'
         new_outfile = new_outfile.replace('.pkl',f'_BEST.pkl')
         with open(new_outfile, 'wb') as g:
-            model_state_dict = flax.serialization.to_state_dict(trainstate_objs[i])
+            model_state_dict = flax.serialization.to_state_dict(best_trainstates[i])
             pickle.dump(model_state_dict, g)   
     
     # output average losses
