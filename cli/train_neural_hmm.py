@@ -328,14 +328,15 @@ def train_neural_hmm(args, dataloader_dict: dict):
     with open(args.logfile_name,'a') as g:
         g.write(f'SCORING ALL TRAIN SEQS\n')
         
+    # DON'T save arrays yet; takes up too much memory
     train_summary_stats = final_eval_wrapper(dataloader = training_dl, 
                                              dataset = training_dset, 
                                              best_trainstates = best_trainstates, 
                                              jitted_determine_seqlen_bin = training_wrapper.seqlen_bin_fn,
                                              jitted_determine_alignlen_bin = training_wrapper.alignlen_bin_fn,
                                              eval_fn_jitted = eval_fn_jitted,
-                                             out_alph_size = getattr(args,'out_alph_size',None),
-                                             save_arrs = args.save_arrs,
+                                             out_alph_size = None,
+                                             save_arrs = False,
                                              save_per_sample_losses = args.save_per_sample_losses,
                                              interms_for_tboard = args.interms_for_tboard, 
                                              logfile_dir = args.logfile_dir,
@@ -351,14 +352,13 @@ def train_neural_hmm(args, dataloader_dict: dict):
     with open(args.logfile_name,'a') as g:
         g.write(f'SCORING ALL TEST SEQS\n')
         
-    # output_attn_weights also controlled by cond1 and cond2
     test_summary_stats = final_eval_wrapper(dataloader = test_dl, 
                                              dataset = test_dset, 
                                              best_trainstates = best_trainstates, 
                                              jitted_determine_seqlen_bin = training_wrapper.seqlen_bin_fn,
                                              jitted_determine_alignlen_bin = training_wrapper.alignlen_bin_fn,
                                              eval_fn_jitted = eval_fn_jitted,
-                                             out_alph_size = getattr(args,'out_alph_size',None), 
+                                             out_alph_size = None, 
                                              save_arrs = args.save_arrs,
                                              save_per_sample_losses = args.save_per_sample_losses,
                                              interms_for_tboard = args.interms_for_tboard, 

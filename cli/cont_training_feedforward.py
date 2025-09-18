@@ -352,6 +352,7 @@ def cont_training_feedforward(args,
     with open(args.logfile_name,'a') as g:
         g.write(f'SCORING ALL TRAIN SEQS\n')
         
+    # DON'T save arrays yet; takes up too much memory
     train_summary_stats = final_eval_wrapper(dataloader = training_dl, 
                                              dataset = training_dset, 
                                              best_trainstates = best_trainstates, 
@@ -359,7 +360,7 @@ def cont_training_feedforward(args,
                                              jitted_determine_alignlen_bin = training_wrapper.alignlen_bin_fn,
                                              eval_fn_jitted = eval_fn_jitted,
                                              out_alph_size = args.out_alph_size,
-                                             save_arrs = args.save_arrs,
+                                             save_arrs = False,
                                              save_per_sample_losses = args.save_per_sample_losses,
                                              interms_for_tboard = args.interms_for_tboard, 
                                              logfile_dir = args.logfile_dir,
