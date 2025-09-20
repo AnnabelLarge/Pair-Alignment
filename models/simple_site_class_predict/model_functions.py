@@ -1970,8 +1970,7 @@ def joint_only_forward(aligned_inputs,
                        unique_time_per_sample: bool, 
                        return_all_intermeds: bool = False):
     """
-    TODO: this should be ready for nested TKF92 model... but come back and 
-          check this out later
+    TODO: it's kind of annoying that B is the last dim through these calculations
     
     forward algo ONLY to find joint loglike
     
@@ -2110,8 +2109,7 @@ def joint_only_forward(aligned_inputs,
                 transit_ps_cs = jnp.take_along_axis(transit_ps, cs_idx, axis=4)  # (B, C_prev, C_curr, 1, 1)
                 transit_ps_cs = transit_ps_cs[:,:,:,0,0] # (B, C_prev, C_curr)
                 tr_per_class = jnp.transpose(transit_ps_cs, (1, 2, 0)) #(C_prev, C_curr, B) 
-                to_add = logsumexp(in_carry[:, None, :] + tr_per_class, axis=0) #(C_curr, B) # this line causes nan gradients
-                
+                to_add = logsumexp(in_carry[:, None, :] + tr_per_class, axis=0) #(C_curr, B) 
             return e + to_add #(T, C_curr, B) or (C_curr, B)
         
         def end(in_carry, ps, cs_not_used):
