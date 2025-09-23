@@ -23,6 +23,7 @@ def joint_loglike_emission_at_k_len_per_samp( anc_toks,
     
     L: length of pairwise alignment
     B: batch size
+    W: width of diagonal in wavefront cache
     C: number of latent site clases
     S: number of states (4: match, ins, del, start/end)
     A: alphabet size (20 for proteins, 4 for amino acids)
@@ -30,7 +31,7 @@ def joint_loglike_emission_at_k_len_per_samp( anc_toks,
     
     Arguments
     ----------
-    anc_toks, desc_toks : ArrayLike, (B,)
+    anc_toks, desc_toks : ArrayLike, (B,W)
         ancestor and descendant tokens at diagonal k
     
     joint_logprob_emit_at_match : ArrayLike, (B, C, A, A)
@@ -41,37 +42,30 @@ def joint_loglike_emission_at_k_len_per_samp( anc_toks,
         
     Returns
     -------
-    joint_emissions : ArrayLike, (C*S-1, B)
+    joint_emissions : ArrayLike, (W, C*S-1, B)
         log-probability of emission at given column, across all possible 
         site classes
     """
-    # Gather over last two axes using (B, 1, 1) indices
-    gather_idx_anc = anc_toks[:, None, None, None]  # (B, 1, 1)
-    gather_idx_desc = desc_toks[:, None, None, None]  # (B, 1, 1)
-
-    # Shape: (B, C, A, A) → (B, C, 1, 1) after indexing
-    joint_emit_if_match = jnp.take_along_axis(
-        joint_logprob_emit_at_match, gather_idx_anc, axis=2
-    )
-    joint_emit_if_match = jnp.take_along_axis(
-        joint_emit_if_match, gather_idx_desc, axis=3
-    )
-    joint_emit_if_match = joint_emit_if_match[:, :, 0, 0].T  # (C, B)
-
-    # Indels: (C, B)
-    emit_if_indel_desc = logprob_emit_at_indel[:, desc_toks] #(C, B)
-    emit_if_indel_anc = logprob_emit_at_indel[:, anc_toks] #(C, B)
+    # infer dims
+    C = joint_logprob_emit_at_match.shape[1]
+    B = anc_toks.shape[0]
+    W = anc_toks.shape[1]
+    
+    # emit at match
+    joint_emit_if_match = joint_logprob_emit_at_match[jnp.arange(B)[:, None], :, anc_toks, desc_toks] # (B, C, W)?
+    joint_emit_if_match = jnp.transpose(joint_emit_if_match, (C, B, W)) #(C, B, W)?
+    
+    # emit at indels
+    emit_if_indel_desc = logprob_emit_at_indel[:, desc_toks] #(C, B, W)?
+    emit_if_indel_anc = logprob_emit_at_indel[:, anc_toks] #(C, B, W)?
 
     joint_emissions = jnp.stack([joint_emit_if_match, 
                                  emit_if_ins, 
-                                 emit_if_del], axis=-2) #(C, S-1, B)
+                                 emit_if_del], axis=-2) #(C, S-1, B, W)?
     
-    # reshape
-    C = joint_emissions.shape[0]
+    # transpose, reshape
     S_minus_one = joint_emissions.shape[1]
-    B = joint_emissions.shape[2]
-    
-    joint_emissions = jnp.reshape( joint_emissions, (C*S_minus_one, B) ) #(C*S-1, B)
+    joint_emissions = jnp.reshape( joint_emissions, (W, C*S_minus_one, B) ) #(W, C*S-1, B)?
     
     return joint_emissions
 
@@ -90,6 +84,7 @@ def joint_loglike_emission_at_k_time_grid( anc_toks,
     L: length of pairwise alignment
     T: number of timepoints
     B: batch size
+    W: width of diagonal in wavefront cache
     C: number of latent site clases
     S: number of states (4: match, ins, del, start/end)
     A: alphabet size (20 for proteins, 4 for amino acids)
@@ -97,7 +92,7 @@ def joint_loglike_emission_at_k_time_grid( anc_toks,
     
     Arguments
     ----------
-    anc_toks, desc_toks : ArrayLike, (B,)
+    anc_toks, desc_toks : ArrayLike, (B,W)
         ancestor and descendant tokens at diagonal k
     
     joint_logprob_emit_at_match : ArrayLike, (T, C, A, A)
@@ -108,30 +103,32 @@ def joint_loglike_emission_at_k_time_grid( anc_toks,
         
     Returns
     -------
-    joint_emissions : ArrayLike, (T, C*S-1, B)
+    joint_emissions : ArrayLike, (W, T, C*S-1, B)
         log-probability of emission at given column, across all possible 
         site classes
     """
+    # infer dims
+    T = joint_logprob_emit_at_match.shape[0]
+    C = joint_logprob_emit_at_match.shape[1]
+    B = anc_toks.shape[0]
+    W = anc_toks.shape[1]
+    
     # get all possible scores at M/I/D
-    joint_emit_if_match = joint_logprob_emit_at_match[..., anc_toks - 3, desc_toks - 3] # (T, C, B) (TODO: or (C, B), if time per sample )
-    emit_if_ins = logprob_emit_at_indel[:, desc_toks - 3] #(C, B)
-    emit_if_del = logprob_emit_at_indel[:, anc_toks - 3] #(C, B)
+    joint_emit_if_match = joint_logprob_emit_at_match[..., anc_toks - 3, desc_toks - 3] # (T, C, B, W)?
+    emit_if_ins = logprob_emit_at_indel[:, desc_toks - 3] #(C, B, W)?
+    emit_if_del = logprob_emit_at_indel[:, anc_toks - 3] #(C, B, W)?
     
     # stack all
-    emit_if_ins = jnp.broadcast_to( emit_if_ins[None, :, :], (T, C, B) ) #(T, C, B)
-    emit_if_del = jnp.broadcast_to( emit_if_del[None, :, :], (T, C, B) ) #(T, C, B)
+    emit_if_ins = jnp.broadcast_to( emit_if_ins[None, :, :, :], (T, C, B, W) ) #(T, C, B, W)?
+    emit_if_del = jnp.broadcast_to( emit_if_del[None, :, :, :], (T, C, B, W) ) #(T, C, B, W)?
     joint_emissions = jnp.stack([joint_emit_if_match, 
                                  emit_if_ins, 
-                                 emit_if_del], axis=-2) #(T, C, S-1, B)
+                                 emit_if_del], axis=-2) #(T, C, S-1, B, W)?
     
-    # reshape
-    T = joint_emissions.shape[0]
-    C = joint_emissions.shape[1]
-    S_minus_one = joint_emissions.shape[2]
-    B = joint_emissions.shape[3]
-    
-    joint_emissions = jnp.reshape( joint_emissions, (T, C*S_minus_one, B) ) #(T, C*S-1, B)
-    
+    # transpose, reshape
+    joint_emissions = jnp.transpose(joint_emissions, (1, 2, 3, 4, 0) ) #(W, T, C, S-1, B)?
+    S_minus_one = joint_emissions.shape[3]
+    joint_emissions = jnp.reshape( joint_emissions, (W, T, C*S_minus_one, B) ) #(W, T, C*S-1, B)?
     return joint_emissions
 
 
