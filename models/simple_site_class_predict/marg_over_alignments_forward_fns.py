@@ -52,20 +52,21 @@ def joint_loglike_emission_at_k_len_per_samp( anc_toks,
     W = anc_toks.shape[1]
     
     # emit at match
-    joint_emit_if_match = joint_logprob_emit_at_match[jnp.arange(B)[:, None], :, anc_toks, desc_toks] # (B, C, W)?
-    joint_emit_if_match = jnp.transpose(joint_emit_if_match, (C, B, W)) #(C, B, W)?
+    joint_emit_if_match = joint_logprob_emit_at_match[jnp.arange(B)[:, None], :, anc_toks - 3, desc_toks - 3] # (B, W, C)
+    joint_emit_if_match = jnp.transpose(joint_emit_if_match, (2,0,1)) #(C, B, W)
     
     # emit at indels
-    emit_if_indel_desc = logprob_emit_at_indel[:, desc_toks] #(C, B, W)?
-    emit_if_indel_anc = logprob_emit_at_indel[:, anc_toks] #(C, B, W)?
+    emit_if_ins = logprob_emit_at_indel[:, desc_toks - 3] #(C, B, W)
+    emit_if_del = logprob_emit_at_indel[:, anc_toks - 3] #(C, B, W)
 
     joint_emissions = jnp.stack([joint_emit_if_match, 
                                  emit_if_ins, 
-                                 emit_if_del], axis=-2) #(C, S-1, B, W)?
+                                 emit_if_del], axis=1) #(C, S-1, B, W)
     
     # transpose, reshape
-    S_minus_one = joint_emissions.shape[1]
-    joint_emissions = jnp.reshape( joint_emissions, (W, C*S_minus_one, B) ) #(W, C*S-1, B)?
+    joint_emissions = jnp.transpose(joint_emissions, (3, 0, 1, 2) ) #(W, C, S-1, B)
+    S_minus_one = joint_emissions.shape[2]
+    joint_emissions = jnp.reshape( joint_emissions, (W, C*S_minus_one, B) ) #(W, C*S-1, B)
     
     return joint_emissions
 
@@ -114,21 +115,22 @@ def joint_loglike_emission_at_k_time_grid( anc_toks,
     W = anc_toks.shape[1]
     
     # get all possible scores at M/I/D
-    joint_emit_if_match = joint_logprob_emit_at_match[..., anc_toks - 3, desc_toks - 3] # (T, C, B, W)?
-    emit_if_ins = logprob_emit_at_indel[:, desc_toks - 3] #(C, B, W)?
-    emit_if_del = logprob_emit_at_indel[:, anc_toks - 3] #(C, B, W)?
+    joint_emit_if_match = joint_logprob_emit_at_match[..., anc_toks - 3, desc_toks - 3] # (T, C, B, W)
+    emit_if_ins = logprob_emit_at_indel[:, desc_toks - 3] #(C, B, W)
+    emit_if_del = logprob_emit_at_indel[:, anc_toks - 3] #(C, B, W)
     
     # stack all
-    emit_if_ins = jnp.broadcast_to( emit_if_ins[None, :, :, :], (T, C, B, W) ) #(T, C, B, W)?
-    emit_if_del = jnp.broadcast_to( emit_if_del[None, :, :, :], (T, C, B, W) ) #(T, C, B, W)?
+    emit_if_ins = jnp.broadcast_to( emit_if_ins[None, :, :, :], (T, C, B, W) ) #(T, C, B, W)
+    emit_if_del = jnp.broadcast_to( emit_if_del[None, :, :, :], (T, C, B, W) ) #(T, C, B, W)
+
     joint_emissions = jnp.stack([joint_emit_if_match, 
                                  emit_if_ins, 
-                                 emit_if_del], axis=-2) #(T, C, S-1, B, W)?
+                                 emit_if_del], axis=2) #(T, C, S-1, B, W)
     
     # transpose, reshape
-    joint_emissions = jnp.transpose(joint_emissions, (1, 2, 3, 4, 0) ) #(W, T, C, S-1, B)?
+    joint_emissions = jnp.transpose(joint_emissions, (4, 0, 1, 2, 3) ) #(W, T, C, S-1, B)
     S_minus_one = joint_emissions.shape[3]
-    joint_emissions = jnp.reshape( joint_emissions, (W, T, C*S_minus_one, B) ) #(W, T, C*S-1, B)?
+    joint_emissions = jnp.reshape( joint_emissions, (W, T, C*S_minus_one, B) ) #(W, T, C*S-1, B)
     return joint_emissions
 
 
