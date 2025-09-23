@@ -20,14 +20,16 @@ from models.simple_site_class_predict.marg_over_alignments_forward_fns import (j
 class TestEmissionScoringFns(unittest.TestCase):
     def setUp(self):
         self.anc_toks = jnp.array( [[3, 4, 5, 6, 3],
-                               [4, 4, 4, 5, 3],
-                               [4, 4, 4, 5, 3],
-                               [6, 5, 4, 3, 3]] ) #(B, W)
+                                    [4, 4, 4, 5, 3],
+                                    [4, 4, 4, 0, 0],
+                                    [6, 5, 4, 5, 0]] ) #(B, W)
         
         self.desc_toks = jnp.array( [[6, 5, 4, 3, 3],
-                                [3, 6, 6, 6, 3],
-                                [3, 6, 6, 6, 3],
-                                [3, 4, 5, 6, 3]] ) #(B, W)
+                                     [3, 6, 6, 6, 3],
+                                     [3, 6, 6, 0, 0],
+                                     [3, 4, 5, 1, 0]] ) #(B, W)
+        
+        self.mask = (self.anc_toks != 0 ) #(B, W)
         
         self.B = self.anc_toks.shape[0]
         self.W = self.anc_toks.shape[1]
@@ -55,9 +57,10 @@ class TestEmissionScoringFns(unittest.TestCase):
         
         ### by my function
         pred_out = joint_loglike_emission_at_k_time_grid(self.anc_toks,
-                                                          self.desc_toks,
-                                                          joint_logprob_emit_at_match,
-                                                          logprob_emit_at_indel) #(W, T, C*S-1, B)
+                                                         self.desc_toks,
+                                                         self.mask,
+                                                         joint_logprob_emit_at_match,
+                                                         logprob_emit_at_indel) #(W, T, C*S-1, B)
         
         
         ### true value
@@ -65,20 +68,26 @@ class TestEmissionScoringFns(unittest.TestCase):
             for w in range(W):
                 a = self.anc_toks[b,w]-3
                 d = self.desc_toks[b,w]-3
+                score_pos = self.mask[b,w]
                 
-                true_match_val = joint_logprob_emit_at_match[:, :, a, d] #(T, C_trans)
-                true_ins_val = logprob_emit_at_indel[:, d] #(C_trans,)
-                true_del_val = logprob_emit_at_indel[:, a] #(C_trans,)
-                
-                true_ins_val = jnp.broadcast_to( true_ins_val[None,...], (T, C_trans) ) #(T, C_trans)
-                true_del_val = jnp.broadcast_to( true_del_val[None,...], (T, C_trans) ) #(T, C_trans)
-                
-                true_c_s = jnp.stack( [true_match_val,
-                                        true_ins_val,
-                                        true_del_val], axis=-1 ) #(T, C_trans, S-1)
-                true_c_s = jnp.reshape(true_c_s, (T, C_trans * 3)) #(T, C_trans*S-1)
-                
-                npt.assert_allclose( pred_out[w, :, :, b], true_c_s ), f'{b}, {w}'
+                if score_pos:
+                    true_match_val = joint_logprob_emit_at_match[:, :, a, d] #(T, C_trans)
+                    true_ins_val = logprob_emit_at_indel[:, d] #(C_trans,)
+                    true_del_val = logprob_emit_at_indel[:, a] #(C_trans,)
+                    
+                    true_ins_val = jnp.broadcast_to( true_ins_val[None,...], (T, C_trans) ) #(T, C_trans)
+                    true_del_val = jnp.broadcast_to( true_del_val[None,...], (T, C_trans) ) #(T, C_trans)
+                    
+                    true_c_s = jnp.stack( [true_match_val,
+                                            true_ins_val,
+                                            true_del_val], axis=-1 ) #(T, C_trans, S-1)
+                    true_c_s = jnp.reshape(true_c_s, (T, C_trans * 3)) #(T, C_trans*S-1)
+                    
+                    npt.assert_allclose( pred_out[w, :, :, b], true_c_s ), f'{b}, {w}'
+                    
+                elif not score_pos:
+                    npt.assert_allclose( pred_out[w, :, :, b], 
+                                         jnp.zeros( pred_out[w, :, :, b].shape ) ), f'{b}, {w}'
     
     
     def test_uniq_time_per_samp(self):
@@ -103,6 +112,7 @@ class TestEmissionScoringFns(unittest.TestCase):
         ### by my function
         pred_out = joint_loglike_emission_at_k_len_per_samp(self.anc_toks,
                                                             self.desc_toks,
+                                                            self.mask,
                                                             joint_logprob_emit_at_match,
                                                             logprob_emit_at_indel) #(W, C*S-1, B)
         
@@ -111,17 +121,24 @@ class TestEmissionScoringFns(unittest.TestCase):
             for w in range(W):
                 a = self.anc_toks[b,w]-3
                 d = self.desc_toks[b,w]-3
+                score_pos = self.mask[b,w]
                 
-                true_match_val = joint_logprob_emit_at_match[b, :, a, d] #(C_trans)
-                true_ins_val = logprob_emit_at_indel[:, d] #(C_trans,)
-                true_del_val = logprob_emit_at_indel[:, a] #(C_trans,)
+                if score_pos:
+                    true_match_val = joint_logprob_emit_at_match[b, :, a, d] #(C_trans)
+                    true_ins_val = logprob_emit_at_indel[:, d] #(C_trans,)
+                    true_del_val = logprob_emit_at_indel[:, a] #(C_trans,)
+                    
+                    true_c_s = jnp.stack( [true_match_val,
+                                            true_ins_val,
+                                            true_del_val], axis=-1 ) #(C_trans, S-1)
+                    true_c_s = jnp.reshape(true_c_s, (C_trans * 3)) #(C_trans*S-1,)
+                    
+                    npt.assert_allclose( pred_out[w, :, b], true_c_s )
                 
-                true_c_s = jnp.stack( [true_match_val,
-                                        true_ins_val,
-                                        true_del_val], axis=-1 ) #(C_trans, S-1)
-                true_c_s = jnp.reshape(true_c_s, (C_trans * 3)) #(C_trans*S-1,)
-                
-                npt.assert_allclose( pred_out[w, :, b], true_c_s )
+                elif not score_pos:
+                    npt.assert_allclose( pred_out[w, :, b], 
+                                         jnp.zeros( pred_out[w, :, b].shape ) ), f'{b}, {w}'
                   
+                    
 if __name__ == '__main__':
     unittest.main()  

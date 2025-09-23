@@ -13,8 +13,76 @@ import flax.linen as nn
 ###############################################################################
 ### SCORING   #################################################################
 ###############################################################################
+def wavefront_cache_lookup(ij_needed_for_k, 
+                           pad_mask_at_k, 
+                           cache_for_prev_diagonal, 
+                           seq_lens, 
+                           pad_val = jnp.finfo(jnp.float32).min):
+    """
+    Extracts cell value at (i_prev, j_prev) from the cache, which is stored as 
+      a diagonal in the wavefront parallelism algo
+      
+    need (i_prev=i-1, j_prev=j-1) if current state is Match
+    need (i_prev=i,   j_prev=j-1) if current state is Ins
+    need (i_prev=i-1, j_prev=j)   if current state is Del
+    
+    
+    Arguements:
+    ------------
+    seq_lens : ArrayLike, (B, L, 2)
+        seq_lens[:,:,0] will hold length of ancestor sequences
+    
+    ij_needed_for_k : ArrayLike, (B, W, 2)
+        indices (i_prev=i-1, j_prev=j-1) if current state is Match
+        indices (i_prev=i,   j_prev=j-1) if current state is Ins
+        indices (i_prev=i-1, j_prev=j)   if current state is Del
+        
+    pad_mask_at_k : ArrayLike, (B, W)
+        for the CURRENT diagonal, what values to mask b/c they are padding tokens
+    
+    cache_for_prev_diagonal : ArrayLike, (W, T, C_S, B)
+        for the PREVIOUS diagonal; the cache you take values from
+    
+    pad_value : float
+        default = jnp.finfo(jnp.float32).min i.e. as close to log(0) as you can get
+    
+    
+    Returns:
+    ---------
+    cache, (W, T, C_S, B)
+        the (i_prev, j_prev) values needed to update current diagonal values
+        mathematically, this is alpha_{i_prev, j_prev}^{S_c} = 
+          P(x_{...i_prev}, y_{...j_prev}, tau_{i_prev, j_prev}=S, nu_{i_prev, j_prev}=c)
+    """
+    B = seq_lens.shape[0]
+    
+    # mask out invalid indexes (at edges of alignment matrix), combine with 
+    #   previously generate mask for padding positions
+    valid_ij = ( ij_needed_for_k[...,1] >= 0 ) #(B, W)
+    mask_at_k = pad_mask_at_k & valid_ij #(B, W)
+    del valid_ij, pad_mask_at_k
+        
+    # replace invalid cell indices with (0,0), to avoid nan gradients due to 
+    #   invalid indexing
+    ij_needed_for_k = jnp.multiply( ij_needed_for_k, mask_at_k[...,None] ) #(B, W, 2)
+    
+    # find (i_prev, j_prev) in cache_for_prev_diagonal 
+    cache_pos_needed = ij_coords_to_wavefront_pos_at_diagonal_k( indices = ij_needed_for_k,
+                                                                 anc_len = seq_lens[...,0] ) #(B, W)
+    
+    # use cache_pos_needed to retrieve values in the cache
+    # advanced indexing moves batch to fist dim, so transpose that back
+    cache_to_return = cache_for_prev_diagonal[cache_pos_needed, :, :, jnp.arange(B)[:,None]] #(B, W, T, C_S)
+    cache_to_return = jnp.where( mask_at_k[:,:,None,None],
+                                 cache_to_return,
+                                 pad_val ) #(B, W, T, C_S)
+    cache_to_return = jnp.transpose(cache_to_return, (1,2,3,0)) #(W, T, C_S, B)
+    
+    return cache_to_return
+
 def joint_loglike_emission_at_k_len_per_samp( anc_toks,
                                               desc_toks,
+                                              pad_mask_at_k,
                                               joint_logprob_emit_at_match,
                                               logprob_emit_at_indel ):
     """
@@ -34,6 +102,9 @@ def joint_loglike_emission_at_k_len_per_samp( anc_toks,
     anc_toks, desc_toks : ArrayLike, (B,W)
         ancestor and descendant tokens at diagonal k
     
+    pad_mask_at_k : ArrayLike, (B, W)
+        what values to mask b/c they are padding tokens
+    
     joint_logprob_emit_at_match : ArrayLike, (B, C, A, A)
         logP(anc, desc | c, t); log-probability of emission at match site
     
@@ -50,6 +121,16 @@ def joint_loglike_emission_at_k_len_per_samp( anc_toks,
     C = joint_logprob_emit_at_match.shape[1]
     B = anc_toks.shape[0]
     W = anc_toks.shape[1]
+    
+    # replace invalid indices to avoid nan errors
+    # these will get masked out, so it doesn't matter what they are
+    anc_toks = jnp.where(pad_mask_at_k,
+                         anc_toks,
+                         3) #(B, W)
+    
+    desc_toks = jnp.where(pad_mask_at_k,
+                         desc_toks,
+                         3) #(B, W)
     
     # emit at match
     joint_emit_if_match = joint_logprob_emit_at_match[jnp.arange(B)[:, None], :, anc_toks - 3, desc_toks - 3] # (B, W, C)
@@ -68,11 +149,16 @@ def joint_loglike_emission_at_k_len_per_samp( anc_toks,
     S_minus_one = joint_emissions.shape[2]
     joint_emissions = jnp.reshape( joint_emissions, (W, C*S_minus_one, B) ) #(W, C*S-1, B)
     
+    # mask and return
+    pad_mask_at_k = pad_mask_at_k.T[:, None, :] #(W, 1, B)
+    joint_emissions = jnp.multiply( joint_emissions, pad_mask_at_k )#(W, C*S-1, B)
+    
     return joint_emissions
 
 
 def joint_loglike_emission_at_k_time_grid( anc_toks,
                                            desc_toks,
+                                           pad_mask_at_k,
                                            joint_logprob_emit_at_match,
                                            logprob_emit_at_indel ):
     """
@@ -96,6 +182,9 @@ def joint_loglike_emission_at_k_time_grid( anc_toks,
     anc_toks, desc_toks : ArrayLike, (B,W)
         ancestor and descendant tokens at diagonal k
     
+    pad_mask_at_k : ArrayLike, (B, W)
+        what values to mask b/c they are padding tokens
+    
     joint_logprob_emit_at_match : ArrayLike, (T, C, A, A)
         logP(anc, desc | c, t); log-probability of emission at match site
     
@@ -114,6 +203,16 @@ def joint_loglike_emission_at_k_time_grid( anc_toks,
     B = anc_toks.shape[0]
     W = anc_toks.shape[1]
     
+    # replace invalid indices to avoid nan errors
+    # these will get masked out, so it doesn't matter what they are
+    anc_toks = jnp.where(pad_mask_at_k,
+                         anc_toks,
+                         3) #(B, W)
+    
+    desc_toks = jnp.where(pad_mask_at_k,
+                         desc_toks,
+                         3) #(B, W)
+    
     # get all possible scores at M/I/D
     joint_emit_if_match = joint_logprob_emit_at_match[..., anc_toks - 3, desc_toks - 3] # (T, C, B, W)
     emit_if_ins = logprob_emit_at_indel[:, desc_toks - 3] #(C, B, W)
@@ -131,6 +230,11 @@ def joint_loglike_emission_at_k_time_grid( anc_toks,
     joint_emissions = jnp.transpose(joint_emissions, (4, 0, 1, 2, 3) ) #(W, T, C, S-1, B)
     S_minus_one = joint_emissions.shape[3]
     joint_emissions = jnp.reshape( joint_emissions, (W, T, C*S_minus_one, B) ) #(W, T, C*S-1, B)
+    
+    # mask and return
+    pad_mask_at_k = pad_mask_at_k.T[:, None, None, :] #(W, 1, 1, B)
+    joint_emissions = jnp.multiply( joint_emissions, pad_mask_at_k )#(W, T, C*S-1, B)
+    
     return joint_emissions
 
 
@@ -332,70 +436,5 @@ def index_all_classes_one_state(state_idx,
     return jnp.arange(num_transit_classes) * 3 + state_idx
 
 
-def wavefront_cache_lookup(ij_needed_for_k, 
-                           pad_mask_at_k, 
-                           cache_for_prev_diagonal, 
-                           seq_lens, 
-                           pad_val = jnp.finfo(jnp.float32).min):
-    """
-    Extracts cell value at (i_prev, j_prev) from the cache, which is stored as 
-      a diagonal in the wavefront parallelism algo
-      
-    need (i_prev=i-1, j_prev=j-1) if current state is Match
-    need (i_prev=i,   j_prev=j-1) if current state is Ins
-    need (i_prev=i-1, j_prev=j)   if current state is Del
-    
-    
-    Arguements:
-    ------------
-    seq_lens : ArrayLike, (B, L, 2)
-        seq_lens[:,:,0] will hold length of ancestor sequences
-    
-    ij_needed_for_k : ArrayLike, (B, W, 2)
-        indices (i_prev=i-1, j_prev=j-1) if current state is Match
-        indices (i_prev=i,   j_prev=j-1) if current state is Ins
-        indices (i_prev=i-1, j_prev=j)   if current state is Del
-        
-    pad_mask_at_k : ArrayLike, (B, W)
-        for the CURRENT diagonal, what values to mask b/c they are padding tokens
-    
-    cache_for_prev_diagonal : ArrayLike, (W, T, C_S, B)
-        for the PREVIOUS diagonal; the cache you take values from
-    
-    pad_value : float
-        default = jnp.finfo(jnp.float32).min i.e. as close to log(0) as you can get
-    
-    
-    Returns:
-    ---------
-    cache, (W, T, C_S, B)
-        the (i_prev, j_prev) values needed to update current diagonal values
-        mathematically, this is alpha_{i_prev, j_prev}^{S_c} = 
-          P(x_{...i_prev}, y_{...j_prev}, tau_{i_prev, j_prev}=S, nu_{i_prev, j_prev}=c)
-    """
-    B = seq_lens.shape[0]
-    
-    # mask out invalid indexes (at edges of alignment matrix), combine with 
-    #   previously generate mask for padding positions
-    valid_ij = ( ij_needed_for_k[...,1] >= 0 ) #(B, W)
-    mask_at_k = pad_mask_at_k & valid_ij #(B, W)
-    del valid_ij, pad_mask_at_k
-        
-    # replace invalid cell indices with (0,0), to avoid nan gradients due to 
-    #   invalid indexing
-    ij_needed_for_k = jnp.multiply( ij_needed_for_k, mask_at_k[...,None] ) #(B, W, 2)
-    
-    # find (i_prev, j_prev) in cache_for_prev_diagonal 
-    cache_pos_needed = ij_coords_to_wavefront_pos_at_diagonal_k( indices = ij_needed_for_k,
-                                                                 anc_len = seq_lens[...,0] ) #(B, W)
-    
-    # use cache_pos_needed to retrieve values in the cache
-    # advanced indexing moves batch to fist dim, so transpose that back
-    cache_to_return = cache_for_prev_diagonal[cache_pos_needed, :, :, jnp.arange(B)[:,None]] #(B, W, T, C_S)
-    cache_to_return = jnp.where( mask_at_k[:,:,None,None],
-                                 cache_to_return,
-                                 pad_val ) #(B, W, T, C_S)
-    cache_to_return = jnp.transpose(cache_to_return, (1,2,3,0)) #(W, T, C_S, B)
-    
-    return cache_to_return
+
 
