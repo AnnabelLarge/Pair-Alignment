@@ -13,9 +13,9 @@ import numpy as np
 import numpy.testing as npt
 import unittest
 
-from models.simple_site_class_predict.NestedTKF import NestedTKF
-from models.simple_site_class_predict.transition_models import TKF91DomainTransitionLogprobs
-from models.simple_site_class_predict.model_functions import (regular_tkf,
+from models.latent_class_mixtures.NestedTKF import NestedTKF
+from models.latent_class_mixtures.transition_models import TKF91DomainTransitionLogprobs
+from models.latent_class_mixtures.model_functions import (regular_tkf,
                                                               get_tkf91_single_seq_marginal_transition_logprobs)
                                                               
 

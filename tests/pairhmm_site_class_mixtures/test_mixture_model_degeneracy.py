@@ -22,7 +22,7 @@ import unittest
 
 from tests.data_processing import (str_aligns_to_tensor,
                                    summarize_alignment)
-from models.simple_site_class_predict.model_functions import (rate_matrix_from_exch_equl,
+from models.latent_class_mixtures.model_functions import (rate_matrix_from_exch_equl,
                                                               cond_logprob_emit_at_match_per_mixture,
                                                               joint_logprob_emit_at_match_per_mixture,
                                                               lse_over_match_logprobs_per_mixture,

@@ -15,7 +15,7 @@ from jax.scipy.linalg import expm
 from jax.scipy.special import logsumexp
 
 from models.BaseClasses import ModuleBase
-from models.simple_site_class_predict.emission_models import (EqulDistLogprobsFromCounts,
+from models.latent_class_mixtures.emission_models import (EqulDistLogprobsFromCounts,
                                                               EqulDistLogprobsPerClass,
                                                               EqulDistLogprobsFromFile,
                                                               GTRLogprobs,
@@ -28,11 +28,11 @@ from models.simple_site_class_predict.emission_models import (EqulDistLogprobsFr
                                                               HKY85LogprobsFromFile,
                                                               F81Logprobs,
                                                               F81LogprobsFromFile)
-from models.simple_site_class_predict.transition_models import (TKF92TransitionLogprobs,
+from models.latent_class_mixtures.transition_models import (TKF92TransitionLogprobs,
                                                                 TKF92TransitionLogprobsFromFile,
                                                                 TKF91DomainTransitionLogprobs,
                                                                 TKF91DomainTransitionLogprobsFromFile)
-from models.simple_site_class_predict.model_functions import (bound_sigmoid,
+from models.latent_class_mixtures.model_functions import (bound_sigmoid,
                                                               safe_log,
                                                               cond_logprob_emit_at_match_per_mixture,
                                                               joint_logprob_emit_at_match_per_mixture,
@@ -48,7 +48,7 @@ from models.simple_site_class_predict.model_functions import (bound_sigmoid,
                                                               logspace_marginalize_inf_transits,
                                                               log_matmul,
                                                               get_cond_transition_logprobs)
-from models.simple_site_class_predict.FragAndSiteClasses import FragAndSiteClasses
+from models.latent_class_mixtures.FragAndSiteClasses import FragAndSiteClasses
 
 
 class NestedTKF(FragAndSiteClasses):

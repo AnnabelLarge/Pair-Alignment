@@ -5,6 +5,33 @@ Created on Mon Sep 22 12:25:48 2025
 
 @author: annabel
 
+'compute_forward_messages_for_state',
+'generate_ij_coords_at_diagonal_k',
+'get_del_transition_message',
+'get_ins_transition_message',
+'get_match_transition_message',
+'ij_coords_to_wavefront_pos_at_diagonal_k',
+'index_all_classes_one_state',
+'init_first_diagonal',
+'init_second_diagonal',
+'joint_loglike_emission_at_k_len_per_samp',
+'joint_loglike_emission_at_k_time_grid',
+'replace_invalid_toks_in_emissions',
+'update_cache',
+'wavefront_cache_lookup'
+
+
+
+B: batch
+W: width of wavefront cache; equal to longest bottom-left-to-top-right 
+ diagonal in the alignment grid
+T: time
+C_transit: number of latent classes for transitions (domain, fragment)
+S: number of alignment states (4: Match, Ins, Del, Start/End)
+C_S: C_transit * (S-1), combined dim for state+class, like M_c, I_c, D_c, etc.
+A: alphabet size (20 for proteins, 4 for amino acids)
+
+
 TODO: all of these functions are written for working with a separate grid of 
   times. They probably need editing before applying to case where there's 
   one unique branch length per sample
@@ -598,8 +625,8 @@ def get_match_transition_message( align_cell_idxes,
     # \sum_{s \in \{M,I,D\}, c in C_transit} Tr(M,d|s,c,t) * alpha_{i-1,j-1}^{s_c}
     match_idx = index_all_classes_one_state(state_idx = 0, num_transit_classes = C_transit) #(C,)
     match_transit_message = compute_forward_messages_for_state( logprob_transit_mid_only = joint_logprob_transit_mid_only,
-                                                              idxes_for_curr_state = match_idx,
-                                                              cache_for_state = cache_for_match ) #(W, T, C, B)
+                                                                idxes_for_curr_state = match_idx,
+                                                                cache_for_state = cache_for_match ) #(W, T, C, B)
     
     return match_idx, match_transit_message
 

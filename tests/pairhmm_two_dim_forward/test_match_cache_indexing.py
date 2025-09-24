@@ -12,7 +12,7 @@ import numpy as np
 import numpy.testing as npt
 import unittest
 
-from models.simple_site_class_predict.marg_over_alignments_forward_fns import (generate_ij_coords_at_diagonal_k,
+from models.latent_class_mixtures.forward_algo_helpers import (generate_ij_coords_at_diagonal_k,
                                                                                ij_coords_to_wavefront_pos_at_diagonal_k,
                                                                                index_all_classes_one_state,
                                                                                wavefront_cache_lookup)

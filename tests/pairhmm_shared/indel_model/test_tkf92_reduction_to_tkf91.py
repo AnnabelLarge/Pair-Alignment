@@ -15,9 +15,9 @@ from scipy.special import softmax
 import numpy.testing as npt
 import unittest
 
-from models.simple_site_class_predict.transition_models import (TKF91TransitionLogprobs,
+from models.latent_class_mixtures.transition_models import (TKF91TransitionLogprobs,
                                                                 TKF92TransitionLogprobs)
-from models.simple_site_class_predict.model_functions import (switch_tkf,
+from models.latent_class_mixtures.model_functions import (switch_tkf,
                                                               regular_tkf)
 
 

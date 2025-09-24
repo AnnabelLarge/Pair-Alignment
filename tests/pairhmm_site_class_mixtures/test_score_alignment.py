@@ -16,7 +16,7 @@ import numpy as np
 import numpy.testing as npt
 import unittest
 
-from models.simple_site_class_predict.model_functions import (lse_over_match_logprobs_per_mixture,
+from models.latent_class_mixtures.model_functions import (lse_over_match_logprobs_per_mixture,
                                                               joint_prob_from_counts)
 
 

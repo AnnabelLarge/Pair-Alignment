@@ -40,20 +40,20 @@ from itertools import product
 from scipy.special import logsumexp
 from tqdm import tqdm
 
-from models.simple_site_class_predict.transition_models import (TKF92TransitionLogprobs)
+from models.latent_class_mixtures.transition_models import (TKF92TransitionLogprobs)
 
-from models.simple_site_class_predict.marg_over_alignments_forward_fns import (generate_ij_coords_at_diagonal_k,
-                                                                               ij_coords_to_wavefront_pos_at_diagonal_k,
-                                                                               index_all_classes_one_state,
-                                                                               wavefront_cache_lookup,
-                                                                               compute_forward_messages_for_state,
-                                                                               joint_loglike_emission_at_k_time_grid,
-                                                                               init_first_diagonal,
-                                                                               init_second_diagonal,
-                                                                               get_match_transition_message,
-                                                                               get_ins_transition_message,
-                                                                               get_del_transition_message,
-                                                                               update_cache)
+from models.latent_class_mixtures.forward_algo_helpers import (generate_ij_coords_at_diagonal_k,
+                                                               ij_coords_to_wavefront_pos_at_diagonal_k,
+                                                               index_all_classes_one_state,
+                                                               wavefront_cache_lookup,
+                                                               compute_forward_messages_for_state,
+                                                               joint_loglike_emission_at_k_time_grid,
+                                                               init_first_diagonal,
+                                                               init_second_diagonal,
+                                                               get_match_transition_message,
+                                                               get_ins_transition_message,
+                                                               get_del_transition_message,
+                                                               update_cache)
 
 
 ###############################################################################

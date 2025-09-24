@@ -17,8 +17,8 @@ import unittest
 
 from tests.data_processing import (str_aligns_to_tensor,
                                    summarize_alignment)
-from models.simple_site_class_predict.IndpSites import IndpSitesLoadAll
-from models.simple_site_class_predict.model_functions import (anc_marginal_probs_from_counts,
+from models.latent_class_mixtures.IndpSites import IndpSitesLoadAll
+from models.latent_class_mixtures.model_functions import (anc_marginal_probs_from_counts,
                                                               cond_prob_from_counts,
                                                               joint_prob_from_counts)
 

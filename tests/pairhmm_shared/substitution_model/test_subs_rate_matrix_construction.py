@@ -24,9 +24,9 @@ from scipy.special import logsumexp
 import numpy.testing as npt
 import unittest
 
-from models.simple_site_class_predict.emission_models import (EqulDistLogprobsFromFile,
+from models.latent_class_mixtures.emission_models import (EqulDistLogprobsFromFile,
                                                               GTRLogprobsFromFile)
-from models.simple_site_class_predict.model_functions import (upper_tri_vector_to_sym_matrix, 
+from models.latent_class_mixtures.model_functions import (upper_tri_vector_to_sym_matrix, 
                                                               rate_matrix_from_exch_equl)
 
 THRESHOLD = 1e-5

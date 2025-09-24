@@ -12,7 +12,7 @@ import numpy as np
 import numpy.testing as npt
 import unittest
 
-from models.simple_site_class_predict.emission_models import F81Logprobs
+from models.latent_class_mixtures.emission_models import F81Logprobs
 from models.neural_hmm_predict.model_functions import logprob_f81 as neural_f81
 
 THRESHOLD = 1e-6

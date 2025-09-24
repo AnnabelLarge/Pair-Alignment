@@ -12,8 +12,8 @@ import numpy as np
 import numpy.testing as npt
 import unittest
 
-from models.simple_site_class_predict.model_functions import regular_tkf as pairhmm_regular_tkf
-from models.simple_site_class_predict.model_functions import approx_tkf as pairhmm_approx_tkf
+from models.latent_class_mixtures.model_functions import regular_tkf as pairhmm_regular_tkf
+from models.latent_class_mixtures.model_functions import approx_tkf as pairhmm_approx_tkf
 
 from models.neural_hmm_predict.model_functions import regular_tkf as neural_regular_tkf
 from models.neural_hmm_predict.model_functions import approx_tkf as neural_approx_tkf

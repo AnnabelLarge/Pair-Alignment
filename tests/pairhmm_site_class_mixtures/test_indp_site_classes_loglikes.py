@@ -17,7 +17,7 @@ import unittest
 
 from tests.data_processing import (str_aligns_to_tensor,
                                    summarize_alignment)
-from models.simple_site_class_predict.IndpSites import IndpSites
+from models.latent_class_mixtures.IndpSites import IndpSites
 
 THRESHOLD = 1e-6
 

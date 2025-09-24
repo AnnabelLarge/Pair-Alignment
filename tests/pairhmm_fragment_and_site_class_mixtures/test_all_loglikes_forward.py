@@ -19,13 +19,13 @@ from jax.scipy.linalg import expm
 from jax.scipy.special import logsumexp
 
 from models.BaseClasses import ModuleBase
-from models.simple_site_class_predict.model_functions import (bound_sigmoid, 
+from models.latent_class_mixtures.model_functions import (bound_sigmoid, 
                                                               safe_log)
 from tests.data_processing import (str_aligns_to_tensor,
                                    summarize_alignment)
 
-from models.simple_site_class_predict.transition_models import TKF92TransitionLogprobs
-from models.simple_site_class_predict.model_functions import (switch_tkf,
+from models.latent_class_mixtures.transition_models import TKF92TransitionLogprobs
+from models.latent_class_mixtures.model_functions import (switch_tkf,
                                                               get_tkf92_single_seq_marginal_transition_logprobs,
                                                               joint_only_forward,
                                                               all_loglikes_forward)

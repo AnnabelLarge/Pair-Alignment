@@ -12,7 +12,7 @@ import numpy as np
 import numpy.testing as npt
 import unittest
 
-from models.simple_site_class_predict.marg_over_alignments_forward_fns import ij_coords_to_wavefront_pos_at_diagonal_k
+from models.latent_class_mixtures.forward_algo_helpers import ij_coords_to_wavefront_pos_at_diagonal_k
                                                                              
 
 class TestRecoverWavefrontPos(unittest.TestCase):

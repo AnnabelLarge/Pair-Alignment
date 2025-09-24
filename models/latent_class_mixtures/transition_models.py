@@ -35,7 +35,7 @@ from jax.scipy.special import logsumexp
 import pickle
 
 from models.BaseClasses import ModuleBase
-from models.simple_site_class_predict.model_functions import (bound_sigmoid,
+from models.latent_class_mixtures.model_functions import (bound_sigmoid,
                                                               safe_log,
                                                               log_one_minus_x,
                                                               switch_tkf,

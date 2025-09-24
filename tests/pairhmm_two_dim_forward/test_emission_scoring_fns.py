@@ -12,7 +12,7 @@ import numpy as np
 
 import numpy.testing as npt
 import unittest
-from models.simple_site_class_predict.marg_over_alignments_forward_fns import (joint_loglike_emission_at_k_time_grid,
+from models.latent_class_mixtures.forward_algo_helpers import (joint_loglike_emission_at_k_time_grid,
                                                                                joint_loglike_emission_at_k_len_per_samp)
 
 

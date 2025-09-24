@@ -29,7 +29,7 @@ from torch.utils.data import DataLoader
 # custom function/classes imports (in order of appearance)
 from train_eval_fns.build_optimizer import build_optimizer
 from utils.sequence_length_helpers import determine_alignlen_bin
-from models.simple_site_class_predict.initializers import init_pairhmm_markov_sites as init_pairhmm
+from models.latent_class_mixtures.initializers import init_pairhmm_markov_sites as init_pairhmm
 from train_eval_fns.markovian_site_classes_training_fns import ( label_class_posteriors )
 
 

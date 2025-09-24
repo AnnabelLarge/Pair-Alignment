@@ -23,8 +23,8 @@ from scipy.special import softmax
 import numpy.testing as npt
 import unittest
 
-from models.simple_site_class_predict.emission_models import F81Logprobs,GTRLogprobs
-from models.simple_site_class_predict.model_functions import upper_tri_vector_to_sym_matrix
+from models.latent_class_mixtures.emission_models import F81Logprobs,GTRLogprobs
+from models.latent_class_mixtures.model_functions import upper_tri_vector_to_sym_matrix
 
 THRESHOLD = 1e-6
 

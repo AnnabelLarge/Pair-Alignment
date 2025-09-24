@@ -27,9 +27,9 @@ import unittest
 
 from tests.data_processing import (str_aligns_to_tensor,
                                    summarize_alignment)
-from models.simple_site_class_predict.IndpSites import IndpSitesLoadAll
+from models.latent_class_mixtures.IndpSites import IndpSitesLoadAll
 from models.neural_hmm_predict.NeuralCondTKF import NeuralCondTKF
-from models.simple_site_class_predict.model_functions import cond_prob_from_counts
+from models.latent_class_mixtures.model_functions import cond_prob_from_counts
 from models.neural_hmm_predict.model_functions import (regular_tkf,
                                                        logprob_tkf92)
 

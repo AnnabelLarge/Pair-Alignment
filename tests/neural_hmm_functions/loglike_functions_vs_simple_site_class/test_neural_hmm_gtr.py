@@ -12,8 +12,8 @@ import numpy as np
 import numpy.testing as npt
 import unittest
 
-from models.simple_site_class_predict.model_functions import upper_tri_vector_to_sym_matrix
-from models.simple_site_class_predict.emission_models import GTRLogprobs
+from models.latent_class_mixtures.model_functions import upper_tri_vector_to_sym_matrix
+from models.latent_class_mixtures.emission_models import GTRLogprobs
 from models.neural_hmm_predict.model_functions import logprob_gtr as neural_gtr
 
 jax.config.update("jax_enable_x64", True)

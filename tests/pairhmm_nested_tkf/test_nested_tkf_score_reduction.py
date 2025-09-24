@@ -18,8 +18,8 @@ import unittest
 from tests.data_processing import (str_aligns_to_tensor,
                                    summarize_alignment)
 
-from models.simple_site_class_predict.NestedTKF import NestedTKF
-from models.simple_site_class_predict.FragAndSiteClasses import FragAndSiteClasses
+from models.latent_class_mixtures.NestedTKF import NestedTKF
+from models.latent_class_mixtures.FragAndSiteClasses import FragAndSiteClasses
 
 THRESHOLD = 1e-6
 

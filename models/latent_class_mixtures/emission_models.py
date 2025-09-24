@@ -47,7 +47,7 @@ from functools import partial
 from typing import Optional
 
 from models.BaseClasses import ModuleBase
-from models.simple_site_class_predict.model_functions import (bound_sigmoid,
+from models.latent_class_mixtures.model_functions import (bound_sigmoid,
                                                               bound_sigmoid_inverse,
                                                               safe_log,
                                                               rate_matrix_from_exch_equl,

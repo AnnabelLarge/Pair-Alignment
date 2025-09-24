@@ -14,7 +14,7 @@ import numpy as np
 import numpy.testing as npt
 import unittest
 
-from models.simple_site_class_predict.model_functions import (switch_tkf,
+from models.latent_class_mixtures.model_functions import (switch_tkf,
                                                               regular_tkf)
 
 

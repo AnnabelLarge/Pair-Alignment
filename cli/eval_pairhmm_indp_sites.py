@@ -36,7 +36,7 @@ from train_eval_fns.build_optimizer import build_optimizer
 # specific to training this model
 from utils.edit_argparse import pairhmm_indp_sites_fill_with_default_values as fill_with_default_values
 from utils.edit_argparse import pairhmms_share_top_level_args as share_top_level_args
-from models.simple_site_class_predict.initializers import init_pairhmm_indp_sites as init_pairhmm
+from models.latent_class_mixtures.initializers import init_pairhmm_indp_sites as init_pairhmm
 from train_eval_fns.indp_site_classes_training_fns import ( eval_one_batch,
                                                             final_eval_wrapper )
 

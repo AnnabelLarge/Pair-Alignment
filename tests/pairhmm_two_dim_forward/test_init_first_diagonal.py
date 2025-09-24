@@ -13,8 +13,8 @@ import numpy as np
 import numpy.testing as npt
 import unittest
 
-from models.simple_site_class_predict.transition_models import (TKF92TransitionLogprobs)
-from models.simple_site_class_predict.marg_over_alignments_forward_fns import (index_all_classes_one_state,
+from models.latent_class_mixtures.transition_models import (TKF92TransitionLogprobs)
+from models.latent_class_mixtures.forward_algo_helpers import (index_all_classes_one_state,
                                                                                init_first_diagonal)
 
 
