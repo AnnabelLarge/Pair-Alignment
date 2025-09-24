@@ -7,14 +7,18 @@ Created on Tue Sep 16 13:47:05 2025
 
 This works through MARGINALIZING OVER A GRID OF TIMES; T!=B
 
+This also assumes that ancestor and descendant produces an interesting 
+  alignment; one has a length of at least 2, and the other has a length 
+  of at least 1
+
 
 sizes:
 ------
-transition matrx: T, C_trans, C_trans, S_from, S_to
-equilibrium distribution: C_trans, C_sites, A
-  > after marginalizing over site-independent C_sites: C_trans, A
-substitution emission matrix: T, C_trans, C_sites, K, A, A
-  > after marginalizing over site-independent C_sites and K: T, C_trans, A, A
+transition matrx: T, C_transit, C_transit, S_prev, S_curr
+equilibrium distribution: C_transit, C_sites, A
+  > after marginalizing over site-independent C_sites: C_transit, A
+substitution emission matrix: T, C_transit, C_sites, K, A, A
+  > after marginalizing over site-independent C_sites and K: T, C_transit, A, A
 
 
 references:
@@ -42,7 +46,14 @@ from models.simple_site_class_predict.marg_over_alignments_forward_fns import (g
                                                                                ij_coords_to_wavefront_pos_at_diagonal_k,
                                                                                index_all_classes_one_state,
                                                                                wavefront_cache_lookup,
-                                                                               joint_loglike_emission_at_k_time_grid)
+                                                                               compute_forward_messages_for_state,
+                                                                               joint_loglike_emission_at_k_time_grid,
+                                                                               init_first_diagonal,
+                                                                               init_second_diagonal,
+                                                                               get_match_transition_message,
+                                                                               get_ins_transition_message,
+                                                                               get_del_transition_message,
+                                                                               update_cache)
 
 
 ###############################################################################
@@ -50,10 +61,10 @@ from models.simple_site_class_predict.marg_over_alignments_forward_fns import (g
 ###############################################################################
 # dims
 T = 1
-C_trans = 3
+C_transit = 3
 A = 20
 S = 4
-C_S = C_trans * (S-1) #use this for forward algo carry
+C_S = C_transit * (S-1) #use this for forward algo carry
 
 # time
 t_array = jnp.array( [1.0] )
@@ -65,7 +76,7 @@ t_array = jnp.array( [1.0] )
 # use real model object for transition matrix
 transit_model = TKF92TransitionLogprobs( config={'tkf_function': 'regular_tkf',
                                                  'num_domain_mixtures': 1,
-                                                 'num_fragment_mixtures': C_trans},
+                                                 'num_fragment_mixtures': C_transit},
                                          name = 'transit_mat' )
 init_params = transit_model.init( rngs = jax.random.key(0),
                                   t_array = t_array,
@@ -76,18 +87,18 @@ out = transit_model.apply( variables = init_params,
                            t_array = t_array,
                            return_all_matrices = False,
                            sow_intermediates = False )
-joint_logprob_transit = out[1]['joint'][:,0,...] #(T, C_trans_from, C_trans_to, S_from, S_to)
+joint_logprob_transit = out[1]['joint'][:,0,...] #(T, C_transit_prev, C_transit_curr, S_prev, S_curr)
 del transit_model, init_params, out
 
 # use dummy scoring matrices for emissions
 sub_emit_logits = jax.random.normal( key = jax.random.key(0),
-                                     shape = (T, C_trans, A, A) ) #(T, C_trans, A, A)
-joint_logprob_emit_at_match = nn.log_softmax(sub_emit_logits, axis=(-1,-2)) #(T, C_trans, A, A)
+                                     shape = (T, C_transit, A, A) ) #(T, C_transit, A, A)
+joint_logprob_emit_at_match = nn.log_softmax(sub_emit_logits, axis=(-1,-2)) #(T, C_transit, A, A)
 del sub_emit_logits
 
 indel_emit_logits = jax.random.normal( key = jax.random.key(0),
-                                     shape = (C_trans, A) ) #(C_trans, A)
-logprob_emit_at_indel = nn.log_softmax(indel_emit_logits, axis=-1) #(C_trans, A)
+                                     shape = (C_transit, A) ) #(C_transit, A)
+logprob_emit_at_indel = nn.log_softmax(indel_emit_logits, axis=-1) #(C_transit, A)
 del indel_emit_logits
 
 
@@ -213,7 +224,7 @@ B = unaligned_seqs.shape[0]
 L_seq = unaligned_seqs.shape[1]
 
 # widest diagonal for wavefront parallelism is min(anc_len, desc_len) + 1
-seq_lens = (unaligned_seqs != 0).sum(axis=1) #(B, 2)
+seq_lens = (unaligned_seqs != 0).sum(axis=1)-2 #(B, 2)
 min_lens = seq_lens.min(axis=1) #(B,)
 W = min_lens.max() + 1 #float
 del min_lens
@@ -233,7 +244,7 @@ def marginalize_state_and_class(aligns):
             # all possible path combinations
             invalid_toks = np.array([0,1,2])
             n = (  ~np.isin(sample_seq[:, 0], invalid_toks) ).sum()
-            paths = [list(p) for p in product(range(C_trans), repeat= int(n) )]
+            paths = [list(p) for p in product(range(C_transit), repeat= int(n) )]
             
             # manually score each possible path
             score_per_path = []
@@ -285,181 +296,115 @@ def marginalize_state_and_class(aligns):
 ###############################################################################
 ### 2D forward algo   #########################################################
 ###############################################################################
-### init
 # transpose transition matrix 
-# old: (T, C_trans_from, C_trans_to, S_from, S_to)
-# new: (T, C_trans_from, S_from, C_trans_to, S_to)
-joint_logprob_transit = jnp.transpose(joint_logprob_transit, (0,1,3,2,4)) # (T, C_trans_from, S_from, C_trans_to, S_to)
+# old: (T, C_transit_prev, C_transit_curr, S_prev, S_curr)
+# new: (T, C_transit_prev, S_prev, C_transit_curr, S_curr)
+joint_logprob_transit = jnp.transpose(joint_logprob_transit, (0,1,3,2,4)) # (T, C_transit_prev, S_prev, C_transit_curr, S_curr)
   
 
-### cache for wavefront diagonals
+################################################
+### Initialize cache for wavefront diagonals   #
+################################################
 # \tau = state, M/I/D
 # \nu = class (unique to combination of domain+fragment)
 # alpha_{ij}^{s_d} = P(desc_{...j}, anc_{...i}, \tau=s, \nu=d | t)
-#
-# diagonal runs from lower left to upper right:
-# (0,0)  (0,1)  (0,2)  (0,3)
-# (1,0)  (1,1)  (1,2)  (1,3)
-# (2,0)  (2,1)  (2,2)  (2,3)
-#
-# k0 = [ (0,0), <pad>, <pad> ]
-# k1 = [ (1,0), (0,1), <pad> ]
-# k2 = [ (2,0), (1,1), (0,2) ]
-# k3 = [ (2,1), (1,2), (0,3) ]
-# k4 = [ (2,2), (1,3), <pad> ]
-# k5 = [ (2,3), <pad>, <pad> ]
-#
 # dim0: 0=previous diagonal, 1=diag BEFORE previous diagonal
-# dim1: maximum diagonal length, W (pad before and after)
-# dim2: time, T
-# dim3: transition class and state (not including start/end), C_S
-# dim4: batch
 alpha = jnp.full( (2, W, T, C_S, B), jnp.finfo(jnp.float32).min )
 
+# fill diagonal k-2: alignment cells (1,0) and (0,1)
+alpha = init_first_diagonal( empty_cache = alpha, 
+                             unaligned_seqs = unaligned_seqs,
+                             joint_logprob_transit = joint_logprob_transit,
+                             logprob_emit_at_indel = logprob_emit_at_indel )  #(2, W, T, C_S, B)
 
-##########################################################
-### init diagonal k-2: alignment cells (1,0) and (0,1)   #
-##########################################################
-first_anc_toks = unaligned_seqs[:, 1, 0] #(B,)
-first_desc_toks = unaligned_seqs[:, 1, 1] #(B,)
-k=1
-# second_align_cell_idxes is (B, W, 2)
-# second_mask is (B, W)
-first_align_cell_idxes, first_mask = generate_ij_coords_at_diagonal_k(seq_lens = seq_lens,
-                                                          diagonal_k = k,
-                                                          widest_diag_W = W)
+# fill diag k-1: alignment cells (1,1), and (if applicable) (0,2) and/or (2,0)
+out = init_second_diagonal( cache_with_first_diag = alpha, 
+                            unaligned_seqs = unaligned_seqs,
+                            joint_logprob_transit = joint_logprob_transit,
+                            joint_logprob_emit_at_match = joint_logprob_emit_at_match,
+                            logprob_emit_at_indel = logprob_emit_at_indel ) 
 
-### first insert
-# alpha_{i=0, j=1}^{I_d} = Em( y_1 | \tau = I, \nu = d, t ) * Tr( \tau = I, \nu = d | Start, t )
-first_ins_emit = logprob_emit_at_indel[:, first_desc_toks - 3] #(C, B)
-start_ins_transit = joint_logprob_transit[:, 0, -1, :, 1] #(T, C)
-new_value = first_ins_emit[None,...] + start_ins_transit[...,None] #(T, C, B)
-
-#         dim0 = 1: corresponds to k-2
-#         dim1 = 0: at cell (1,0), which is the first element of the diagonal
-#             dim2: all times, add a new dim to handle indexing
-# dim3 = 1, 4, ...: at Ins for all classes, which is encoded as one
-#             dim4: all samples in the batch
-idx_to_reset = index_all_classes_one_state(state_idx=1,
-                                           num_transit_classes=C_trans) #(C,)
-alpha = alpha.at[1, 0, jnp.arange(T)[:,None], idx_to_reset[None,:], :].set( new_value ) # (2, W, T, C*S, B)
-del first_ins_emit, start_ins_transit, new_value, idx_to_reset
+alpha = out[0] #(2, W, T, C_S, B)
+joint_logprob_transit_mid_only = out[1] #(T, C_S_prev, C_S_curr )
+del out 
 
 
-### first delete
-# alpha_{i=1, j=0}^{D_d} = Em( x_1 | \tau = D, \nu = d, t ) * Tr( \tau = D, \nu = d | Start, t )
-first_del_emit = logprob_emit_at_indel[:, first_anc_toks - 3] #(C, B)
-start_del_transit = joint_logprob_transit[:, 0, -1, :, 2] #(T, C)
-new_value = first_del_emit[None,...] + start_del_transit[...,None] #(T, C, B)
+########################
+### Start Recurrence   #
+########################
+# try this out with k = 3 first, to get feel for jax.lax.scan
+k = 3
+previous_cache = alpha
 
-#         dim0 = 1: corresponds to k-2
-#         dim1 = 1: at cell (0,1), which is the second element of the diagonal
-#             dim2: all times, add a new dim to handle indexing
-# dim3 = 2, 5, ...: at Del for all classes, which is encoded as two
-#             dim4: all samples in the batch
-idx_to_reset = index_all_classes_one_state(state_idx=2,
-                                           num_transit_classes=C_trans) #(C,)
-alpha = alpha.at[1, 1, jnp.arange(T)[:,None], idx_to_reset[None,:], :].set( new_value ) # (2, W, T, C*S, B)
-del first_del_emit, start_del_transit, new_value, idx_to_reset
+# cache to fill
+cache_at_curr_k = jnp.full( (W, T, C_S, B), jnp.finfo(jnp.float32).min ) # (W, T, C*S, B)
 
-# remove S/E transitions, and merge class and state dims
-joint_logprob_transit_mid_only = jnp.reshape(joint_logprob_transit[:, :, :3, :, :3], (T, C_S, C_S)) #(T, C*S_from, C*S_to)
+# align_cell_idxes is (B, W, 2)
+# pad_mask is (B, W)
+align_cell_idxes, pad_mask = generate_ij_coords_at_diagonal_k(seq_lens = seq_lens,
+                                                              diagonal_k = k,
+                                                              widest_diag_W = W)
 
+### update with transitions
+# match
+# match_idx is (C_trans,) 
+# match_transition_message is (W, T, C_trans, B)
+match_idx, match_transition_message = get_match_transition_message( align_cell_idxes = align_cell_idxes,
+                                                                    pad_mask = pad_mask,
+                                                                    cache_at_curr_diagonal = cache_at_curr_k,
+                                                                    cache_two_diags_prior = previous_cache[1,...],
+                                                                    seq_lens = seq_lens,
+                                                                    joint_logprob_transit_mid_only = joint_logprob_transit_mid_only,
+                                                                    C_transit = C_transit )
+cache_at_curr_k = update_cache(idx_arr_for_state = match_idx, 
+                               transit_message = match_transition_message, 
+                               cache_to_update = cache_at_curr_k) # (W, T, C*S, B)
 
-##############################################################
-### init diagonal k-1: alignment cells (2,0), (1,1), (0,2)   #
-##############################################################
-k=2
-# second_align_cell_idxes is (B, W, 2)
-# second_mask is (B, W)
-second_align_cell_idxes, second_mask = generate_ij_coords_at_diagonal_k(seq_lens = seq_lens,
-                                                            diagonal_k = k,
-                                                            widest_diag_W = W)
+# ins
+# ins_idx is (C_trans,) 
+# ins_transition_message is (W, T, C_trans, B)
+ins_idx, ins_transition_message = get_ins_transition_message( align_cell_idxes = align_cell_idxes,
+                                                              pad_mask = pad_mask,
+                                                              cache_at_curr_diagonal = cache_at_curr_k,
+                                                              cache_for_prev_diagonal = previous_cache[0,...],
+                                                              seq_lens = seq_lens,
+                                                              joint_logprob_transit_mid_only = joint_logprob_transit_mid_only,
+                                                              C_transit = C_transit )
+cache_at_curr_k = update_cache(idx_arr_for_state = ins_idx, 
+                               transit_message = ins_transition_message, 
+                               cache_to_update = cache_at_curr_k) # (W, T, C*S, B)
 
-### transitions for ins:
-### alpha_{i,j}^{I,d} = \sum_{s \in \{M,I,D\}, c in C_trans} Tr(I,d|s,c,t) * alpha_{i,j-1}^{s_c}
-# need (i,j-1) values; get this from alpha[1,...]
-ins_ij_needed = second_align_cell_idxes.at[...,1].add(-1) #(B, W, 2)
-ins_cache_raw = wavefront_cache_lookup(ij_needed_for_k = ins_ij_needed, 
-                                       pad_mask_at_k = second_mask, 
-                                       cache_for_prev_diagonal = alpha[1,...], 
-                                       seq_lens = seq_lens, 
-                                       pad_val = jnp.finfo(jnp.float32).min) #(W, T, C_S, B)
+# del
+# del_idx is (C_trans,) 
+# del_transition_message is (W, T, C_trans, B)
+del_idx, del_transition_message = get_del_transition_message( align_cell_idxes = align_cell_idxes,
+                                                              pad_mask = pad_mask,
+                                                              cache_at_curr_diagonal = cache_at_curr_k,
+                                                              cache_for_prev_diagonal = previous_cache[0,...],
+                                                              seq_lens = seq_lens,
+                                                              joint_logprob_transit_mid_only = joint_logprob_transit_mid_only,
+                                                              C_transit = C_transit )
+cache_at_curr_k = update_cache(idx_arr_for_state = del_idx, 
+                               transit_message = del_transition_message,  
+                               cache_to_update = cache_at_curr_k) # (W, T, C*S, B)
 
-# only keep values where C_S is ins
-ins_idx = index_all_classes_one_state(state_idx = 1,
-                                      num_transit_classes = C_trans) #(C,)
-ins_cache = ins_cache_raw[:, :, ins_idx, :] #(W, T, C_to, B)
+### update with emissions
+# get emission tokens; at padding positions in diagonal, these will also be pad
+anc_toks_at_diag_k = unaligned_seqs[jnp.arange(B)[:, None], align_cell_idxes[...,0], 0] #(B, W)
+desc_toks_at_diag_k = unaligned_seqs[jnp.arange(B)[:, None], align_cell_idxes[...,1], 1] #(B, W)
 
-# multiply by transitions, then sum over C_S_from (in log space, add then LSE)
-mid_to_ins_transit = joint_logprob_transit_mid_only[:, :, ins_idx] #(T, C_S_from, C_to)
-ins_alpha_times_transit = ins_cache[:, :, None, :, :] + mid_to_ins_transit[None, :, :, :, None]  #(W, T, C_S_from, C_to, B)
-ins_alpha_times_transit = logsumexp(ins_alpha_times_transit, axis=2) #(W, T, C_to, B)
-
-# update values in alpha
-#         dim0 = 0: corresponds to k-1
-#             dim1: across entire diagonal
-#             dim2: all times
-# dim3 = 1, 4, ...: at Ins for all classes, which is encoded as one
-#             dim4: all samples in the batch
-alpha = alpha.at[0, jnp.arange(W)[:, None, None], jnp.arange(T)[None, :, None], ins_idx[None, None, :], :].set( ins_alpha_times_transit ) # (2, W, T, C*S, B)
-del ins_ij_needed, ins_cache_raw, ins_idx, ins_cache, mid_to_ins_transit, ins_alpha_times_transit
-
-
-### transitions for del
-# need (i-1,j) values; get this from alpha[1,...]
-del_ij_needed = second_align_cell_idxes.at[...,0].add(-1) #(B, W, 2)
-del_cache_raw = wavefront_cache_lookup(ij_needed_for_k = del_ij_needed, 
-                                       pad_mask_at_k = second_mask, 
-                                       cache_for_prev_diagonal = alpha[1,...], 
-                                       seq_lens = seq_lens, 
-                                       pad_val = jnp.finfo(jnp.float32).min) #(W, T, C_S, B)
-
-# only keep values where C_S is del
-del_idx = index_all_classes_one_state(state_idx = 2,
-                                      num_transit_classes = C_trans) #(C,)
-del_cache = del_cache_raw[:, :, del_idx, :] #(W, T, C_to, B)
-
-# multiply by transitions, then sum over C_S_from (in log space, add then LSE)
-mid_to_del_transit = joint_logprob_transit_mid_only[:, :, del_idx] #(T, C_S_from, C_to)
-del_alpha_times_transit = del_cache[:, :, None, :, :] + mid_to_del_transit[None, :, :, :, None]  #(W, T, C_S_from, C_to, B)
-del_alpha_times_transit = logsumexp(del_alpha_times_transit, axis=2) #(W, T, C_to, B)
-
-# update values in alpha
-#         dim0 = 0: corresponds to k-1
-#             dim1: across entire diagonal
-#             dim2: all times
-# dim3 = 2, 5, ...: at Del for all classes, which is encoded as two
-#             dim4: all samples in the batch
-alpha = alpha.at[0, jnp.arange(W)[:, None, None], jnp.arange(T)[None, :, None], del_idx[None, None, :], :].set( del_alpha_times_transit ) # (2, W, T, C*S, B)
-del del_ij_needed, del_cache_raw, del_idx, del_cache, mid_to_del_transit, del_alpha_times_transit
+# use emissions to index scoring matrices
+#   at invalid positions, this is ZERO (not jnp.finfo(jnp.float32).min)!!!
+#   later, will add this to log-probability of transitions, so at invalid 
+#   positions, adding zero is the same as skipping the operation
+emit_logprobs_at_k = joint_loglike_emission_at_k_time_grid( anc_toks = anc_toks_at_diag_k,
+                                                            desc_toks = desc_toks_at_diag_k,
+                                                            joint_logprob_emit_at_match = joint_logprob_emit_at_match,
+                                                            logprob_emit_at_indel = logprob_emit_at_indel, 
+                                                            fill_invalid_pos_with = 0.0 ) # (W, T, C*S, B)
+cache_at_curr_k = cache_at_curr_k + emit_logprobs_at_k # (W, T, C*S, B)
 
 
-
-### TODO: deal with all emissions (match values wil be overwritten later)
-# extract anc_idx and desc_idx for (2,0), (1,1), and (0,2)
-# use joint_loglike_emission_at_k_time_grid to get emission values
-# replace all alpha values
-
-
-
-
-#%%
-### match: S->M is only valid move at cell (1,1); replace this manually
-# alpha_{i=1, j=1}^{M_d} = Em( x_1, y_1 | \tau = I, \nu = d, t ) * Tr( \tau = M, \nu = d | Start, t )
-first_match_emit = joint_logprob_emit_at_match[:, :, first_anc_toks - 3, first_desc_toks - 3] #(T, C, B)
-start_match_transit = joint_logprob_transit[:, 0, -1, :, 0] #(T, C)
-new_value = first_match_emit + start_match_transit[...,None] #(T, C, B)
-
-#         dim0 = 0: corresponds to k-1
-#         dim1 = 1: at cell (1,1), which is the second element of the diagonal
-#             dim2: all times, add a new dim to handle indexing
-# dim3 = 0, 3, ...: at Match for all classes, which is encoded as zero
-#             dim4: all samples in the batch
-idx_to_reset = index_all_classes_one_state(state_idx = 0,
-                                           num_transit_classes = C_trans) #(C,)
-alpha = alpha.at[0, 1, jnp.arange(T)[:,None], idx_to_reset[None,:], :].set( new_value ) # (2, W, T, C*S, B)
-del first_match_emit, start_match_transit, new_value, idx_to_reset
-
+# TODO: does this automatically handle end states...?
 
 
