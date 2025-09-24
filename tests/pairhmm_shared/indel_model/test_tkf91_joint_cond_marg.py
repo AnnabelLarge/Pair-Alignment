@@ -94,7 +94,7 @@ class TestTKF91JointCondMarg(unittest.TestCase):
                                     sow_intermediates = False)
         
         log_pred =  my_model.apply(variables = fake_params,
-                                   out_dict = my_tkf_params,
+                                   tkf_param_dict = my_tkf_params,
                                    method = 'fill_joint_tkf91') #(T, 1, 4, 4)
         
         # check shape
@@ -199,7 +199,7 @@ class TestTKF91JointCondMarg(unittest.TestCase):
                                     sow_intermediates = False)
         
         log_joint_tkf91 =  my_model.apply(variables = fake_params,
-                                      out_dict = my_tkf_params,
+                                      tkf_param_dict = my_tkf_params,
                                       method = 'fill_joint_tkf91') #(T, 1, 4, 4)
         
         log_marg_tkf91 = get_tkf91_single_seq_marginal_transition_logprobs(offset) #(2, 2)

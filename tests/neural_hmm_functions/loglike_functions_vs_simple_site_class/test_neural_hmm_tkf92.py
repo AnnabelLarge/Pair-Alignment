@@ -55,11 +55,11 @@ class TestTKF92(unittest.TestCase):
                                    unique_time_per_sample = False )[:,0,0,...] #(T,4,4)
     
         # reference implementation
-        true_tkf_params,_ = pairhmm_regular_tkf( mu = mu,
-                                                 offset = offset,
+        true_tkf_params,_ = pairhmm_regular_tkf( mu = mu[None],
+                                                 offset = offset[None],
                                                  t_array = self.t_array )
-        true_tkf_params['log_one_minus_offset'] = jnp.log( 1-offset )
-        true_tkf_params['log_offset'] = jnp.log( offset )
+        true_tkf_params['log_one_minus_offset'] = jnp.log( 1-offset[None] )
+        true_tkf_params['log_offset'] = jnp.log( offset[None] )
         
         my_model = TKF92TransitionLogprobs(config={'num_fragment_mixtures': 1,
                                                    'num_domain_mixtures': 1,
@@ -71,14 +71,14 @@ class TestTKF92(unittest.TestCase):
                                    sow_intermediates=False)
         
         true_joint_mat = my_model.apply( variables=init_vars,
-                                         out_dict=true_tkf_params,
+                                         tkf_param_dict=true_tkf_params,
                                          r_extend=r[None,None],
                                          frag_class_probs = jnp.ones((1,1)),
                                          method='fill_joint_tkf92'
                                          )
         
         true_all_mats = my_model.apply( variables=init_vars,
-                                         offset=offset,
+                                         offset=offset[None],
                                          frag_class_probs = jnp.ones((1,1)),
                                          r_ext_prob=r[None,None],
                                          joint_matrix=true_joint_mat,
@@ -113,11 +113,11 @@ class TestTKF92(unittest.TestCase):
             for l in range(L):
                 pred = pred_cond[:,b,l,...] #(T,4,4)
                 
-                true_tkf_params,_ = pairhmm_regular_tkf( mu = mu[b,l],
-                                                          offset = offset[b,l],
+                true_tkf_params,_ = pairhmm_regular_tkf( mu = mu[b,l][None],
+                                                          offset = offset[b,l][None],
                                                           t_array = self.t_array )
-                true_tkf_params['log_one_minus_offset'] = jnp.log( 1-offset[b,l] )[None]
-                true_tkf_params['log_offset'] = jnp.log( offset[b,l] )[None]
+                true_tkf_params['log_one_minus_offset'] = jnp.log( 1-offset[b,l][None] )
+                true_tkf_params['log_offset'] = jnp.log( offset[b,l][None] )
                 
                 my_model = TKF92TransitionLogprobs(config={'num_fragment_mixtures': 1,
                                                             'num_domain_mixtures': 1,
@@ -129,14 +129,14 @@ class TestTKF92(unittest.TestCase):
                                             sow_intermediates=False)
                 
                 true_joint_mat = my_model.apply( variables=init_vars,
-                                                  out_dict=true_tkf_params,
+                                                  tkf_param_dict=true_tkf_params,
                                                   r_extend=r[None,None],
                                                   frag_class_probs = jnp.ones((1,1)),
                                                   method='fill_joint_tkf92'
                                                   )
                 
                 true_all_mats = my_model.apply( variables=init_vars,
-                                                  offset=offset[b,l],
+                                                  offset=offset[b,l][None],
                                                   frag_class_probs = jnp.ones((1,1)),
                                                   r_ext_prob=r[None,None],
                                                   joint_matrix=true_joint_mat,
@@ -171,11 +171,11 @@ class TestTKF92(unittest.TestCase):
             for l in range(L):
                 pred = pred_cond[:,b,l,...] #(T,4,4)
                 
-                true_tkf_params,_ = pairhmm_regular_tkf( mu = mu,
-                                                          offset = offset,
+                true_tkf_params,_ = pairhmm_regular_tkf( mu = mu[None],
+                                                          offset = offset[None],
                                                           t_array = self.t_array )
-                true_tkf_params['log_one_minus_offset'] = jnp.log( 1-offset )
-                true_tkf_params['log_offset'] = jnp.log( offset )
+                true_tkf_params['log_one_minus_offset'] = jnp.log( 1-offset[None] )
+                true_tkf_params['log_offset'] = jnp.log( offset[None] )
                 
                 my_model = TKF92TransitionLogprobs(config={'num_fragment_mixtures': 1,
                                                             'num_domain_mixtures': 1,
@@ -187,14 +187,14 @@ class TestTKF92(unittest.TestCase):
                                             sow_intermediates=False)
                 
                 true_joint_mat = my_model.apply( variables=init_vars,
-                                                  out_dict=true_tkf_params,
+                                                  tkf_param_dict=true_tkf_params,
                                                   r_extend=r[b,l][None,None],
                                                   frag_class_probs = jnp.ones((1,1)),
                                                   method='fill_joint_tkf92'
                                                   )
                 
                 true_all_mats = my_model.apply( variables=init_vars,
-                                                  offset=offset,
+                                                  offset=offset[None],
                                                   frag_class_probs = jnp.ones((1,1)),
                                                   r_ext_prob=r[b,l][None,None],
                                                   joint_matrix=true_joint_mat,
@@ -229,11 +229,11 @@ class TestTKF92(unittest.TestCase):
             for l in range(L):
                 pred = pred_cond[:,b,l,...] #(T,4,4)
                 
-                true_tkf_params,_ = pairhmm_regular_tkf( mu = mu[b,l],
-                                                          offset = offset[b,l],
+                true_tkf_params,_ = pairhmm_regular_tkf( mu = mu[b,l][None],
+                                                          offset = offset[b,l][None],
                                                           t_array = self.t_array )
-                true_tkf_params['log_one_minus_offset'] = jnp.log( 1-offset[b,l] )[None]
-                true_tkf_params['log_offset'] = jnp.log( offset[b,l] )[None]
+                true_tkf_params['log_one_minus_offset'] = jnp.log( 1-offset[b,l][None] )
+                true_tkf_params['log_offset'] = jnp.log( offset[b,l][None] )
                 
                 my_model = TKF92TransitionLogprobs(config={'num_fragment_mixtures': 1,
                                                             'num_domain_mixtures': 1,
@@ -245,14 +245,14 @@ class TestTKF92(unittest.TestCase):
                                             sow_intermediates=False)
                 
                 true_joint_mat = my_model.apply( variables=init_vars,
-                                                  out_dict=true_tkf_params,
+                                                  tkf_param_dict=true_tkf_params,
                                                   r_extend=r[b,l][None,None],
                                                   frag_class_probs = jnp.ones((1,1)),
                                                   method='fill_joint_tkf92'
                                                   )
                 
                 true_all_mats = my_model.apply( variables=init_vars,
-                                                  offset=offset[b,l],
+                                                  offset=offset[b,l][None],
                                                   frag_class_probs = jnp.ones((1,1)),
                                                   r_ext_prob=r[b,l][None,None],
                                                   joint_matrix=true_joint_mat,

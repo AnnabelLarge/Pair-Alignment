@@ -129,6 +129,5 @@ class TestScoreIndels(unittest.TestCase):
         npt.assert_allclose(true_scores, pred_scores)
 
 
-
 if __name__ == '__main__':
     unittest.main()

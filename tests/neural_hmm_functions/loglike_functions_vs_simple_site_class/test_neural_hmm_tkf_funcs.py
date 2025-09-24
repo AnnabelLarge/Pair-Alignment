@@ -30,8 +30,8 @@ class TestTKFFuncs(unittest.TestCase):
                            ref_fn,
                            mu,
                            offset):
-        true_out,_ = ref_fn( mu = mu,
-                             offset = offset,
+        true_out,_ = ref_fn( mu = mu[None],
+                             offset = offset[None],
                              t_array = self.t_array )
         
         pred_out,_ = neural_fn( mu = mu[None,None], 
@@ -40,24 +40,25 @@ class TestTKFFuncs(unittest.TestCase):
                                 unique_time_per_sample = False )
         
         for key in pred_out.keys():
-            pred = pred_out[key][:,0,0]
-            npt.assert_allclose(pred, true_out[key])
+            pred = np.squeeze( pred_out[key] )
+            true = np.squeeze( true_out[key] )
+            npt.assert_allclose(pred, true)
     
     def test_one_regular_tkf(self):
         mu = jnp.array(0.06)
         offset = jnp.array(0.01)
         self._single_model_test( neural_fn = neural_regular_tkf,
-                                 ref_fn = pairhmm_regular_tkf,
-                                 mu=mu,
-                                 offset=offset )
+                                  ref_fn = pairhmm_regular_tkf,
+                                  mu=mu,
+                                  offset=offset )
     
     def test_one_approx_tkf(self):
         mu = jnp.array(0.06)
         offset = jnp.array(0.01)
         self._single_model_test( neural_fn = neural_approx_tkf,
-                                 ref_fn = pairhmm_approx_tkf,
-                                 mu=mu,
-                                 offset=offset )
+                                  ref_fn = pairhmm_approx_tkf,
+                                  mu=mu,
+                                  offset=offset )
     
     def _multi_model_test(self,
                           neural_fn, 
@@ -74,13 +75,15 @@ class TestTKFFuncs(unittest.TestCase):
         
         for b in range(B):
             for l in range(L):
-                true_out,_ = ref_fn( mu = mu[b,l],
-                                      offset = offset[b,l],
+                true_out,_ = ref_fn( mu = mu[b,l][None],
+                                      offset = offset[b,l][None],
                                       t_array = self.t_array )
-        
+                
                 for key in pred_out.keys():
-                    pred = pred_out[key][:,b,l]
-                    npt.assert_allclose(pred, true_out[key])
+                    pred = np.squeeze( pred_out[key][:,b,l] )
+                    true = np.squeeze( true_out[key] )
+                    
+                    npt.assert_allclose(pred, true)
     
     def test_multi_regular_tkf(self):
         mu = jnp.array([[0.1, 0.2, 0.3],
@@ -88,9 +91,9 @@ class TestTKFFuncs(unittest.TestCase):
         offset = jnp.array([[0.01, 0.02, 0.03],
                             [0.04, 0.05, 0.06]])
         self._multi_model_test( neural_fn = neural_regular_tkf,
-                                 ref_fn = pairhmm_regular_tkf,
-                                 mu=mu,
-                                 offset=offset )
+                                  ref_fn = pairhmm_regular_tkf,
+                                  mu=mu,
+                                  offset=offset )
     
     def test_multi_approx_tkf(self):
         mu = jnp.array([[0.1, 0.2, 0.3],

@@ -110,7 +110,7 @@ class TestTKF92ReductionToTKF91(unittest.TestCase):
                                                 sow_intermediates = False)
         
         log_joint_tkf91 = self.tkf91_mod.apply(variables = fake_tkf91_params,
-                                               out_dict = tkf_param_dict,
+                                               tkf_param_dict = tkf_param_dict,
                                                method = 'fill_joint_tkf91') #(T, C_dom, 4, 4)
         
         # check size
@@ -124,7 +124,7 @@ class TestTKF92ReductionToTKF91(unittest.TestCase):
                                                 sow_intermediates = False)
         
         log_joint_tkf92_in_parts =  self.tkf92_mod.apply(variables = fake_tkf92_params,
-                                                      out_dict = tkf_param_dict,
+                                                      tkf_param_dict = tkf_param_dict,
                                                       r_extend = self.r_mix,
                                                       frag_class_probs = self.fragment_class_probs,
                                                       method = 'fill_joint_tkf92') #(T, C_dom, C_frag, C_frag, 4, 4)
@@ -205,7 +205,7 @@ class TestTKF92ReductionToTKF91(unittest.TestCase):
                                                 sow_intermediates = False)
         
         log_joint_tkf91 = self.tkf91_mod.apply(variables = fake_tkf91_params,
-                                                out_dict = dummy_tkf_param_dict,
+                                                tkf_param_dict = dummy_tkf_param_dict,
                                                 method = 'fill_joint_tkf91') #(T, C_dom, 4, 4)
         
         all_tkf91 = self.tkf91_mod.apply(variables = fake_tkf91_params,
@@ -221,7 +221,7 @@ class TestTKF92ReductionToTKF91(unittest.TestCase):
                                                 sow_intermediates = False)
         
         log_joint_tkf92 =  self.tkf92_mod.apply(variables = fake_tkf92_params,
-                                                      out_dict = dummy_tkf_param_dict,
+                                                      tkf_param_dict = dummy_tkf_param_dict,
                                                       r_extend = self.r_mix,
                                                       frag_class_probs = self.fragment_class_probs,
                                                       method = 'fill_joint_tkf92') #(T, C_dom, C_frag, C_frag, 4, 4)
@@ -300,7 +300,7 @@ class TestTKF92ReductionToTKF91(unittest.TestCase):
                                                 sow_intermediates = False)
         
         log_joint_tkf91 = self.tkf91_mod.apply(variables = fake_tkf91_params,
-                                                out_dict = tkf_param_dict,
+                                                tkf_param_dict = tkf_param_dict,
                                                 method = 'fill_joint_tkf91') #(T, C_dom, 4, 4)
         
         all_tkf91 = self.tkf91_mod.apply(variables = fake_tkf91_params,
@@ -320,7 +320,7 @@ class TestTKF92ReductionToTKF91(unittest.TestCase):
                                                 sow_intermediates = False)
         
         log_joint_tkf92 =  self.tkf92_mod.apply(variables = fake_tkf92_params,
-                                                      out_dict = tkf_param_dict,
+                                                      tkf_param_dict = tkf_param_dict,
                                                       r_extend = self.r_mix,
                                                       frag_class_probs = self.fragment_class_probs,
                                                       method = 'fill_joint_tkf92') #(T, C_dom, C_frag, C_frag, 4, 4)

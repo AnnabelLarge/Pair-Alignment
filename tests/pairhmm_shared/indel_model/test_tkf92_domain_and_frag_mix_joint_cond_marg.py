@@ -291,7 +291,7 @@ class TestTKF92DomainAndFragMixJointCondMarg(unittest.TestCase):
                                     sow_intermediates = False)
         
         log_pred =  my_model.apply(variables = fake_params,
-                                    out_dict = my_tkf_params,
+                                    tkf_param_dict = my_tkf_params,
                                     r_extend = self.r_mix,
                                     frag_class_probs = self.fragment_class_probs,
                                     method = 'fill_joint_tkf92') #(T, C_dom, C_frag, C_frag, 4, 4)
@@ -442,7 +442,7 @@ class TestTKF92DomainAndFragMixJointCondMarg(unittest.TestCase):
                                     sow_intermediates = False)
         
         log_joint_tkf92 =  my_model.apply(variables = fake_params,
-                                    out_dict = my_tkf_params,
+                                    tkf_param_dict = my_tkf_params,
                                     r_extend = self.r_mix,
                                     frag_class_probs = self.fragment_class_probs,
                                     method = 'fill_joint_tkf92') #(T, C_dom, C_frag, C_frag, 4, 4)

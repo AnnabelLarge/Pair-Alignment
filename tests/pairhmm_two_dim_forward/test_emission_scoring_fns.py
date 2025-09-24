@@ -27,7 +27,7 @@ class TestEmissionScoringFns(unittest.TestCase):
         self.desc_toks = jnp.array( [[6, 5, 4, 3, 3],
                                      [3, 6, 6, 6, 3],
                                      [3, 6, 6, 0, 0],
-                                     [3, 4, 5, 1, 0]] ) #(B, W)
+                                     [3, 4, 5, 5, 0]] ) #(B, W)
         
         self.mask = (self.anc_toks != 0 ) #(B, W)
         
@@ -56,11 +56,10 @@ class TestEmissionScoringFns(unittest.TestCase):
         
         
         ### by my function
-        pred_out = joint_loglike_emission_at_k_time_grid(self.anc_toks,
-                                                         self.desc_toks,
-                                                         self.mask,
-                                                         joint_logprob_emit_at_match,
-                                                         logprob_emit_at_indel) #(W, T, C*S-1, B)
+        pred_out = joint_loglike_emission_at_k_time_grid( anc_toks = self.anc_toks,
+                                                          desc_toks = self.desc_toks,
+                                                          joint_logprob_emit_at_match = joint_logprob_emit_at_match,
+                                                          logprob_emit_at_indel = logprob_emit_at_indel) #(W, T, C*S-1, B)
         
         
         ### true value
@@ -83,11 +82,11 @@ class TestEmissionScoringFns(unittest.TestCase):
                                             true_del_val], axis=-1 ) #(T, C_trans, S-1)
                     true_c_s = jnp.reshape(true_c_s, (T, C_trans * 3)) #(T, C_trans*S-1)
                     
-                    npt.assert_allclose( pred_out[w, :, :, b], true_c_s ), f'{b}, {w}'
+                    npt.assert_allclose( pred_out[w, :, :, b], true_c_s )
                     
                 elif not score_pos:
                     npt.assert_allclose( pred_out[w, :, :, b], 
-                                         jnp.zeros( pred_out[w, :, :, b].shape ) ), f'{b}, {w}'
+                                         jnp.zeros( pred_out[w, :, :, b].shape ) )
     
     
     def test_uniq_time_per_samp(self):
@@ -110,11 +109,10 @@ class TestEmissionScoringFns(unittest.TestCase):
         
         
         ### by my function
-        pred_out = joint_loglike_emission_at_k_len_per_samp(self.anc_toks,
-                                                            self.desc_toks,
-                                                            self.mask,
-                                                            joint_logprob_emit_at_match,
-                                                            logprob_emit_at_indel) #(W, C*S-1, B)
+        pred_out = joint_loglike_emission_at_k_len_per_samp( anc_toks = self.anc_toks,
+                                                          desc_toks = self.desc_toks,
+                                                          joint_logprob_emit_at_match = joint_logprob_emit_at_match,
+                                                          logprob_emit_at_indel = logprob_emit_at_indel) #(W, C*S-1, B)
         
         ### true value
         for b in range(B):
@@ -137,7 +135,7 @@ class TestEmissionScoringFns(unittest.TestCase):
                 
                 elif not score_pos:
                     npt.assert_allclose( pred_out[w, :, b], 
-                                         jnp.zeros( pred_out[w, :, b].shape ) ), f'{b}, {w}'
+                                          jnp.zeros( pred_out[w, :, b].shape ) ), f'{b}, {w}'
                   
                     
 if __name__ == '__main__':

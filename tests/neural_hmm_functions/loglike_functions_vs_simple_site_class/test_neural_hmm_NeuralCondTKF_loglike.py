@@ -25,7 +25,7 @@ THRESHOLD = 1e-6
 
 class TestNeuralLoglikeVsPairhmmLoglike(unittest.TestCase):
     def setUp(self):
-        self.path = 'tests/TODO_neural_hmm_functions/loglike_functions_vs_simple_site_class'
+        self.path = 'tests/neural_hmm_functions/loglike_functions_vs_simple_site_class'
         self.req_files_loc = f'{self.path}/req_files'
         
         ### fake alignments
@@ -252,12 +252,15 @@ class TestNeuralLoglikeVsPairhmmLoglike(unittest.TestCase):
                                         logprob_emit_indel=logprob_emit_indel,
                                         logprob_transits=cond_logprob_transits,
                                         corr=corr_factors,
+                                        rate_multiplier=jnp.ones((1,1)),
                                         true_out=self.fake_aligns_neural,
                                         method='neg_loglike_in_scan_fn')
+            logprob_perSamp_perTime = raw_scores['logprob_perSamp_perTime']
             
             _, pred_scores = jitted_apply( variables=init_params,
-                                           logprob_perSamp_perTime=raw_scores,
-                                           length_for_normalization_for_reporting=jnp.ones(raw_scores.shape),
+                                           logprob_perSamp_perTime=logprob_perSamp_perTime,
+                                           loss_dict=raw_scores,
+                                           length_for_normalization_for_reporting=jnp.ones(logprob_perSamp_perTime.shape),
                                            t_array=t_array,
                                            method='evaluate_loss_after_scan')
         
@@ -267,12 +270,15 @@ class TestNeuralLoglikeVsPairhmmLoglike(unittest.TestCase):
                                         logprob_emit_indel=logprob_emit_indel,
                                         logprob_transits=cond_logprob_transits,
                                         corr=corr_factors,
+                                        rate_multiplier=jnp.ones((1,1)),
                                         true_out=self.fake_aligns_neural,
                                         method='neg_loglike_in_scan_fn') #(T,B) or (B,L)
+            logprob_perSamp_perTime = raw_scores['logprob_perSamp_perTime']
         
             _, pred_scores = neural.apply( variables=init_params,
-                                           logprob_perSamp_perTime=raw_scores,
-                                           length_for_normalization_for_reporting=jnp.ones(raw_scores.shape),
+                                           logprob_perSamp_perTime=logprob_perSamp_perTime,
+                                           loss_dict=raw_scores,
+                                           length_for_normalization_for_reporting=jnp.ones(logprob_perSamp_perTime.shape),
                                            t_array=t_array,
                                            method='evaluate_loss_after_scan')
         pred_cond_neg_logP = pred_scores['sum_neg_logP']

@@ -176,7 +176,7 @@ class TestMatchCacheIndexing(unittest.TestCase):
                                                     pad_mask_at_k = wf_pad_mask, 
                                                     cache_for_prev_diagonal = cache_to_read, 
                                                     seq_lens = seq_lens, 
-                                                    pad_val = 0) #(W, T, C_S, B)
+                                                    fill_invalid_pos_with = 0) #(W, T, C_S, B)
             
             npt.assert_allclose(pred_match_cache, true_match_cache), k
             

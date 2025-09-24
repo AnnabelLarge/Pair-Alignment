@@ -175,7 +175,7 @@ class TestTKF92JointCondMarg(unittest.TestCase):
                                     sow_intermediates = False)
         
         log_pred =  my_model.apply(variables = fake_params,
-                                    out_dict = my_tkf_params,
+                                    tkf_param_dict = my_tkf_params,
                                     r_extend = r,
                                     frag_class_probs = jnp.ones( (C_dom, C_frag) ),
                                     method = 'fill_joint_tkf92') #(T, C_dom, 1, 1, 4, 4)
@@ -321,7 +321,7 @@ class TestTKF92JointCondMarg(unittest.TestCase):
                                     sow_intermediates = False)
         
         log_joint_tkf92 =  my_model.apply(variables = fake_params,
-                                    out_dict = my_tkf_params,
+                                    tkf_param_dict = my_tkf_params,
                                     r_extend = r,
                                     frag_class_probs = jnp.ones( (C_dom, C_frag) ),
                                     method = 'fill_joint_tkf92') #(T, C_dom, 1, 1, 4, 4)

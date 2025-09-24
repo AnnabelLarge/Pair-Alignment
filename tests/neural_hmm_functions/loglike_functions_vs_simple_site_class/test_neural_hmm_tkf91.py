@@ -50,11 +50,11 @@ class TestTKF91(unittest.TestCase):
                                    unique_time_per_sample = False )[:,0,0,...] #(T,4,4)
     
         # reference implementation
-        true_tkf_params,_ = pairhmm_regular_tkf( mu = mu,
-                                                 offset = offset,
+        true_tkf_params,_ = pairhmm_regular_tkf( mu = mu[None],
+                                                 offset = offset[None],
                                                  t_array = self.t_array )
-        true_tkf_params['log_one_minus_offset'] = jnp.log( 1-offset )
-        true_tkf_params['log_offset'] = jnp.log( offset )
+        true_tkf_params['log_one_minus_offset'] = jnp.log( 1-offset[None] )
+        true_tkf_params['log_offset'] = jnp.log( offset[None] )
         
         my_model = TKF91TransitionLogprobs(config={'num_fragment_mixtures': 1,
                                                    'num_domain_mixtures': 1,
@@ -66,7 +66,7 @@ class TestTKF91(unittest.TestCase):
                                    sow_intermediates=False)
         
         true_joint_mat = my_model.apply( variables=init_vars,
-                                         out_dict=true_tkf_params,
+                                         tkf_param_dict=true_tkf_params,
                                          method='fill_joint_tkf91'
                                          )
         
@@ -76,6 +76,9 @@ class TestTKF91(unittest.TestCase):
                                          method='return_all_matrices'
                                          )
         true_cond = true_all_mats['conditional'] #(T, 4, 4)
+        
+        pred_cond = np.squeeze(pred_cond)
+        true_cond = np.squeeze(true_cond)
         
         npt.assert_allclose(pred_cond, true_cond, atol=THRESHOLD)
         
@@ -102,8 +105,8 @@ class TestTKF91(unittest.TestCase):
             for l in range(L):
                 pred = pred_cond[:,b,l,...] #(T,4,4)
                 
-                true_tkf_params,_ = pairhmm_regular_tkf( mu = mu[b,l],
-                                                         offset = offset[b,l],
+                true_tkf_params,_ = pairhmm_regular_tkf( mu = mu[b,l][None],
+                                                         offset = offset[b,l][None],
                                                          t_array = self.t_array )
                 true_tkf_params['log_one_minus_offset'] = jnp.log( 1-offset[b,l] )[None]
                 true_tkf_params['log_offset'] = jnp.log( offset[b,l] )[None]
@@ -118,7 +121,7 @@ class TestTKF91(unittest.TestCase):
                                            sow_intermediates=False)
                 
                 true_joint_mat = my_model.apply( variables=init_vars,
-                                                 out_dict=true_tkf_params,
+                                                 tkf_param_dict=true_tkf_params,
                                                  method='fill_joint_tkf91'
                                                  )
                 
@@ -129,6 +132,9 @@ class TestTKF91(unittest.TestCase):
                                                  )
                 true_cond = true_all_mats['conditional'] #(T, 4, 4)
                 del my_model, init_vars, true_joint_mat, true_all_mats, true_tkf_params
+                
+                pred = np.squeeze(pred)
+                true_cond = np.squeeze(true_cond)
                 
                 npt.assert_allclose(pred, true_cond, atol=THRESHOLD)
 
