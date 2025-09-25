@@ -99,7 +99,7 @@ def wavefront_cache_lookup(ij_needed_for_k,
     
     # mask out invalid indexes (at edges of alignment matrix), combine with 
     #   previously generate mask for padding positions
-    valid_ij = ( ij_needed_for_k[...,1] >= 0 ) #(B, W)
+    valid_ij = ( ij_needed_for_k[...,0] >= 0 ) & ( ij_needed_for_k[...,1] >= 0 ) #(B, W)
     mask_at_k = pad_mask_at_k & valid_ij #(B, W)
     del valid_ij, pad_mask_at_k
         
@@ -165,9 +165,6 @@ def compute_forward_messages_for_state(logprob_transit_mid_only,
         updated transition probabilties for CURRENT position
         
     """
-    # if jnp.allclose( idxes_for_curr_state, 2 ):
-    #     breakpoint()
-    
     # P( S, d | R, c, t )
     mid_to_state_transit = logprob_transit_mid_only[:, :, idxes_for_curr_state] #(T, C_S_prev, C_transit_curr)
     
@@ -921,7 +918,6 @@ def init_second_diagonal( cache_with_first_diag,
     
     
     ### Del: alpha_{i,j}^{D,d} = \sum_{s \in \{M,I,D\}, c in C_transit} Tr(D,d|s,c,t) * alpha_{i-1,j}^{s_c}
-    # COME BACK HERE
     to_fill = jnp.full( (W, T, C_S, B), jnp.finfo(jnp.float32).min )
     out = get_del_transition_message( align_cell_idxes = align_cell_idxes,
                                       pad_mask = pad_mask,
@@ -951,7 +947,7 @@ def init_second_diagonal( cache_with_first_diag,
     
     ### Match: alpha_{i=1, j=1}^{I_d} = Em( x_1, y_1 | \tau = M, \nu = d, t ) * Tr( \tau = M, \nu = d | Start, t )
     start_match_transit = joint_logprob_transit[:, 0, -1, :, 0] #(T, C)
-
+    
     # along dim W: determine which cell in the diagonal is (1,1)
     mask_for_cell_1_1 = jnp.all(align_cell_idxes == jnp.array([1, 1]), axis=-1)  # (B, W)
     w_idx_for_cell_1_1 = jnp.argmax(mask_for_cell_1_1, axis=1)  # (B,)

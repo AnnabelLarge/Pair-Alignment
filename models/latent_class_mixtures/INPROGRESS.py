@@ -62,13 +62,13 @@ from models.latent_class_mixtures.forward_algo_helpers import (generate_ij_coord
 ### Fake inputs   #############################################################
 ###############################################################################
 # dims
-C_transit = 1
+C_transit = 3
 A = 20
 S = 4
 C_S = C_transit * (S-1) #use this for forward algo carry
 
 # time
-t_array = jnp.array( [1.0] )
+t_array = jnp.array( [1.0, 0.2, 0.3, 0.5] )
 T = t_array.shape[0]
 
 
@@ -315,11 +315,11 @@ K = (seq_lens.sum(axis=1)).max()
 ###############################################################################
 def sum_over_alignments(all_possible_aligns):
     score_per_align = joint_only_forward(aligned_inputs = all_possible_aligns,
-                              joint_logprob_emit_at_match = joint_logprob_emit_at_match,
-                              logprob_emit_at_indel = logprob_emit_at_indel,
-                              joint_logprob_transit = joint_logprob_transit_old_dim_order,
-                              unique_time_per_sample = False,
-                              return_all_intermeds = False) #(T, num_alignments)
+                                         joint_logprob_emit_at_match = joint_logprob_emit_at_match,
+                                         logprob_emit_at_indel = logprob_emit_at_indel,
+                                         joint_logprob_transit = joint_logprob_transit_old_dim_order,
+                                         unique_time_per_sample = False,
+                                         return_all_intermeds = False) #(T, num_alignments)
     return logsumexp(score_per_align, axis=-1 ) #(T,)
 
 true_score1 = sum_over_alignments(aligned_mats1)
@@ -367,7 +367,6 @@ out = init_second_diagonal( cache_with_first_diag = alpha,
                             seq_lens = seq_lens ) 
 
 
-breakpoint()
 alpha = out[0] #(2, W, T, C_S, B)
 joint_logprob_transit_mid_only = out[1] #(T, C_S_prev, C_S_curr )
 del out 
@@ -472,7 +471,6 @@ mid_to_end = joint_logprob_transit[:, :, :3, -1, -1] #(T, C_transit_prev, (S-1)_
 mid_to_end = jnp.reshape(mid_to_end, (T, C_transit*(S-1) ) ) #(T, C_S)
 pred = nn.logsumexp( mid_to_end[...,None] + previous_first_cell_scores, axis=1 ) #(T, B)
 
-print()
-print(f'PRED: {pred}')
-print(f'TRUE: {true}')
+assert np.allclose(pred, true)
+
 
