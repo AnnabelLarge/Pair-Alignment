@@ -29,13 +29,13 @@ from models.latent_class_mixtures.forward_algo_helpers import (generate_ij_coord
 class TestInitSecondDiagonal(unittest.TestCase):
     def setUp(self):
         # dims
-        C_transit = 2
+        C_transit = 1
         A = 20
         S = 4
         C_S = C_transit * (S-1) #use this for forward algo carry
         
         # time
-        t_array = jnp.array( [1.0, 0.3, 0.2, 0.1, 0.1] )
+        t_array = jnp.array( [1.0] )
         T = t_array.shape[0]
         
         ########################
@@ -272,6 +272,7 @@ class TestInitSecondDiagonal(unittest.TestCase):
         logprob_emit_at_indel = self.logprob_emit_at_indel
         idx_of_cell_0_2 = self.idx_of_cell_0_2
         
+        ### COME BACK HERE
         cell_0_2 = alpha[0, idx_of_cell_0_2, ..., sample_idxes] # (B, T, C_S)
         cell_0_2 = jnp.transpose(cell_0_2, (1,2,0) ) #(T, C_S, B)
         B = unaligned_seqs.shape[0]

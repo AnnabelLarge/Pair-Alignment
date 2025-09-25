@@ -2047,7 +2047,7 @@ def joint_only_forward(aligned_inputs,
     start_any = joint_logprob_transit[:, 0, :, -1, :] #(T, C_curr, S_curr) or (B, C_curr, S_curr)
     
     if not unique_time_per_sample:
-        tr = start_any[...,curr_state-1] #(T, C_curr, B)
+        tr = start_any[..., curr_state_idx] #(T, C_curr, B)
     
     elif unique_time_per_sample:
         # joint_logprob_transit: (B, C_curr, S_curr)
@@ -2059,7 +2059,7 @@ def joint_only_forward(aligned_inputs,
         )
         tr = tr[...,0].T # (C_curr, B)
 
-    # carry value; 
+    # carry value
     init_alpha = e + tr # (T, C, B) or (C, B)
     del e, tr, start_any, curr_state, pos
     
@@ -2284,7 +2284,7 @@ def all_loglikes_forward(aligned_inputs,
     start_any = joint_logprob_transit[:, 0, :, -1, :] #(T, C_curr, S_curr) or (B, C_curr, S_curr)
     
     if not unique_time_per_sample:
-        joint_tr = start_any[...,curr_state-1] #(T, C_curr, B)
+        joint_tr = start_any[..., curr_state_idx] #(T, C_curr, B)
     
     elif unique_time_per_sample:
         # joint_logprob_transit: (B, C_curr, S_curr)

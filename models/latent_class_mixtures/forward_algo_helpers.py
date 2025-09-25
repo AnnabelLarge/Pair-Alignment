@@ -165,12 +165,16 @@ def compute_forward_messages_for_state(logprob_transit_mid_only,
         updated transition probabilties for CURRENT position
         
     """
+    # if jnp.allclose( idxes_for_curr_state, 2 ):
+    #     breakpoint()
+    
     # P( S, d | R, c, t )
     mid_to_state_transit = logprob_transit_mid_only[:, :, idxes_for_curr_state] #(T, C_S_prev, C_transit_curr)
     
     # NOTE: if you get NaN gradients, it might be because something in this sum is reducing to -np.inf
     # P( S, d | R, c, t ) * \alpha_{ X_{...prev_i}, Y_{...prev_j} } ^ { R_c }
-    alpha_times_transit = cache_for_state[:, :, :, None, :] + mid_to_state_transit[None, :, :, :, None]
+    #(W, T, C_S_prev, C_transit_curr, B)
+    alpha_times_transit = cache_for_state[:, :, :, None, :] + mid_to_state_transit[None, :, :, :, None] #(W, T, C_S_prev, C_transit_curr, B)
     
     # \sum_{ R \in \{ M,I,D \}, c \in C_transit } 
     #   P( S, d | R, c, t ) * \alpha_{ X_{...prev_i}, Y_{...prev_j} } ^ { R_c }
@@ -673,7 +677,6 @@ def get_del_transition_message( align_cell_idxes,
                                 seq_lens,
                                 joint_logprob_transit_mid_only,
                                 C_transit ):
-    
     # dims
     W = cache_for_prev_diagonal.shape[0]
     T = cache_for_prev_diagonal.shape[1]
@@ -918,6 +921,7 @@ def init_second_diagonal( cache_with_first_diag,
     
     
     ### Del: alpha_{i,j}^{D,d} = \sum_{s \in \{M,I,D\}, c in C_transit} Tr(D,d|s,c,t) * alpha_{i-1,j}^{s_c}
+    # COME BACK HERE
     to_fill = jnp.full( (W, T, C_S, B), jnp.finfo(jnp.float32).min )
     out = get_del_transition_message( align_cell_idxes = align_cell_idxes,
                                       pad_mask = pad_mask,
@@ -965,6 +969,7 @@ def init_second_diagonal( cache_with_first_diag,
                      jnp.arange(T)[:, None, None], 
                      match_idx[None,:, None], 
                      jnp.arange(B)[None, None, :] ].set( start_match_transit[..., None] ) # (2, W, T, C*S, B)
+    
     del start_match_transit, match_idx
     
     
@@ -984,6 +989,7 @@ def init_second_diagonal( cache_with_first_diag,
                                                                 joint_logprob_emit_at_match = joint_logprob_emit_at_match,
                                                                 logprob_emit_at_indel = logprob_emit_at_indel, 
                                                                 fill_invalid_pos_with = 0.0 ) # (W, T, C*S, B)
+    
     # add to appropriate positions in the cache
     #         dim0 = 0: corresponds to k-1
     #             dim1: all values in the diagonal

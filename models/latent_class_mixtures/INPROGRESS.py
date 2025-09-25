@@ -89,7 +89,7 @@ out = transit_model.apply( variables = init_params,
                            t_array = t_array,
                            return_all_matrices = False,
                            sow_intermediates = False )
-joint_logprob_transit = out[1]['joint'][:,0,...] #(T, C_transit_prev, C_transit_curr, S_prev, S_curr)
+joint_logprob_transit_old_dim_order = out[1]['joint'][:,0,...] #(T, C_transit_prev, C_transit_curr, S_prev, S_curr)
 del transit_model, init_params, out
 
 # use dummy scoring matrices for emissions
@@ -239,7 +239,7 @@ align1 = jnp.array( [[ 1,  1,  4],
 # T
 # T
 align2 = jnp.array( [[ 1,  1,  4],
-                     [ 6,  6,  2],
+                     [ 6,  6,  1],
                      [ 2,  2,  5],
                      [ 0,  0,  0],
                      [ 0,  0,  0]] )
@@ -276,7 +276,7 @@ align1 = jnp.array( [[ 1,  1,  4],
 # A
 # A
 align2 = jnp.array( [[ 1,  1,  4],
-                     [ 3,  3,  2],
+                     [ 3,  3,  1],
                      [ 2,  2,  5],
                      [ 0,  0,  0],
                      [ 0,  0,  0]] )
@@ -317,7 +317,7 @@ def sum_over_alignments(all_possible_aligns):
     score_per_align = joint_only_forward(aligned_inputs = all_possible_aligns,
                               joint_logprob_emit_at_match = joint_logprob_emit_at_match,
                               logprob_emit_at_indel = logprob_emit_at_indel,
-                              joint_logprob_transit = joint_logprob_transit,
+                              joint_logprob_transit = joint_logprob_transit_old_dim_order,
                               unique_time_per_sample = False,
                               return_all_intermeds = False) #(T, num_alignments)
     return logsumexp(score_per_align, axis=-1 ) #(T,)
@@ -326,9 +326,12 @@ true_score1 = sum_over_alignments(aligned_mats1)
 true_score2 = sum_over_alignments(aligned_mats2)
 true_score3 = sum_over_alignments(aligned_mats3)
 true_score4 = sum_over_alignments(aligned_mats4)
+
 true = np.stack( [true_score1, true_score2, true_score3, true_score4], axis=-1 ) #(T, B)
 del true_score1, true_score2, true_score3, true_score4
 del aligned_mats1, aligned_mats2, aligned_mats3, aligned_mats4
+
+
 
 
 ###############################################################################
@@ -337,7 +340,7 @@ del aligned_mats1, aligned_mats2, aligned_mats3, aligned_mats4
 # transpose transition matrix 
 # old: (T, C_transit_prev, C_transit_curr, S_prev, S_curr)
 # new: (T, C_transit_prev, S_prev, C_transit_curr, S_curr)
-joint_logprob_transit = jnp.transpose(joint_logprob_transit, (0,1,3,2,4)) # (T, C_transit_prev, S_prev, C_transit_curr, S_curr)
+joint_logprob_transit = jnp.transpose(joint_logprob_transit_old_dim_order, (0,1,3,2,4)) # (T, C_transit_prev, S_prev, C_transit_curr, S_curr)
   
 
 ################################################
@@ -363,9 +366,12 @@ out = init_second_diagonal( cache_with_first_diag = alpha,
                             logprob_emit_at_indel = logprob_emit_at_indel,
                             seq_lens = seq_lens ) 
 
+
+breakpoint()
 alpha = out[0] #(2, W, T, C_S, B)
 joint_logprob_transit_mid_only = out[1] #(T, C_S_prev, C_S_curr )
 del out 
+
 
 
 ########################
@@ -447,7 +453,7 @@ for k in range(3, K+1):
     
     ### Final recordings, updates for next iteration
     # If not padding, then record the first cell of the cache; final 
-    #   forward score will be here
+    #   forward score will always be here
     previous_first_cell_scores = jnp.where( pad_mask[:,0][None,None,:],
                                            cache_at_curr_k[0,...],
                                            previous_first_cell_scores ) #(T, C*S, B)
@@ -458,16 +464,15 @@ for k in range(3, K+1):
     previous_cache = jnp.stack( [cache_at_curr_k, previous_cache[0,...]], axis=0 ) #(2, W, T, C*S, B)
 
 
-
 ##################################################
 ### Terminate all by multiplying by any -> end   #
 ##################################################
 # joint_logprob_transit is (T, C_transit_prev, S_prev, C_transit_curr, S_curr)
 mid_to_end = joint_logprob_transit[:, :, :3, -1, -1] #(T, C_transit_prev, (S-1)_prev)
 mid_to_end = jnp.reshape(mid_to_end, (T, C_transit*(S-1) ) ) #(T, C_S)
-
 pred = nn.logsumexp( mid_to_end[...,None] + previous_first_cell_scores, axis=1 ) #(T, B)
 
 print()
 print(f'PRED: {pred}')
 print(f'TRUE: {true}')
+

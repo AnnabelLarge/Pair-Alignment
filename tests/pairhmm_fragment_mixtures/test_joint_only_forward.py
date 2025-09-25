@@ -43,18 +43,20 @@ class TestJointOnlyForward(unittest.TestCase):
     """
     def setUp(self):
         # fake inputs
-        self.fake_aligns = [ ('AC-A','D-ED'),
-                        ('D-ED','AC-A'),
-                        ('-C-A-','ECDAD'),
-                        ('-C-A-AA','ECDADAA') ]
+        self.fake_aligns = [ ('T','T')
+                             # ('AC-A','D-ED'),
+                             # ('D-ED','AC-A'),
+                             # ('-C-A-','ECDAD'),
+                             # ('-C-A-AA','ECDADAA'),
+                             ]
         
         self.fake_aligns =  str_aligns_to_tensor(self.fake_aligns) #(B, L, 3)
         
         # fake params
-        rngkey = jax.random.key(42) # note: reusing this rngkey over and over
-        t_array = jnp.array([0.3, 0.5])
+        rngkey = jax.random.key(0) # note: reusing this rngkey over and over
+        t_array = jnp.array([1.0])
         self.T = t_array.shape[0]
-        self.C_frag = 3
+        self.C_frag = 1
         self.A = 20
         lam = jnp.array([0.3])
         mu = jnp.array([0.5])
@@ -72,16 +74,16 @@ class TestJointOnlyForward(unittest.TestCase):
         self.B = self.fake_aligns.shape[0]
         self.L_align = self.fake_aligns.shape[1]
         
-        # fake scoring matrices (not coherently normalized; just some example values)
-        def generate_fake_scoring_mat(dim_tuple):
-            logits = jax.random.uniform(key=rngkey, 
-                                        shape=dim_tuple,
-                                        minval=-10.0,
-                                        maxval=-1e-4)
-            return nn.log_softmax(logits, axis=-1)
-        
-        self.joint_logprob_emit_at_match = generate_fake_scoring_mat( (self.T,self.C_frag,self.A,self.A) )
-        self.logprob_emit_at_indel = generate_fake_scoring_mat( (self.C_frag,self.A) )
+        # use dummy scoring matrices for emissions
+        sub_emit_logits = jax.random.normal( key = jax.random.key(0),
+                                             shape = (self.T, self.C_frag, self.A, self.A) ) #(T, C_transit, A, A)
+        self.joint_logprob_emit_at_match = nn.log_softmax(sub_emit_logits, axis=(-1,-2)) #(T, C_transit, A, A)
+        del sub_emit_logits
+
+        indel_emit_logits = jax.random.normal( key = jax.random.key(0),
+                                             shape = (self.C_frag, self.A) ) #(C_transit, A)
+        self.logprob_emit_at_indel = nn.log_softmax(indel_emit_logits, axis=-1) #(C_transit, A)
+        del indel_emit_logits
         
         # be more careful about generating a fake transition matrix
         my_tkf_params, _ = switch_tkf(mu = mu, 
@@ -91,8 +93,6 @@ class TestJointOnlyForward(unittest.TestCase):
         my_tkf_params['log_one_minus_offset'] = jnp.log1p(-offset)
         my_model = TKF92TransitionLogprobs(config={'num_domain_mixtures':1,
                                                    'num_fragment_mixtures': self.C_frag,
-                                                   'num_site_mixtures': 10,
-                                                   'k_rate_mults':4,
                                                    'tkf_function': 'regular_tkf'},
                                            name='tkf92')
         fake_params = my_model.init(rngs=jax.random.key(0),

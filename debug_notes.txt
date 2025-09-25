@@ -1,0 +1,49 @@
+k=1
+cell_1_0: -4.297548712566452 (GOOD)
+cell_0_1: -3.923680937528616 (GOOD)
+
+k=2
+cell_1_1: -8.338976718510553 (GOOD)
+cell_0_2: -9.591458663097452 (WRONG: value by code is -5.8050623; UNDERCOUNTING SOMETHING?)
+
+
+	pred emit value: -5.33392242 (GOOD)
+	no other emissions possible (GOOD)
+
+	something wrong in transition message passing?
+
+	\sum_{ R \in \{ M,I,D \}, c \in C_transit } 
+      P( Ins, d | R, c, t ) * \alpha_{ X_{...prev_i}, Y_{...prev_j} } ^ { R_c }
+	ins transition message is: -4.25753633
+	
+	ERROR HERE? cell (0,2) should only have values for ins, I think?
+	\sum_{ R \in \{ M,I,D \}, c \in C_transit } 
+      P( Del, d | R, c, t ) * \alpha_{ X_{...prev_i}, Y_{...prev_j} } ^ { R_c }
+	del transition message is: -5.82800077 (should this get masked somehow...?)
+
+		pad_mask says to grab this value, (GOOD)
+
+		mid_to_state_transit
+		Out  [4]: 
+		Array([[[-1.90431975],
+		        [-1.90431975],
+		        [-0.3338553 ]]], dtype=float64)
+
+		cache here only has value for ins, which means previous positions could have only been ins (GOOD)
+		[-3.4028235e+38, -3.9236810e+00, -3.4028235e+38]
+
+		before summing over all possible previous states, there's still a value for ins
+		alpha_times_transit: [-3.40282347e+38, -5.82800077e+00, -3.40282347e+38]
+
+
+
+
+
+
+	match transition message is: -3.4028235e+38
+
+
+
+k=3
+cell_1_2: -13.109815540294601
+
