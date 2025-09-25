@@ -75,6 +75,7 @@ class TestInitSecondDiagonal(unittest.TestCase):
         #################
         ### sequences   #
         #################
+        # has all cells
         seqs1 = jnp.array( [[1, 1],
                             [3, 3],
                             [3, 3],
@@ -82,6 +83,7 @@ class TestInitSecondDiagonal(unittest.TestCase):
                             [2, 0],
                             [0, 0]] )
         
+        # has all cells
         seqs2 = jnp.array( [[1, 1],
                             [6, 6],
                             [3, 3],
@@ -89,6 +91,7 @@ class TestInitSecondDiagonal(unittest.TestCase):
                             [0, 2],
                             [0, 0]] )
         
+        # has (1,1)
         seqs3 = jnp.array( [[1, 1],
                             [6, 6],
                             [2, 2],
@@ -96,16 +99,42 @@ class TestInitSecondDiagonal(unittest.TestCase):
                             [0, 0],
                             [0, 0]] )
         
+        # has (1,1) and (0,2)
+        seqs4 = jnp.array( [[1, 1],
+                            [6, 6],
+                            [2, 3],
+                            [0, 2],
+                            [0, 0],
+                            [0, 0]] )
+        
+        # has (2,0) and (1,1)
+        seqs5 = jnp.array( [[1, 1],
+                            [6, 6],
+                            [3, 2],
+                            [2, 0],
+                            [0, 0],
+                            [0, 0]] )
+        
         # concat
-        unaligned_seqs = jnp.stack([seqs1, seqs2, seqs3], axis=0) #(B, L_seq, 2)
+        unaligned_seqs = jnp.stack([seqs1, seqs2, seqs3, seqs4, seqs5], axis=0) #(B, L_seq, 2)
         
         # extra dims
-        B = unaligned_seqs.shape[0]
+        all_B = unaligned_seqs.shape[0]
         
         # widest diagonal for wavefront parallelism is min(anc_len, desc_len) + 1
         seq_lens = (unaligned_seqs != 0).sum(axis=1)-2 #(B, 2)
         min_lens = seq_lens.min(axis=1) #(B,)
         W = min_lens.max() + 1 #float
+        
+        
+        ### some samples will only have subset of cells in second diagonal
+        # samples to include for cell-specific tests
+        samples_with_cell_2_0 = [0,1,4]
+        samples_with_cell_0_2 = [0,1,3]
+        
+        # locations of cells, in order of samples
+        idx_of_cell_1_1 = [1, 1, 0, 0, 1]
+        idx_of_cell_0_2 = [2, 2, 1]
         
 
         ################################################
@@ -115,7 +144,7 @@ class TestInitSecondDiagonal(unittest.TestCase):
         # \nu = class (unique to combination of domain+fragment)
         # alpha_{ij}^{s_d} = P(desc_{...j}, anc_{...i}, \tau=s, \nu=d | t)
         # dim0: 0=previous diagonal, 1=diag BEFORE previous diagonal
-        alpha = jnp.full( (2, W, T, C_S, B), jnp.finfo(jnp.float32).min )
+        alpha = jnp.full( (2, W, T, C_S, all_B), jnp.finfo(jnp.float32).min )
         
         # fill diagonal k-2: alignment cells (1,0) and (0,1)
         alpha_after_first_diag_fill = init_first_diagonal( empty_cache = alpha, 
@@ -128,7 +157,8 @@ class TestInitSecondDiagonal(unittest.TestCase):
                                          unaligned_seqs = unaligned_seqs,
                                          joint_logprob_transit = joint_logprob_transit,
                                          joint_logprob_emit_at_match = joint_logprob_emit_at_match,
-                                         logprob_emit_at_indel = logprob_emit_at_indel ) #(2, W, T, C_S, B)
+                                         logprob_emit_at_indel = logprob_emit_at_indel,
+                                         seq_lens = seq_lens ) #(2, W, T, C_S, B)
 
         
         ### make attributes
@@ -137,7 +167,7 @@ class TestInitSecondDiagonal(unittest.TestCase):
         self.A = A
         self.S = S
         self.C_S = C_S
-        self.B = B
+        self.all_B = all_B
         self.W = W
         
         self.alpha = alpha
@@ -147,6 +177,11 @@ class TestInitSecondDiagonal(unittest.TestCase):
         self.joint_logprob_transit_mid_only = joint_logprob_transit_mid_only
         self.logprob_emit_at_indel = logprob_emit_at_indel
         self.joint_logprob_emit_at_match = joint_logprob_emit_at_match
+        
+        self.samples_with_cell_2_0 = samples_with_cell_2_0
+        self.samples_with_cell_0_2  = samples_with_cell_0_2
+        self.idx_of_cell_1_1 = idx_of_cell_1_1
+        self.idx_of_cell_0_2 = idx_of_cell_0_2
 
 
     def test_shape(self):
@@ -154,7 +189,7 @@ class TestInitSecondDiagonal(unittest.TestCase):
         W = self.W
         T = self.T
         C_S = self.C_S
-        B = self.B
+        B = self.all_B
         
         npt.assert_allclose( alpha.shape, (2, W, T, C_S, B) )
     
@@ -165,18 +200,19 @@ class TestInitSecondDiagonal(unittest.TestCase):
         npt.assert_allclose( true, pred )
     
     def test_cell_2_0(self):
-        ### for this test, exclude seq3! it is shorter than 2
         alpha = self.alpha
         W = self.W
         T = self.T
         C_transit = self.C_transit
         C_S = self.C_S
-        B = self.B-1
-        unaligned_seqs = self.unaligned_seqs
+        sample_idxes = self.samples_with_cell_2_0
+        unaligned_seqs = self.unaligned_seqs[sample_idxes,...]
         joint_logprob_transit = self.joint_logprob_transit_mid_only
         logprob_emit_at_indel = self.logprob_emit_at_indel
         
-        cell_2_0 = alpha[0, 0, ..., :2] # (T, C_S, B)
+        cell_2_0 = alpha[0, 0, ..., sample_idxes] # (B, T, C_S)
+        cell_2_0 = jnp.transpose(cell_2_0, (1,2,0) ) #(T, C_S, B)
+        B = unaligned_seqs.shape[0]
         
         # check shape
         npt.assert_allclose( cell_2_0.shape, (T, C_S, B) )
@@ -194,7 +230,7 @@ class TestInitSecondDiagonal(unittest.TestCase):
                     
                     # cell (2,0) should only have values for del
                     if c_s_curr not in del_idx:
-                        npt.assert_allclose( cell_value, jnp.finfo(jnp.float32).min ), f'{t_idx}, {c_s_curr}, {b}'
+                        npt.assert_allclose( cell_value, jnp.finfo(jnp.float32).min )
                     
                     elif c_s_curr in del_idx:
                         # transitions
@@ -223,22 +259,85 @@ class TestInitSecondDiagonal(unittest.TestCase):
                         true_val = logprob_anc_tok + c_s_lse
                         npt.assert_allclose(true_val, cell_value) 
     
-                     
-    def test_cell_1_1(self):
-        ### test ALL sequences
+    
+    def test_cell_0_2(self):
         alpha = self.alpha
         W = self.W
         T = self.T
         C_transit = self.C_transit
         C_S = self.C_S
-        B = self.B
+        sample_idxes = self.samples_with_cell_0_2
+        unaligned_seqs = self.unaligned_seqs[sample_idxes,...]
+        joint_logprob_transit = self.joint_logprob_transit_mid_only
+        logprob_emit_at_indel = self.logprob_emit_at_indel
+        idx_of_cell_0_2 = self.idx_of_cell_0_2
+        
+        cell_0_2 = alpha[0, idx_of_cell_0_2, ..., sample_idxes] # (B, T, C_S)
+        cell_0_2 = jnp.transpose(cell_0_2, (1,2,0) ) #(T, C_S, B)
+        B = unaligned_seqs.shape[0]
+        
+        # check shape
+        npt.assert_allclose( cell_0_2.shape, (T, C_S, B) )
+        
+        # cell (0,2) should only have values for ins
+        ins_idx = index_all_classes_one_state( state_idx = 1,
+                                                num_transit_classes = C_transit )
+        ins_idx = set( np.array( ins_idx ) ) #(C_transit)
+        assert len(ins_idx) == C_transit
+        
+        for t_idx in range(T):
+            for b in range(B):
+                for c_s_curr in range(C_S):
+                    cell_value = cell_0_2[t_idx, c_s_curr, b]
+                    
+                    # cell (0,2) should only have values for ins
+                    if c_s_curr not in ins_idx:
+                        npt.assert_allclose( cell_value, jnp.finfo(jnp.float32).min )
+                    
+                    elif c_s_curr in ins_idx:
+                        # transitions
+                        prob_space_c_s_sum = 0
+                        for c_s_prev in range(C_S):
+                            # alpha_{0,1}^{c_s_prev}
+                            cache = alpha[1, 1, t_idx, c_s_prev, b]
+                            
+                            # logP(c_s_curr | c_s_prev, t)
+                            logprob_to_ins = joint_logprob_transit[t_idx, c_s_prev, c_s_curr]
+                            
+                            # alpha_{0,1}^{c_s_prev} + logP(c_s_curr | c_s_prev, t),
+                            #  but do in probability space
+                            prob_space_c_s_sum += np.exp( cache + logprob_to_ins )
+                        
+                        # \sum_{c_s_prev} np.exp(alpha_{0,1}^{c_s_prev}) * P(c_s_curr | c_s_prev, t),
+                        #   but transform to log space
+                        c_s_lse = np.log(prob_space_c_s_sum)
+                        del prob_space_c_s_sum, c_s_prev, cache, logprob_to_ins
+                        
+                        # add logprob emissions Em(y_2); since ins site,
+                        #   use descendant token at position 2
+                        desc_tok = unaligned_seqs[b, 2, 1]
+                        c_curr = c_s_curr // 3
+                        logprob_desc_tok = logprob_emit_at_indel[c_curr, desc_tok-3]
+                        true_val = logprob_desc_tok + c_s_lse
+                        npt.assert_allclose(true_val, cell_value)
+    
+    
+    def test_cell_1_1(self):
+        alpha = self.alpha
+        W = self.W
+        T = self.T
+        C_transit = self.C_transit
+        C_S = self.C_S
+        B = self.all_B
         unaligned_seqs = self.unaligned_seqs
+        idx_of_cell_1_1 = self.idx_of_cell_1_1
         joint_logprob_transit = self.joint_logprob_transit
         joint_logprob_transit_mid_only = self.joint_logprob_transit_mid_only
         joint_logprob_emit_at_match = self.joint_logprob_emit_at_match
         logprob_emit_at_indel = self.logprob_emit_at_indel
         
-        cell_1_1 = alpha[0, 1, ...] # (T, C_S, B)
+        cell_1_1 = alpha[0, idx_of_cell_1_1, :, :, jnp.arange(B)]  #(B, T, C_S)
+        cell_1_1 = jnp.transpose(cell_1_1, (1,2,0) ) #(T, C_S, B)
 
         # check shape
         npt.assert_allclose( cell_1_1.shape, (T, C_S, B) )
@@ -313,68 +412,8 @@ class TestInitSecondDiagonal(unittest.TestCase):
                         anc_tok = unaligned_seqs[b, 1, 0]
                         logprob_anc_tok = logprob_emit_at_indel[c, anc_tok-3]
                         true_val = logprob_anc_tok + c_s_lse
-                        npt.assert_allclose(true_val, cell_value), f'{t_idx}, {c_s}, {b}: {cell_value}'
-    
-    
-    def test_cell_0_2(self):
-        ### for this test, exclude seq3! it is shorter than 2
-        alpha = self.alpha
-        W = self.W
-        T = self.T
-        C_transit = self.C_transit
-        C_S = self.C_S
-        B = self.B-1
-        unaligned_seqs = self.unaligned_seqs
-        joint_logprob_transit = self.joint_logprob_transit_mid_only
-        logprob_emit_at_indel = self.logprob_emit_at_indel
-        
-        cell_0_2 = alpha[0, 2, ..., :2] # (T, C_S, B)
-        
-        # check shape
-        npt.assert_allclose( cell_0_2.shape, (T, C_S, B) )
-        
-        # cell (0,2) should only have values for ins
-        ins_idx = index_all_classes_one_state( state_idx = 1,
-                                                num_transit_classes = C_transit )
-        ins_idx = set( np.array( ins_idx ) ) #(C_transit)
-        assert len(ins_idx) == C_transit
-        
-        for t_idx in range(T):
-            for b in range(B):
-                for c_s_curr in range(C_S):
-                    cell_value = cell_0_2[t_idx, c_s_curr, b]
-                    
-                    # cell (0,2) should only have values for ins
-                    if c_s_curr not in ins_idx:
-                        npt.assert_allclose( cell_value, jnp.finfo(jnp.float32).min ), f'{t_idx}, {c_s_curr}, {b}'
-                    
-                    elif c_s_curr in ins_idx:
-                        # transitions
-                        prob_space_c_s_sum = 0
-                        for c_s_prev in range(C_S):
-                            # alpha_{0,1}^{c_s_prev}
-                            cache = alpha[1, 1, t_idx, c_s_prev, b]
-                            
-                            # logP(c_s_curr | c_s_prev, t)
-                            logprob_to_ins = joint_logprob_transit[t_idx, c_s_prev, c_s_curr]
-                            
-                            # alpha_{0,1}^{c_s_prev} + logP(c_s_curr | c_s_prev, t),
-                            #  but do in probability space
-                            prob_space_c_s_sum += np.exp( cache + logprob_to_ins )
-                        
-                        # \sum_{c_s_prev} np.exp(alpha_{0,1}^{c_s_prev}) * P(c_s_curr | c_s_prev, t),
-                        #   but transform to log space
-                        c_s_lse = np.log(prob_space_c_s_sum)
-                        del prob_space_c_s_sum, c_s_prev, cache, logprob_to_ins
-                        
-                        # add logprob emissions Em(y_2); since ins site,
-                        #   use descendant token at position 2
-                        desc_tok = unaligned_seqs[b, 2, 1]
-                        c_curr = c_s_curr // 3
-                        logprob_desc_tok = logprob_emit_at_indel[c_curr, desc_tok-3]
-                        true_val = logprob_desc_tok + c_s_lse
                         npt.assert_allclose(true_val, cell_value)
-        
+    
         
 if __name__ == '__main__':
     unittest.main()

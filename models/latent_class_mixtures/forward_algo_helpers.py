@@ -821,7 +821,8 @@ def init_second_diagonal( cache_with_first_diag,
                           unaligned_seqs,
                           joint_logprob_transit,
                           joint_logprob_emit_at_match,
-                          logprob_emit_at_indel ):
+                          logprob_emit_at_indel,
+                          seq_lens ):
     """
     with cache that only has first diagonal filled, fill the second diagonal
       corresponds to (2,0), (1,1), and (0,2)
@@ -869,7 +870,6 @@ def init_second_diagonal( cache_with_first_diag,
     
     """
     # dims, lengths
-    seq_lens = (unaligned_seqs != 0).sum(axis=1) #(B, 2)
     W = cache_with_first_diag.shape[1]
     T = cache_with_first_diag.shape[2]
     C_transit = logprob_emit_at_indel.shape[0]
@@ -881,7 +881,7 @@ def init_second_diagonal( cache_with_first_diag,
     align_cell_idxes, pad_mask = generate_ij_coords_at_diagonal_k(seq_lens = seq_lens,
                                                                   diagonal_k = 2,
                                                                   widest_diag_W = W)
-
+    
     # remove S/E transitions, and merge class and state dims
     joint_logprob_transit_mid_only = jnp.reshape(joint_logprob_transit[:, :, :3, :, :3], (T, C_S, C_S) ) #(T, C*S_prev, C*S_curr)
     
@@ -947,9 +947,13 @@ def init_second_diagonal( cache_with_first_diag,
     
     ### Match: alpha_{i=1, j=1}^{I_d} = Em( x_1, y_1 | \tau = M, \nu = d, t ) * Tr( \tau = M, \nu = d | Start, t )
     start_match_transit = joint_logprob_transit[:, 0, -1, :, 0] #(T, C)
-    
+
+    # along dim W: determine which cell in the diagonal is (1,1)
+    mask_for_cell_1_1 = jnp.all(align_cell_idxes == jnp.array([1, 1]), axis=-1)  # (B, W)
+    w_idx_for_cell_1_1 = jnp.argmax(mask_for_cell_1_1, axis=1)  # (B,)
+
     #         dim0 = 0: corresponds to k-1
-    #         dim1 = 1: at cell (1,1), which is the second element of the diagonal
+    #         dim1 = 1: at cell (1,1)
     #             dim2: all times
     # dim3 = 0, 3, ...: at Match for all classes, which is encoded as zero
     #             dim4: all samples in the batch
@@ -957,10 +961,10 @@ def init_second_diagonal( cache_with_first_diag,
                                              num_transit_classes = C_transit ) #(C,)
     
     alpha = alpha.at[0, 
-                     1, 
-                     jnp.arange(T)[:,None], 
-                     match_idx[None,:], 
-                     :].set( start_match_transit[..., None] ) # (2, W, T, C*S, B)
+                     w_idx_for_cell_1_1[None, None, :], 
+                     jnp.arange(T)[:, None, None], 
+                     match_idx[None,:, None], 
+                     jnp.arange(B)[None, None, :] ].set( start_match_transit[..., None] ) # (2, W, T, C*S, B)
     del start_match_transit, match_idx
     
     
