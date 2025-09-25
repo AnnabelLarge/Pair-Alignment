@@ -32,6 +32,7 @@ lecture about wave-front parallelism
       only need JUST enough of the cache to accumulate sums
 """
 import jax
+jax.config.update("jax_enable_x64", True)
 from jax import numpy as jnp
 import flax.linen as nn
 
@@ -40,7 +41,7 @@ from itertools import product
 from scipy.special import logsumexp
 from tqdm import tqdm
 
-from models.latent_class_mixtures.transition_models import (TKF92TransitionLogprobs)
+from models.latent_class_mixtures.transition_models import TKF92TransitionLogprobs
 
 from models.latent_class_mixtures.forward_algo_helpers import (generate_ij_coords_at_diagonal_k,
                                                                ij_coords_to_wavefront_pos_at_diagonal_k,
@@ -217,8 +218,46 @@ aligned_mats2 = jnp.stack( [align1, align2, align3, align4, align5], axis=0 ) #(
 del align1, align2, align3, align4, align5
 
 
-unaligned_seqs = jnp.stack([seqs1, seqs2], axis=0) #(B, L_seq, 2)
-del seqs1, seqs2
+### T -> T: 3 possible alignment paths
+seqs3 = jnp.array( [[1, 1],
+                    [6, 6],
+                    [2, 2],
+                    [0, 0],
+                    [0, 0]] )
+
+# alignment 1:
+# -T
+# T-
+align1 = jnp.array( [[ 1,  1,  4],
+                     [43,  6,  2],
+                     [ 6, 43,  3],
+                     [ 2,  2,  5],
+                     [ 0,  0,  0]] )
+
+# alignment 2:
+# T
+# T
+align2 = jnp.array( [[ 1,  1,  4],
+                     [ 6,  6,  2],
+                     [ 2,  2,  5],
+                     [ 0,  0,  0],
+                     [ 0,  0,  0]] )
+
+# alignment 3:
+# T-
+# -T
+align3 = jnp.array( [[ 1,  1,  4],
+                     [ 6, 43,  3],
+                     [43,  6,  2],
+                     [ 2,  2,  5],
+                     [ 0,  0,  0]] )
+
+aligned_mats3 = jnp.stack( [align1, align2, align3], axis=0 ) #(num_possible_aligns, L_align, 3)
+del align1, align2, align3
+
+
+unaligned_seqs = jnp.stack([seqs1, seqs2, seqs3], axis=0) #(B, L_seq, 2)
+del seqs1, seqs2, seqs3
 
 B = unaligned_seqs.shape[0]
 L_seq = unaligned_seqs.shape[1]
@@ -228,7 +267,9 @@ seq_lens = (unaligned_seqs != 0).sum(axis=1)-2 #(B, 2)
 min_lens = seq_lens.min(axis=1) #(B,)
 W = min_lens.max() + 1 #float
 del min_lens
-                
+
+# number of diagonals
+K = (seq_lens.sum(axis=1)).max()
 
 ###############################################################################
 ### True scores from manual enumeration   #####################################
@@ -263,6 +304,7 @@ def marginalize_state_and_class(aligns):
                     
                     curr_state = np.where(curr_state != 5, curr_state, 4)
                     
+                    
                     ### emissions
                     e = 0
                     
@@ -288,9 +330,11 @@ def marginalize_state_and_class(aligns):
     sum_over_alignments = logsumexp(score_per_alignment, axis=-1 ) #(T,)
     return sum_over_alignments 
 
-# true_score1 = marginalize_state_and_class(aligned_mats1)
-# true_score2 = marginalize_state_and_class(aligned_mats2)
-
+true_score1 = marginalize_state_and_class(aligned_mats1)
+true_score2 = marginalize_state_and_class(aligned_mats2)
+true_score3 = marginalize_state_and_class(aligned_mats3)
+true = np.stack( [true_score1, true_score2, true_score3], axis=-1 ) #(T, B)
+del true_score1, true_score2, true_score3
 
 
 ###############################################################################
@@ -332,79 +376,104 @@ del out
 ########################
 ### Start Recurrence   #
 ########################
-# try this out with k = 3 first, to get feel for jax.lax.scan
-k = 3
-previous_cache = alpha
+previous_cache = alpha #(2, W, T, C_S, B)
+previous_first_cell_scores = alpha[0,0,...] #(T, C_S, B)
+for k in range(3, K+1):
+    # blank cache to fill
+    cache_at_curr_k = jnp.full( (W, T, C_S, B), jnp.finfo(jnp.float32).min ) # (W, T, C*S, B)
+    
+    # align_cell_idxes is (B, W, 2)
+    # pad_mask is (B, W)
+    align_cell_idxes, pad_mask = generate_ij_coords_at_diagonal_k(seq_lens = seq_lens,
+                                                                  diagonal_k = k,
+                                                                  widest_diag_W = W)
+    
+    
+    ### update with transitions
+    # match
+    # match_idx is (C_trans,) 
+    # match_transition_message is (W, T, C_trans, B)
+    match_idx, match_transition_message = get_match_transition_message( align_cell_idxes = align_cell_idxes,
+                                                                        pad_mask = pad_mask,
+                                                                        cache_at_curr_diagonal = cache_at_curr_k,
+                                                                        cache_two_diags_prior = previous_cache[1,...],
+                                                                        seq_lens = seq_lens,
+                                                                        joint_logprob_transit_mid_only = joint_logprob_transit_mid_only,
+                                                                        C_transit = C_transit )
+    cache_at_curr_k = update_cache(idx_arr_for_state = match_idx, 
+                                   transit_message = match_transition_message, 
+                                   cache_to_update = cache_at_curr_k) # (W, T, C*S, B)
+    
+    # ins
+    # ins_idx is (C_trans,) 
+    # ins_transition_message is (W, T, C_trans, B)
+    ins_idx, ins_transition_message = get_ins_transition_message( align_cell_idxes = align_cell_idxes,
+                                                                  pad_mask = pad_mask,
+                                                                  cache_at_curr_diagonal = cache_at_curr_k,
+                                                                  cache_for_prev_diagonal = previous_cache[0,...],
+                                                                  seq_lens = seq_lens,
+                                                                  joint_logprob_transit_mid_only = joint_logprob_transit_mid_only,
+                                                                  C_transit = C_transit )
+    cache_at_curr_k = update_cache(idx_arr_for_state = ins_idx, 
+                                   transit_message = ins_transition_message, 
+                                   cache_to_update = cache_at_curr_k) # (W, T, C*S, B)
+    
+    # del
+    # del_idx is (C_trans,) 
+    # del_transition_message is (W, T, C_trans, B)
+    del_idx, del_transition_message = get_del_transition_message( align_cell_idxes = align_cell_idxes,
+                                                                  pad_mask = pad_mask,
+                                                                  cache_at_curr_diagonal = cache_at_curr_k,
+                                                                  cache_for_prev_diagonal = previous_cache[0,...],
+                                                                  seq_lens = seq_lens,
+                                                                  joint_logprob_transit_mid_only = joint_logprob_transit_mid_only,
+                                                                  C_transit = C_transit )
+    cache_at_curr_k = update_cache(idx_arr_for_state = del_idx, 
+                                   transit_message = del_transition_message,  
+                                   cache_to_update = cache_at_curr_k) # (W, T, C*S, B)
+    
+    
+    ### update with emissions
+    # get emission tokens; at padding positions in diagonal, these will also be pad
+    anc_toks_at_diag_k = unaligned_seqs[jnp.arange(B)[:, None], align_cell_idxes[...,0], 0] #(B, W)
+    desc_toks_at_diag_k = unaligned_seqs[jnp.arange(B)[:, None], align_cell_idxes[...,1], 1] #(B, W)
+    
+    # use emissions to index scoring matrices
+    #   at invalid positions, this is ZERO (not jnp.finfo(jnp.float32).min)!!!
+    #   later, will add this to log-probability of transitions, so at invalid 
+    #   positions, adding zero is the same as skipping the operation
+    emit_logprobs_at_k = joint_loglike_emission_at_k_time_grid( anc_toks = anc_toks_at_diag_k,
+                                                                desc_toks = desc_toks_at_diag_k,
+                                                                joint_logprob_emit_at_match = joint_logprob_emit_at_match,
+                                                                logprob_emit_at_indel = logprob_emit_at_indel, 
+                                                                fill_invalid_pos_with = 0.0 ) # (W, T, C*S, B)
+    cache_at_curr_k = cache_at_curr_k + emit_logprobs_at_k # (W, T, C*S, B)
+    
+    
+    ### Final recordings, updates for next iteration
+    # If not padding, then record the first cell of the cache; final 
+    #   forward score will be here
+    previous_first_cell_scores = jnp.where( pad_mask[:,0][None,None,:],
+                                           cache_at_curr_k[0,...],
+                                           previous_first_cell_scores ) #(T, C*S, B)
+    
+    # update cache
+    # dim0 = 0 is k-1 (previous diagonal)
+    # dim0 = 1 is k-2 (diagonal BEFORE previous diagonal)
+    previous_cache = jnp.stack( [cache_at_curr_k, previous_cache[0,...]], axis=0 ) #(2, W, T, C*S, B)
 
-# cache to fill
-cache_at_curr_k = jnp.full( (W, T, C_S, B), jnp.finfo(jnp.float32).min ) # (W, T, C*S, B)
-
-# align_cell_idxes is (B, W, 2)
-# pad_mask is (B, W)
-align_cell_idxes, pad_mask = generate_ij_coords_at_diagonal_k(seq_lens = seq_lens,
-                                                              diagonal_k = k,
-                                                              widest_diag_W = W)
-
-### update with transitions
-# match
-# match_idx is (C_trans,) 
-# match_transition_message is (W, T, C_trans, B)
-match_idx, match_transition_message = get_match_transition_message( align_cell_idxes = align_cell_idxes,
-                                                                    pad_mask = pad_mask,
-                                                                    cache_at_curr_diagonal = cache_at_curr_k,
-                                                                    cache_two_diags_prior = previous_cache[1,...],
-                                                                    seq_lens = seq_lens,
-                                                                    joint_logprob_transit_mid_only = joint_logprob_transit_mid_only,
-                                                                    C_transit = C_transit )
-cache_at_curr_k = update_cache(idx_arr_for_state = match_idx, 
-                               transit_message = match_transition_message, 
-                               cache_to_update = cache_at_curr_k) # (W, T, C*S, B)
-
-# ins
-# ins_idx is (C_trans,) 
-# ins_transition_message is (W, T, C_trans, B)
-ins_idx, ins_transition_message = get_ins_transition_message( align_cell_idxes = align_cell_idxes,
-                                                              pad_mask = pad_mask,
-                                                              cache_at_curr_diagonal = cache_at_curr_k,
-                                                              cache_for_prev_diagonal = previous_cache[0,...],
-                                                              seq_lens = seq_lens,
-                                                              joint_logprob_transit_mid_only = joint_logprob_transit_mid_only,
-                                                              C_transit = C_transit )
-cache_at_curr_k = update_cache(idx_arr_for_state = ins_idx, 
-                               transit_message = ins_transition_message, 
-                               cache_to_update = cache_at_curr_k) # (W, T, C*S, B)
-
-# del
-# del_idx is (C_trans,) 
-# del_transition_message is (W, T, C_trans, B)
-del_idx, del_transition_message = get_del_transition_message( align_cell_idxes = align_cell_idxes,
-                                                              pad_mask = pad_mask,
-                                                              cache_at_curr_diagonal = cache_at_curr_k,
-                                                              cache_for_prev_diagonal = previous_cache[0,...],
-                                                              seq_lens = seq_lens,
-                                                              joint_logprob_transit_mid_only = joint_logprob_transit_mid_only,
-                                                              C_transit = C_transit )
-cache_at_curr_k = update_cache(idx_arr_for_state = del_idx, 
-                               transit_message = del_transition_message,  
-                               cache_to_update = cache_at_curr_k) # (W, T, C*S, B)
-
-### update with emissions
-# get emission tokens; at padding positions in diagonal, these will also be pad
-anc_toks_at_diag_k = unaligned_seqs[jnp.arange(B)[:, None], align_cell_idxes[...,0], 0] #(B, W)
-desc_toks_at_diag_k = unaligned_seqs[jnp.arange(B)[:, None], align_cell_idxes[...,1], 1] #(B, W)
-
-# use emissions to index scoring matrices
-#   at invalid positions, this is ZERO (not jnp.finfo(jnp.float32).min)!!!
-#   later, will add this to log-probability of transitions, so at invalid 
-#   positions, adding zero is the same as skipping the operation
-emit_logprobs_at_k = joint_loglike_emission_at_k_time_grid( anc_toks = anc_toks_at_diag_k,
-                                                            desc_toks = desc_toks_at_diag_k,
-                                                            joint_logprob_emit_at_match = joint_logprob_emit_at_match,
-                                                            logprob_emit_at_indel = logprob_emit_at_indel, 
-                                                            fill_invalid_pos_with = 0.0 ) # (W, T, C*S, B)
-cache_at_curr_k = cache_at_curr_k + emit_logprobs_at_k # (W, T, C*S, B)
 
 
-# TODO: does this automatically handle end states...?
+##################################################
+### Terminate all by multiplying by any -> end   #
+##################################################
+# joint_logprob_transit # (T, C_transit_prev, S_prev, C_transit_curr, S_curr)
 
+mid_to_end = joint_logprob_transit[:, :, :3, -1, -1] #(T, C_transit_prev, (S-1)_prev)
+mid_to_end = jnp.reshape(mid_to_end, (T, C_transit*(S-1) ) ) #(T, C_S)
 
+pred = nn.logsumexp( mid_to_end[...,None] + previous_first_cell_scores, axis=1 ) #(T, B)
+
+print()
+print(pred)
+print(true)

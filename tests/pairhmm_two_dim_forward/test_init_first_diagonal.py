@@ -81,8 +81,15 @@ class TestInitFirstDiagonal(unittest.TestCase):
                             [0, 2],
                             [0, 0]] )
         
+        seqs3 = jnp.array( [[1, 1],
+                            [6, 6],
+                            [2, 2],
+                            [0, 0],
+                            [0, 0],
+                            [0, 0]] )
+        
         # concat
-        unaligned_seqs = jnp.stack([seqs1, seqs2], axis=0) #(B, L_seq, 2)
+        unaligned_seqs = jnp.stack([seqs1, seqs2, seqs3], axis=0) #(B, L_seq, 2)
         
         # extra dims
         B = unaligned_seqs.shape[0]

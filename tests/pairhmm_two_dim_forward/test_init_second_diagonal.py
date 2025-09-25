@@ -89,8 +89,15 @@ class TestInitSecondDiagonal(unittest.TestCase):
                             [0, 2],
                             [0, 0]] )
         
+        seqs3 = jnp.array( [[1, 1],
+                            [6, 6],
+                            [2, 2],
+                            [0, 0],
+                            [0, 0],
+                            [0, 0]] )
+        
         # concat
-        unaligned_seqs = jnp.stack([seqs1, seqs2], axis=0) #(B, L_seq, 2)
+        unaligned_seqs = jnp.stack([seqs1, seqs2, seqs3], axis=0) #(B, L_seq, 2)
         
         # extra dims
         B = unaligned_seqs.shape[0]
@@ -158,17 +165,18 @@ class TestInitSecondDiagonal(unittest.TestCase):
         npt.assert_allclose( true, pred )
     
     def test_cell_2_0(self):
+        ### for this test, exclude seq3! it is shorter than 2
         alpha = self.alpha
         W = self.W
         T = self.T
         C_transit = self.C_transit
         C_S = self.C_S
-        B = self.B
+        B = self.B-1
         unaligned_seqs = self.unaligned_seqs
         joint_logprob_transit = self.joint_logprob_transit_mid_only
         logprob_emit_at_indel = self.logprob_emit_at_indel
         
-        cell_2_0 = alpha[0, 0, ...] # (T, C_S, B)
+        cell_2_0 = alpha[0, 0, ..., :2] # (T, C_S, B)
         
         # check shape
         npt.assert_allclose( cell_2_0.shape, (T, C_S, B) )
@@ -213,10 +221,11 @@ class TestInitSecondDiagonal(unittest.TestCase):
                         c_curr = c_s_curr // 3
                         logprob_anc_tok = logprob_emit_at_indel[c_curr, anc_tok-3]
                         true_val = logprob_anc_tok + c_s_lse
-                        npt.assert_allclose(true_val, cell_value), f'{t_idx}, {c_s_curr}, {b}: {cell_value}'
+                        npt.assert_allclose(true_val, cell_value) 
     
                      
     def test_cell_1_1(self):
+        ### test ALL sequences
         alpha = self.alpha
         W = self.W
         T = self.T
@@ -308,17 +317,18 @@ class TestInitSecondDiagonal(unittest.TestCase):
     
     
     def test_cell_0_2(self):
+        ### for this test, exclude seq3! it is shorter than 2
         alpha = self.alpha
         W = self.W
         T = self.T
         C_transit = self.C_transit
         C_S = self.C_S
-        B = self.B
+        B = self.B-1
         unaligned_seqs = self.unaligned_seqs
         joint_logprob_transit = self.joint_logprob_transit_mid_only
         logprob_emit_at_indel = self.logprob_emit_at_indel
         
-        cell_0_2 = alpha[0, 2, ...] # (T, C_S, B)
+        cell_0_2 = alpha[0, 2, ..., :2] # (T, C_S, B)
         
         # check shape
         npt.assert_allclose( cell_0_2.shape, (T, C_S, B) )
