@@ -331,8 +331,6 @@ del true_score1, true_score2, true_score3, true_score4
 del aligned_mats1, aligned_mats2, aligned_mats3, aligned_mats4
 
 
-
-
 ###############################################################################
 ### 2D forward algo   #########################################################
 ###############################################################################
@@ -368,32 +366,6 @@ out = init_second_diagonal( cache_with_first_diag = alpha,
 alpha = out[0] #(2, W, T, C_S, B)
 joint_logprob_transit_mid_only = out[1] #(T, C_S_prev, C_S_curr )
 del out 
-
-# joint_logprob_transit is (T, C_transit_prev, S_prev, C_transit_curr, S_curr)
-mid_to_end = joint_logprob_transit[:, :, :3, -1, -1] #(T, C_transit_prev, (S-1)_prev)
-mid_to_end = jnp.reshape(mid_to_end, (T, C_transit*(S-1) ) ) #(T, C_S)
-
-scores_from_cell_1_1 = alpha[0, [1, 0, 0, 0], ..., jnp.arange(B)] #(B, T, C_S)
-pred = nn.logsumexp( mid_to_end[None,...] + scores_from_cell_1_1, axis=-1 ).T #(B,T)
-print(pred)
-
-
-
-# scores_from_cell_1_1 = alpha[0, 0, ...] #(T, C_S, B)
-# pred = nn.logsumexp( mid_to_end[...,None] + scores_from_second_diag, axis=-1 ) #(B,T)
-
-
-
-
-
-
-
-
-
-
-
-
-#%%
 
 
 ########################
