@@ -12,7 +12,6 @@ tests/pairhmm_two_dim_forward_with_time_grid/test_align_submat_consistency.py . 
 tests/pairhmm_two_dim_forward_with_time_grid/test_del_cache_indexing.py .                [ 10%]
 tests/pairhmm_two_dim_forward_with_time_grid/test_emission_scoring_fns.py ..             [ 20%]
 tests/pairhmm_two_dim_forward_with_time_grid/test_forward_loglike_vs_brute_force_enum_edge_cases.py . [ 25%]
-                                                                                         [ 25%]
 tests/pairhmm_two_dim_forward_with_time_grid/test_generate_wavefront_indices.py .        [ 30%]
 tests/pairhmm_two_dim_forward_with_time_grid/test_init_first_diagonal.py ...             [ 45%]
 tests/pairhmm_two_dim_forward_with_time_grid/test_init_second_diagonal.py ....           [ 65%]

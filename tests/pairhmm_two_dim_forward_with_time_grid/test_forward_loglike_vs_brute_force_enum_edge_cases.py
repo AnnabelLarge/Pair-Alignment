@@ -5,16 +5,6 @@ Created on Tue Sep 16 13:47:05 2025
 
 @author: annabel
 
-This works through MARGINALIZING OVER A GRID OF TIMES; T!=B
-
-
-sizes:
-------
-transition matrx: T, C_transit, C_transit, S_prev, S_curr
-equilibrium distribution: C_transit, C_sites, A
-  > after marginalizing over site-independent C_sites: C_transit, A
-substitution emission matrix: T, C_transit, C_sites, K, A, A
-  > after marginalizing over site-independent C_sites and K: T, C_transit, A, A
 """
 import jax
 from jax import numpy as jnp
@@ -28,13 +18,21 @@ from scipy.special import logsumexp
 from tqdm import tqdm
 
 from models.latent_class_mixtures.transition_models import TKF92TransitionLogprobs
-from models.latent_class_mixtures.model_functions import joint_only_forward
+from models.latent_class_mixtures.model_functions import joint_only_forward as one_dim_forward
 
 from models.latent_class_mixtures.two_dim_forward_with_time_grid import two_dim_forward_with_time_grid as forward_fn
 
 
 
 class TestForwardLoglikeVsBruteFroceEnumEdgeCases(unittest.TestCase):
+    """
+    This works through MARGINALIZING OVER A GRID OF TIMES; T!=B
+
+    Specifically tests alignments where:
+    anc_length = 1, desc_length = 1
+    anc_length = 2, desc_length = 1
+    anc_length = 1, desc_length = 2
+    """
     def test_against_brute_force_enumeration(self):
         # make sure this is turned off, or the test will fail
         jax.config.update("jax_enable_x64", False)
@@ -275,7 +273,7 @@ class TestForwardLoglikeVsBruteFroceEnumEdgeCases(unittest.TestCase):
         del align1, align2, align3
         
         
-        ### concate sequences
+        ### concat sequences
         unaligned_seqs = jnp.stack([seqs1, seqs2, seqs3, seqs4], axis=0) #(B, L_seq, 2)
         del seqs1, seqs2, seqs3, seqs4
         
@@ -283,9 +281,11 @@ class TestForwardLoglikeVsBruteFroceEnumEdgeCases(unittest.TestCase):
         #######################################################################
         ### Test function   ###################################################
         #######################################################################
-        ### True scores from sum over possible alignments
+        ### True scores from sum over all possible alignments (manually enumerated)
         def sum_over_alignments(all_possible_aligns):
-            score_per_align = joint_only_forward(aligned_inputs = all_possible_aligns,
+            # one_dim_forward was previously developed to marginalize over classes, given an alignment
+            # proven to work in other tests
+            score_per_align = one_dim_forward(aligned_inputs = all_possible_aligns,
                                                  joint_logprob_emit_at_match = joint_logprob_emit_at_match,
                                                  logprob_emit_at_indel = logprob_emit_at_indel,
                                                  joint_logprob_transit = joint_logprob_transit_old_dim_order,
