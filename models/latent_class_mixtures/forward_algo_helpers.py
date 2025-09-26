@@ -5,6 +5,11 @@ Created on Mon Sep 22 12:25:48 2025
 
 @author: annabel
 
+these are helpers specifically for the 2D forward algorithm;
+    for 1D implementation, see model_functions.py
+
+functions:
+----------
 'compute_forward_messages_for_state',
 'generate_ij_coords_at_diagonal_k',
 'get_del_transition_message',
@@ -20,8 +25,8 @@ Created on Mon Sep 22 12:25:48 2025
 'update_cache',
 'wavefront_cache_lookup'
 
-
-
+dims:
+-----
 B: batch
 W: width of wavefront cache; equal to longest bottom-left-to-top-right 
  diagonal in the alignment grid
@@ -704,6 +709,13 @@ def get_del_transition_message( align_cell_idxes,
 def update_cache(idx_arr_for_state, 
                  transit_message, 
                  cache_to_update):
+    """
+    idx_arr_for_state : ArrayLike, (C_transit,)
+    
+    transit_message : ArrayLike, (W, T, C_transit, B)
+    
+    cache_to_update : ArrayLike, (W, T, C_transit * S-1, B)
+    """
     # dims
     W = cache_to_update.shape[0]
     T = cache_to_update.shape[1]
@@ -714,9 +726,9 @@ def update_cache(idx_arr_for_state,
     # dim2 = s, s_3, ...: at State s for all classes, given by idx_arr_for_state
     #               dim3: all samples in the batch
     updated = cache_to_update.at[jnp.arange(W)[:, None, None], 
-                                 jnp.arange(T)[None, :, None], 
-                                 idx_arr_for_state[None, None, :], 
-                                 :].set( transit_message ) # (W, T, C*S, B)
+                                  jnp.arange(T)[None, :, None], 
+                                  idx_arr_for_state[None, None, :], 
+                                  :].set( transit_message ) # (W, T, C*S, B)
     return updated
 
 
@@ -724,7 +736,7 @@ def update_cache(idx_arr_for_state,
 ###############################################################################
 ### INITIALIZE THE WAVEFRONT CACHE   ##########################################
 ###############################################################################
-def init_first_diagonal(empty_cache, 
+def init_first_diagonal(cache_size, 
                         unaligned_seqs,
                         joint_logprob_transit,
                         logprob_emit_at_indel):
@@ -749,8 +761,8 @@ def init_first_diagonal(empty_cache,
 
     Arguments:
     ----------
-    empty_cache : ArrayLike, ( 2, W, T, C_S, B )
-        cache to fill
+    cache_size : tuple of length 4
+        yields ( W, T, C_S, B )
     
     unaligned_seqs : ArrayLike, ( B, L_seq, 2 )
         dim2=0 is ancestor
@@ -765,16 +777,19 @@ def init_first_diagonal(empty_cache,
     
     Returns:
     ---------
-    alpha : ArrayLike, ( 2, W, T, C_S, B )
-        alpha[1] is now filled with values
+    first_diag_of_cache : ArrayLike, ( W, T, C_S, B )
     
     """
-    # dims
-    W = empty_cache.shape[1]
-    T = empty_cache.shape[2]
+    ### init
+    # other dims
+    W = cache_size[0]
+    T = cache_size[1]
+    C_S = cache_size[2]
+    B = cache_size[3]
     C_transit = logprob_emit_at_indel.shape[0]
-    C_S = empty_cache.shape[3]
-    B = empty_cache.shape[4]
+    
+    # diagonal to fill
+    empty_cache = jnp.full( (W, T, C_S, B), jnp.finfo(jnp.float32).min ) #(W, T, C_S, B)
     
     # gather emissions
     first_anc_toks = unaligned_seqs[:, 1, 0] #(B,)
@@ -786,38 +801,43 @@ def init_first_diagonal(empty_cache,
     # alpha_{i=1, j=0}^{D_d} = Em( x_1 | \tau = D, \nu = d, t ) * Tr( \tau = D, \nu = d | Start, t )
     first_del_emit = logprob_emit_at_indel[:, first_anc_toks - 3] #(C, B)
     start_del_transit = joint_logprob_transit[:, 0, -1, :, 2] #(T, C)
-    new_value = first_del_emit[None,...] + start_del_transit[...,None] #(T, C, B)
+    logprob_first_del = first_del_emit[None,...] + start_del_transit[...,None] #(T, C, B)
     
-    #         dim0 = 1: corresponds to k-2
-    #         dim1 = 0: at cell (1,0), which is the first element of the diagonal
-    #             dim2: all times
-    # dim3 = 2, 5, ...: at Del for all classes, which is encoded as two
-    #             dim4: all samples in the batch
-    idx_to_reset = index_all_classes_one_state(state_idx=2,
-                                               num_transit_classes=C_transit) #(C,)
-    alpha = empty_cache.at[1, 0, jnp.arange(T)[:,None], idx_to_reset[None,:], :].set( new_value ) # (2, W, T, C*S, B)
-    del first_del_emit, start_del_transit, new_value, idx_to_reset, empty_cache
+    #         dim0 = 0: at cell (1,0), which is the first element of the diagonal
+    #             dim1: all times
+    # dim2 = 2, 5, ...: at Del for all classes, which is encoded as two
+    #             dim3: all samples in the batch
+    del_idx_all_classes = index_all_classes_one_state(state_idx=2,
+                                                      num_transit_classes=C_transit) #(C,)
+    first_diag_of_cache = empty_cache.at[0, 
+                                         jnp.arange(T)[:,None], 
+                                         del_idx_all_classes[None,:], 
+                                         :].set( logprob_first_del ) # (W, T, C*S, B)
+    del first_del_emit, start_del_transit, logprob_first_del
+    del del_idx_all_classes, empty_cache, first_anc_toks
     
     
     ### first insert
     # alpha_{i=0, j=1}^{I_d} = Em( y_1 | \tau = I, \nu = d, t ) * Tr( \tau = I, \nu = d | Start, t )
     first_ins_emit = logprob_emit_at_indel[:, first_desc_toks - 3] #(C, B)
     start_ins_transit = joint_logprob_transit[:, 0, -1, :, 1] #(T, C)
-    new_value = first_ins_emit[None,...] + start_ins_transit[...,None] #(T, C, B)
+    logprob_first_ins = first_ins_emit[None,...] + start_ins_transit[...,None] #(T, C, B)
     
-    #         dim0 = 1: corresponds to k-2
-    #         dim1 = 1: at cell (0,1), which is the second element of the diagonal
-    #             dim2: all times
-    # dim3 = 1, 4, ...: at Ins for all classes, which is encoded as one
-    #             dim4: all samples in the batch
-    idx_to_reset = index_all_classes_one_state(state_idx=1,
-                                               num_transit_classes=C_transit) #(C,)
-    alpha = alpha.at[1, 1, jnp.arange(T)[:,None], idx_to_reset[None,:], :].set( new_value ) # (2, W, T, C*S, B)
+    #         dim0 = 1: at cell (0,1), which is the second element of the diagonal
+    #             dim1: all times
+    # dim2 = 1, 4, ...: at Ins for all classes, which is encoded as one
+    #             dim3: all samples in the batch
+    ins_idx_all_classes = index_all_classes_one_state(state_idx=1,
+                                                      num_transit_classes=C_transit) #(C,)
+    first_diag_of_cache = first_diag_of_cache.at[1, 
+                                                 jnp.arange(T)[:,None], 
+                                                 ins_idx_all_classes[None,:], 
+                                                 :].set( logprob_first_ins ) # (2, W, T, C*S, B)
     
-    return alpha
+    return first_diag_of_cache
 
 
-def init_second_diagonal( cache_with_first_diag, 
+def init_second_diagonal( cache_for_prev_diagonal, 
                           unaligned_seqs,
                           joint_logprob_transit,
                           joint_logprob_emit_at_match,
@@ -843,8 +863,8 @@ def init_second_diagonal( cache_with_first_diag,
     
     Arguments:
     ----------
-    cache_with_first_diag : ArrayLike, ( 2, W, T, C_S, B )
-        cache to fill; cache_with_first_diag[1] already has values
+    cache_for_prev_diagonal : ArrayLike, ( W, T, C_S, B )
+        diagonal at k=1
     
     unaligned_seqs : ArrayLike, ( B, L_seq, 2 )
         dim2=0 is ancestor
@@ -862,19 +882,21 @@ def init_second_diagonal( cache_with_first_diag,
     
     Returns:
     ---------
-    alpha : ArrayLike, ( 2, W, T, C_S, B )
-        alpha[0] is now filled with values
+    second_diag_of_cache : ArrayLike, ( W, T, C_S, B )
               
     joint_logprob_transit_mid_only : ArrayLike, (T, C_S, C_S)
         transition matrix with MID transitions only; inner dims combined
     
     """
     # dims, lengths
-    W = cache_with_first_diag.shape[1]
-    T = cache_with_first_diag.shape[2]
+    W = cache_for_prev_diagonal.shape[0]
+    T = cache_for_prev_diagonal.shape[1]
+    C_S = cache_for_prev_diagonal.shape[2]
+    B = cache_for_prev_diagonal.shape[3]
     C_transit = logprob_emit_at_indel.shape[0]
-    C_S = cache_with_first_diag.shape[3]
-    B = cache_with_first_diag.shape[4]
+    
+    # diagonal to fill
+    empty_cache = jnp.full( (W, T, C_S, B), jnp.finfo(jnp.float32).min ) #(W, T, C_S, B)
     
     # align_cell_idxes is (B, W, 2)
     # pad_mask is (B, W)
@@ -886,43 +908,40 @@ def init_second_diagonal( cache_with_first_diag,
     joint_logprob_transit_mid_only = jnp.reshape(joint_logprob_transit[:, :, :3, :, :3], (T, C_S, C_S) ) #(T, C*S_prev, C*S_curr)
     
     
-    ###########################################
-    ### Fill second diagonal with transitions #
-    ###########################################
-    # Ins: alpha_{i,j}^{I,d} = \sum_{s \in \{M,I,D\}, c in C_transit} Tr(I,d|s,c,t) * alpha_{i,j-1}^{s_c}
-    to_fill = jnp.full( (W, T, C_S, B), jnp.finfo(jnp.float32).min )
+    ##################################
+    ### message passing, per state   #
+    ##################################
+    ### c, d: latent site class
+    ### S: some alignment state, M/I/D (not start/end)
+    
+    ### Ins
+    ### \sum_{s, c} Tr( curr_state = Ins, curr_class = d | prev_state = S, prev_class = c, t ) * \alpha_{i, j-1}^{S_c}
     out = get_ins_transition_message( align_cell_idxes = align_cell_idxes,
                                       pad_mask = pad_mask,
-                                      cache_at_curr_diagonal = to_fill,
-                                      cache_for_prev_diagonal = cache_with_first_diag[1,...],
+                                      cache_at_curr_diagonal = empty_cache,
+                                      cache_for_prev_diagonal = cache_for_prev_diagonal,
                                       seq_lens = seq_lens,
                                       joint_logprob_transit_mid_only = joint_logprob_transit_mid_only,
                                       C_transit = C_transit ) #(W, T, C_S, B)
     
-    ins_idx = out[0] #(C,)
-    ins_transit_message = out[1] #(W, T, C, B)
+    ins_idx = out[0] #(C_transit,)
+    ins_transit_message = out[1] #(W, T, C_transit, B)
     del out
     
-    # update stored values in alpha
-    #         dim0 = 0: corresponds to k-1
-    #             dim1: across entire diagonal
-    #             dim2: all times
-    # dim3 = 1, 4, ...: at Ins for all classes, which is encoded as one
-    #             dim4: all samples in the batch
-    alpha = cache_with_first_diag.at[0, 
-                                     jnp.arange(W)[:, None, None], 
-                                     jnp.arange(T)[None, :, None], 
-                                     ins_idx[None, None, :], 
-                                     :].set( ins_transit_message ) # (2, W, T, C*S, B)
-    del ins_idx, ins_transit_message, to_fill
+    # after this step, cache contains: 
+    # P(curr_state = Ins,   curr_class = d, anc_{...,i},   desc_{...,j-1} | t )
+    second_diag_of_cache = update_cache(idx_arr_for_state = ins_idx, 
+                                   transit_message = ins_transit_message, 
+                                   cache_to_update = empty_cache) # (W, T, C*S, B)
+    del ins_idx, ins_transit_message, empty_cache
     
     
-    ### Del: alpha_{i,j}^{D,d} = \sum_{s \in \{M,I,D\}, c in C_transit} Tr(D,d|s,c,t) * alpha_{i-1,j}^{s_c}
-    to_fill = jnp.full( (W, T, C_S, B), jnp.finfo(jnp.float32).min )
+    ### Del
+    ### \sum_{s, c} Tr( curr_state = Del, curr_class = d | prev_state = S, prev_class = c, t ) * \alpha_{i-1, j}^{S_c}
     out = get_del_transition_message( align_cell_idxes = align_cell_idxes,
                                       pad_mask = pad_mask,
-                                      cache_at_curr_diagonal = to_fill,
-                                      cache_for_prev_diagonal = cache_with_first_diag[1,...],
+                                      cache_at_curr_diagonal = second_diag_of_cache,
+                                      cache_for_prev_diagonal = cache_for_prev_diagonal,
                                       seq_lens = seq_lens,
                                       joint_logprob_transit_mid_only = joint_logprob_transit_mid_only,
                                       C_transit = C_transit ) #(W, T, C_S, B)
@@ -931,68 +950,60 @@ def init_second_diagonal( cache_with_first_diag,
     del_transit_message = out[1] #(W, T, C, B)
     del out
     
-    # update stored values in alpha
-    #         dim0 = 0: corresponds to k-1
-    #             dim1: across entire diagonal
-    #             dim2: all times
-    # dim3 = 2, 5, ...: at del for all classes, which is encoded as two
-    #             dim4: all samples in the batch
-    alpha = alpha.at[0, 
-                     jnp.arange(W)[:, None, None], 
-                     jnp.arange(T)[None, :, None], 
-                     del_idx[None, None, :], 
-                     :].set( del_transit_message ) # (2, W, T, C*S, B)
-    del to_fill, del_idx, del_transit_message
+    # after this step, cache contains: 
+    # P(curr_state = Ins,   curr_class = d, anc_{...,i},   desc_{...,j-1} | t )
+    # P(curr_state = Del,   curr_class = d, anc_{...,i-1}, desc_{...,j}   | t )
+    second_diag_of_cache = update_cache(idx_arr_for_state = del_idx, 
+                                   transit_message = del_transit_message,  
+                                   cache_to_update = second_diag_of_cache) # (W, T, C*S, B)
+    del del_idx, del_transit_message
     
     
-    ### Match: alpha_{i=1, j=1}^{I_d} = Em( x_1, y_1 | \tau = M, \nu = d, t ) * Tr( \tau = M, \nu = d | Start, t )
+    ### Match 
+    ### Em( x_1, y_1 | curr_state = Match, curr_class = d, t ) * Tr( curr_state = Match, curr_class = d | prev_state = Start, t )
     start_match_transit = joint_logprob_transit[:, 0, -1, :, 0] #(T, C)
+    start_match_transit = start_match_transit[..., None] #(T, C, 1)
     
     # along dim W: determine which cell in the diagonal is (1,1)
     mask_for_cell_1_1 = jnp.all(align_cell_idxes == jnp.array([1, 1]), axis=-1)  # (B, W)
     w_idx_for_cell_1_1 = jnp.argmax(mask_for_cell_1_1, axis=1)  # (B,)
 
-    #         dim0 = 0: corresponds to k-1
-    #         dim1 = 1: at cell (1,1)
-    #             dim2: all times
-    # dim3 = 0, 3, ...: at Match for all classes, which is encoded as zero
-    #             dim4: all samples in the batch
+    # indices of match state, across all classes
     match_idx = index_all_classes_one_state( state_idx = 0,
-                                             num_transit_classes = C_transit ) #(C,)
-    
-    alpha = alpha.at[0, 
-                     w_idx_for_cell_1_1[None, None, :], 
-                     jnp.arange(T)[:, None, None], 
-                     match_idx[None,:, None], 
-                     jnp.arange(B)[None, None, :] ].set( start_match_transit[..., None] ) # (2, W, T, C*S, B)
-    
-    del start_match_transit, match_idx
+                                              num_transit_classes = C_transit ) #(C,)
     
     
-    ##############################################################
-    ### Add logprob of emissions to all cells of second diagonal #
-    ##############################################################
+    # after this step, cache contains: 
+    # P(curr_state = Match, curr_class = d, anc_{...,i-1}, desc_{...,j-1} | t )
+    # P(curr_state = Ins,   curr_class = d, anc_{...,i},   desc_{...,j-1} | t )
+    # P(curr_state = Del,   curr_class = d, anc_{...,i-1}, desc_{...,j}   | t )
+    second_diag_of_cache = second_diag_of_cache.at[w_idx_for_cell_1_1[None, None, :], 
+                                        jnp.arange(T)[:, None, None], 
+                                        match_idx[None,:, None], 
+                                        jnp.arange(B)[None, None, :] ].set( start_match_transit ) # (W, T, C*S, B)
+    del start_match_transit, match_idx, mask_for_cell_1_1, w_idx_for_cell_1_1
+    
+    
+    ######################################
+    ### update messages with emissions   #
+    ######################################
     # get emission tokens; at padding positions in diagonal, these will also be pad
     anc_toks_at_diag_k = unaligned_seqs[jnp.arange(B)[:, None], align_cell_idxes[...,0], 0] #(B, W)
     desc_toks_at_diag_k = unaligned_seqs[jnp.arange(B)[:, None], align_cell_idxes[...,1], 1] #(B, W)
     
     # use emissions to index scoring matrices
-    #   at invalid positions, this is ZERO (not jnp.finfo(jnp.float32).min)!!!
-    #   later, will add this to log-probability of transitions, so at invalid 
-    #   positions, adding zero is the same as skipping the operation
+    #   at invalid positions, this is ZERO (not jnp.finfo(jnp.float32).min)!
     emit_logprobs_at_k = joint_loglike_emission_at_k_time_grid( anc_toks = anc_toks_at_diag_k,
                                                                 desc_toks = desc_toks_at_diag_k,
                                                                 joint_logprob_emit_at_match = joint_logprob_emit_at_match,
                                                                 logprob_emit_at_indel = logprob_emit_at_indel, 
                                                                 fill_invalid_pos_with = 0.0 ) # (W, T, C*S, B)
     
-    # add to appropriate positions in the cache
-    #         dim0 = 0: corresponds to k-1
-    #             dim1: all values in the diagonal
-    #             dim2: all times
-    #             dim3: all states and caches
-    #             dim4: all samples in the batch
-    alpha = alpha.at[0, :, :, :, :].add( emit_logprobs_at_k ) # (2, W, T, C*S, B)
+    # after this step, cache contains: 
+    # P(curr_state = Match, curr_class = d, anc_{...,i}, desc_{...,j} | t )
+    # P(curr_state = Ins,   curr_class = d, anc_{...,i}, desc_{...,j} | t )
+    # P(curr_state = Del,   curr_class = d, anc_{...,i}, desc_{...,j} | t )
+    second_diag_of_cache = second_diag_of_cache + emit_logprobs_at_k # (W, T, C*S, B)
     
-    return alpha, joint_logprob_transit_mid_only
+    return second_diag_of_cache, joint_logprob_transit_mid_only
     

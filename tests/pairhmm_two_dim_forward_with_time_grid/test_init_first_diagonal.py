@@ -103,17 +103,11 @@ class TestInitFirstDiagonal(unittest.TestCase):
         ################################################
         ### Initialize cache for wavefront diagonals   #
         ################################################
-        # \tau = state, M/I/D
-        # \nu = class (unique to combination of domain+fragment)
-        # alpha_{ij}^{s_d} = P(desc_{...j}, anc_{...i}, \tau=s, \nu=d | t)
-        # dim0: 0=previous diagonal, 1=diag BEFORE previous diagonal
-        alpha = jnp.full( (2, W, T, C_S, B), jnp.finfo(jnp.float32).min )
-        
         # fill diagonal k-2: alignment cells (1,0) and (0,1)
-        alpha = init_first_diagonal( empty_cache = alpha, 
-                                     unaligned_seqs = unaligned_seqs,
-                                     joint_logprob_transit = joint_logprob_transit,
-                                     logprob_emit_at_indel = logprob_emit_at_indel )  #(2, W, T, C_S, B)
+        first_diag = init_first_diagonal( cache_size = (W, T, C_S, B), 
+                                          unaligned_seqs = unaligned_seqs,
+                                          joint_logprob_transit = joint_logprob_transit,
+                                          logprob_emit_at_indel = logprob_emit_at_indel )  #(2, W, T, C_S, B)
 
         
         ### make attributes
@@ -125,36 +119,23 @@ class TestInitFirstDiagonal(unittest.TestCase):
         self.B = B
         self.W = W
         
-        self.alpha = alpha
+        self.first_diag = first_diag
         self.unaligned_seqs = unaligned_seqs
         self.joint_logprob_transit = joint_logprob_transit
         self.logprob_emit_at_indel = logprob_emit_at_indel
     
     
     def test_shape(self):
-        alpha = self.alpha
+        first_diag = self.first_diag
         W = self.W
         T = self.T
         C_S = self.C_S
         B = self.B
         
-        npt.assert_allclose( alpha.shape, (2, W, T, C_S, B) )
-    
-    
-    def test_empty_cells(self):
-        alpha = self.alpha
-        W = self.W
-        
-        # alpha[0] should still be full of jnp.finfo(jnp.float32).min
-        npt.assert_allclose( alpha[0], jnp.finfo(jnp.float32).min )
-        
-        # for all w > 1, values should also still be full of jnp.finfo(jnp.float32).min
-        if W > 2:
-            npt.assert_allclose( alpha[:, 2:, ...], jnp.finfo(jnp.float32).min )
-        
+        npt.assert_allclose( first_diag.shape, (W, T, C_S, B) )
     
     def test_first_deletion_init(self):
-        alpha = self.alpha
+        first_diag = self.first_diag
         W = self.W
         T = self.T
         C_transit = self.C_transit
@@ -164,7 +145,7 @@ class TestInitFirstDiagonal(unittest.TestCase):
         joint_logprob_transit = self.joint_logprob_transit
         logprob_emit_at_indel = self.logprob_emit_at_indel
         
-        cell_1_0 = alpha[1, 0, ...] # (T, C_S, B)
+        cell_1_0 = first_diag[0, ...] # (T, C_S, B)
 
         # check shape
         npt.assert_allclose( cell_1_0.shape, (T, C_S, B) )
@@ -194,7 +175,7 @@ class TestInitFirstDiagonal(unittest.TestCase):
     
     
     def test_first_insert_init(self):
-        alpha = self.alpha
+        first_diag = self.first_diag
         W = self.W
         T = self.T
         C_transit = self.C_transit
@@ -204,7 +185,7 @@ class TestInitFirstDiagonal(unittest.TestCase):
         joint_logprob_transit = self.joint_logprob_transit
         logprob_emit_at_indel = self.logprob_emit_at_indel
         
-        cell_0_1 = alpha[1, 1, ...] # (T, C_S, B)
+        cell_0_1 = first_diag[1, ...] # (T, C_S, B)
         
         # check shape
         npt.assert_allclose( cell_0_1.shape, (T, C_S, B) )

@@ -1,0 +1,31 @@
+run on: 9/25/25
+
+$ pytest tests/pairhmm_two_dim_forward_with_time_grid/
+===================================== test session starts ======================================
+platform darwin -- Python 3.9.18, pytest-7.4.4, pluggy-1.0.0
+rootdir: /Users/annabel/Desktop/Research/autoregressive_alignment/Pair-Alignment
+configfile: pytest.ini
+plugins: jaxtyping-0.2.25, anyio-3.5.0, typeguard-2.13.3
+collected 20 items                                                                             
+
+tests/pairhmm_two_dim_forward_with_time_grid/test_align_submat_consistency.py .          [  5%]
+tests/pairhmm_two_dim_forward_with_time_grid/test_del_cache_indexing.py .                [ 10%]
+tests/pairhmm_two_dim_forward_with_time_grid/test_emission_scoring_fns.py ..             [ 20%]
+tests/pairhmm_two_dim_forward_with_time_grid/test_forward_loglike_vs_brute_force_enum_edge_cases.py . [ 25%]
+                                                                                         [ 25%]
+tests/pairhmm_two_dim_forward_with_time_grid/test_generate_wavefront_indices.py .        [ 30%]
+tests/pairhmm_two_dim_forward_with_time_grid/test_init_first_diagonal.py ...             [ 45%]
+tests/pairhmm_two_dim_forward_with_time_grid/test_init_second_diagonal.py ....           [ 65%]
+tests/pairhmm_two_dim_forward_with_time_grid/test_ins_cache_indexing.py .                [ 70%]
+tests/pairhmm_two_dim_forward_with_time_grid/test_match_cache_indexing.py .              [ 75%]
+tests/pairhmm_two_dim_forward_with_time_grid/test_message_passing.py ...                 [ 90%]
+tests/pairhmm_two_dim_forward_with_time_grid/test_recover_wavefront_indices.py .         [ 95%]
+tests/pairhmm_two_dim_forward_with_time_grid/test_return_all_indices_per_state.py .      [100%]
+
+======================================= warnings summary =======================================
+../../../../opt/anaconda3/envs/jax_env/lib/python3.9/site-packages/chex/_src/pytypes.py:53
+  /Users/annabel/opt/anaconda3/envs/jax_env/lib/python3.9/site-packages/chex/_src/pytypes.py:53: DeprecationWarning: jax.core.Shape is deprecated. Use Shape = Sequence[int | Any].
+    Shape = jax.core.Shape
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================================ 20 passed, 1 warning in 22.50s ================================

@@ -6,7 +6,6 @@ Created on Tue Sep 23 19:30:31 2025
 @author: annabel
 """
 import jax
-jax.config.update("jax_enable_x64", True)
 from jax import numpy as jnp
 import flax.linen as nn
 
@@ -21,6 +20,9 @@ from models.latent_class_mixtures.forward_algo_helpers import (index_all_classes
 
 class TestMessagePassing(unittest.TestCase):
     def setUp(self):
+        # its helpful to have float64 for this
+        jax.config.update("jax_enable_x64", True)
+        
         # dims
         C_transit = 3
         A = 20

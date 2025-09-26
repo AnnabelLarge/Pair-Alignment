@@ -6,8 +6,6 @@ Created on Tue Sep 23 18:58:08 2025
 @author: annabel
 """
 import jax
-jax.config.update("jax_enable_x64", True)
-
 from jax import numpy as jnp
 import flax.linen as nn
 
@@ -119,7 +117,7 @@ class TestInitSecondDiagonal(unittest.TestCase):
         unaligned_seqs = jnp.stack([seqs1, seqs2, seqs3, seqs4, seqs5], axis=0) #(B, L_seq, 2)
         
         # extra dims
-        all_B = unaligned_seqs.shape[0]
+        B = unaligned_seqs.shape[0]
         
         # widest diagonal for wavefront parallelism is min(anc_len, desc_len) + 1
         seq_lens = (unaligned_seqs != 0).sum(axis=1)-2 #(B, 2)
@@ -140,25 +138,24 @@ class TestInitSecondDiagonal(unittest.TestCase):
         ################################################
         ### Initialize cache for wavefront diagonals   #
         ################################################
-        # \tau = state, M/I/D
-        # \nu = class (unique to combination of domain+fragment)
-        # alpha_{ij}^{s_d} = P(desc_{...j}, anc_{...i}, \tau=s, \nu=d | t)
-        # dim0: 0=previous diagonal, 1=diag BEFORE previous diagonal
-        alpha = jnp.full( (2, W, T, C_S, all_B), jnp.finfo(jnp.float32).min )
-        
         # fill diagonal k-2: alignment cells (1,0) and (0,1)
-        alpha_after_first_diag_fill = init_first_diagonal( empty_cache = alpha, 
-                                                           unaligned_seqs = unaligned_seqs,
-                                                           joint_logprob_transit = joint_logprob_transit,
-                                                           logprob_emit_at_indel = logprob_emit_at_indel ) #(2, W, T, C_S, B)
+        first_diag = init_first_diagonal( cache_size = (W, T, C_S, B), 
+                                          unaligned_seqs = unaligned_seqs,
+                                          joint_logprob_transit = joint_logprob_transit,
+                                          logprob_emit_at_indel = logprob_emit_at_indel ) #(2, W, T, C_S, B)
         
         # fill diag k-1: alignment cells (2,0), (1,1), and (0,2)
-        alpha, joint_logprob_transit_mid_only = init_second_diagonal( cache_with_first_diag = alpha_after_first_diag_fill, 
+        out = init_second_diagonal( cache_for_prev_diagonal = first_diag, 
                                          unaligned_seqs = unaligned_seqs,
                                          joint_logprob_transit = joint_logprob_transit,
                                          joint_logprob_emit_at_match = joint_logprob_emit_at_match,
                                          logprob_emit_at_indel = logprob_emit_at_indel,
-                                         seq_lens = seq_lens ) #(2, W, T, C_S, B)
+                                         seq_lens = seq_lens ) 
+        
+        # second diag is (W, T, C_S, B)
+        # joint_logprob_transit_mid_only is (T, C_S, C_S)
+        second_diag, joint_logprob_transit_mid_only = out
+        del out
 
         
         ### make attributes
@@ -167,11 +164,11 @@ class TestInitSecondDiagonal(unittest.TestCase):
         self.A = A
         self.S = S
         self.C_S = C_S
-        self.all_B = all_B
+        self.B = B
         self.W = W
         
-        self.alpha = alpha
-        self.alpha_after_first_diag_fill = alpha_after_first_diag_fill
+        self.first_diag = first_diag
+        self.second_diag = second_diag 
         self.unaligned_seqs = unaligned_seqs
         self.joint_logprob_transit = joint_logprob_transit
         self.joint_logprob_transit_mid_only = joint_logprob_transit_mid_only
@@ -185,22 +182,17 @@ class TestInitSecondDiagonal(unittest.TestCase):
 
 
     def test_shape(self):
-        alpha = self.alpha
+        second_diag = self.second_diag
         W = self.W
         T = self.T
         C_S = self.C_S
-        B = self.all_B
+        B = self.B
         
-        npt.assert_allclose( alpha.shape, (2, W, T, C_S, B) )
-    
-    def test_first_diagonal(self):
-        # first diagonal should be unchanged
-        true = self.alpha_after_first_diag_fill[1,...]
-        pred = self.alpha[1,...]
-        npt.assert_allclose( true, pred )
+        npt.assert_allclose( second_diag.shape, (W, T, C_S, B) )
     
     def test_cell_2_0(self):
-        alpha = self.alpha
+        first_diag = self.first_diag
+        second_diag = self.second_diag
         W = self.W
         T = self.T
         C_transit = self.C_transit
@@ -210,7 +202,7 @@ class TestInitSecondDiagonal(unittest.TestCase):
         joint_logprob_transit = self.joint_logprob_transit_mid_only
         logprob_emit_at_indel = self.logprob_emit_at_indel
         
-        cell_2_0 = alpha[0, 0, ..., sample_idxes] # (B, T, C_S)
+        cell_2_0 = second_diag[0, ..., sample_idxes] # (B, T, C_S)
         cell_2_0 = jnp.transpose(cell_2_0, (1,2,0) ) #(T, C_S, B)
         B = unaligned_seqs.shape[0]
         
@@ -237,7 +229,7 @@ class TestInitSecondDiagonal(unittest.TestCase):
                         prob_space_c_s_sum = 0
                         for c_s_prev in range(C_S):
                             # alpha_{1,0}^{c_s_prev}
-                            cache = alpha[1,0, t_idx, c_s_prev, b]
+                            cache = first_diag[0, t_idx, c_s_prev, b]
                             
                             # logP(c_s_curr | c_s_prev, t)
                             logprob_to_del = joint_logprob_transit[t_idx, c_s_prev, c_s_curr]
@@ -261,7 +253,8 @@ class TestInitSecondDiagonal(unittest.TestCase):
     
     
     def test_cell_0_2(self):
-        alpha = self.alpha
+        first_diag = self.first_diag
+        second_diag = self.second_diag
         W = self.W
         T = self.T
         C_transit = self.C_transit
@@ -272,8 +265,7 @@ class TestInitSecondDiagonal(unittest.TestCase):
         logprob_emit_at_indel = self.logprob_emit_at_indel
         idx_of_cell_0_2 = self.idx_of_cell_0_2
         
-        ### COME BACK HERE
-        cell_0_2 = alpha[0, idx_of_cell_0_2, ..., sample_idxes] # (B, T, C_S)
+        cell_0_2 = second_diag[idx_of_cell_0_2, ..., sample_idxes] # (B, T, C_S)
         cell_0_2 = jnp.transpose(cell_0_2, (1,2,0) ) #(T, C_S, B)
         B = unaligned_seqs.shape[0]
         
@@ -300,7 +292,7 @@ class TestInitSecondDiagonal(unittest.TestCase):
                         prob_space_c_s_sum = 0
                         for c_s_prev in range(C_S):
                             # alpha_{0,1}^{c_s_prev}
-                            cache = alpha[1, 1, t_idx, c_s_prev, b]
+                            cache = first_diag[1, t_idx, c_s_prev, b]
                             
                             # logP(c_s_curr | c_s_prev, t)
                             logprob_to_ins = joint_logprob_transit[t_idx, c_s_prev, c_s_curr]
@@ -324,12 +316,13 @@ class TestInitSecondDiagonal(unittest.TestCase):
     
     
     def test_cell_1_1(self):
-        alpha = self.alpha
+        first_diag = self.first_diag
+        second_diag = self.second_diag
         W = self.W
         T = self.T
         C_transit = self.C_transit
         C_S = self.C_S
-        B = self.all_B
+        B = self.B
         unaligned_seqs = self.unaligned_seqs
         idx_of_cell_1_1 = self.idx_of_cell_1_1
         joint_logprob_transit = self.joint_logprob_transit
@@ -337,7 +330,7 @@ class TestInitSecondDiagonal(unittest.TestCase):
         joint_logprob_emit_at_match = self.joint_logprob_emit_at_match
         logprob_emit_at_indel = self.logprob_emit_at_indel
         
-        cell_1_1 = alpha[0, idx_of_cell_1_1, :, :, jnp.arange(B)]  #(B, T, C_S)
+        cell_1_1 = second_diag[idx_of_cell_1_1, :, :, jnp.arange(B)]  #(B, T, C_S)
         cell_1_1 = jnp.transpose(cell_1_1, (1,2,0) ) #(T, C_S, B)
 
         # check shape
@@ -366,7 +359,7 @@ class TestInitSecondDiagonal(unittest.TestCase):
                         prob_space_c_s_sum = 0
                         for c_s_prev in range(C_S):
                             # alpha_{1,0}^{c_s_prev}
-                            cache = alpha[1, 0, t_idx, c_s_prev, b]
+                            cache = first_diag[0, t_idx, c_s_prev, b]
                             
                             # logP(c_s | c_s_prev, t)
                             logprob_to_ins = joint_logprob_transit_mid_only[t_idx, c_s_prev, c_s]
@@ -394,7 +387,7 @@ class TestInitSecondDiagonal(unittest.TestCase):
                         prob_space_c_s_sum = 0
                         for c_s_prev in range(C_S):
                             # alpha_{0,1}^{c_s_prev}
-                            cache = alpha[1, 1, t_idx, c_s_prev, b]
+                            cache = first_diag[1, t_idx, c_s_prev, b]
                             
                             # logP(c_s | c_s_prev, t)
                             logprob_to_del = joint_logprob_transit_mid_only[t_idx, c_s_prev, c_s]
