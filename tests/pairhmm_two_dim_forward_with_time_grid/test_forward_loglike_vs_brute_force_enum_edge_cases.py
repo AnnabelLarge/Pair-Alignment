@@ -24,7 +24,7 @@ from models.latent_class_mixtures.two_dim_forward_with_time_grid import two_dim_
 
 
 
-class TestForwardLoglikeVsBruteFroceEnumEdgeCases(unittest.TestCase):
+class TestForwardLoglikeVsBruteForceEnumEdgeCases(unittest.TestCase):
     """
     This works through MARGINALIZING OVER A GRID OF TIMES; T!=B
 

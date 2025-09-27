@@ -88,11 +88,6 @@ def two_dim_forward_with_time_grid(unaligned_seqs,
     ################################################
     ### Initialize cache for wavefront diagonals   #
     ################################################
-    # dim0: 0=previous diagonal, 1=diag BEFORE previous diagonal
-    # alpha = jnp.full( (2, W, T, C_S, B), jnp.finfo(jnp.float32).min )
-    # cache_for_prev_diagonal =  jnp.full( (W, T, C_S, B), jnp.finfo(jnp.float32).min )
-    
-    
     # fill diagonal k=1: alignment cells (1,0) and (0,1)
     diag_k1 = init_first_diagonal( cache_size = (W, T, C_S, B),
                                    unaligned_seqs = unaligned_seqs,
@@ -138,6 +133,7 @@ def two_dim_forward_with_time_grid(unaligned_seqs,
         
         # align_cell_idxes is (B, W, 2)
         # pad_mask is (B, W)
+        # pad_mask is True at valid cells, False at padding locations
         align_cell_idxes, pad_mask = generate_ij_coords_at_diagonal_k(seq_lens = seq_lens,
                                                                       diagonal_k = k,
                                                                       widest_diag_W = W)
@@ -240,23 +236,17 @@ def two_dim_forward_with_time_grid(unaligned_seqs,
         # if at final diagonal, then cell [i = anc_len, j = desc_len] will be at W=0
         #   if at an intermediate diagonal, this contains an intermediate probability
         #   if at padding, then toss this value
+        # pad_mask is True at valid cells, False at padding locations
         new_alignment_score = cache_at_curr_k[0,...] #(T, C*S, B)
         new_alignment_score = jnp.where( pad_mask[:,0][None,None,:],
                                          new_alignment_score,
                                          prev_alignment_score ) #(T, C*S, B)
         
         # build a new carry
-        # cache_for_prev_diagonal = carry['cache_for_prev_diagonal'] #(W, T, C_S, B)
-    
-        # # diagonal at k-2 (diagonal BEFORE previous diagonal; used to get [i-1, j-1] )
-        # cache_two_diags_prior = carry['cache_two_diags_prior'] #(W, T, C_S, B)
-        
-        # # at the end, this will ALWAYS be the bottom-right cell, at [i=anc_len, j=desc_len]
-        # prev_alignment_score = carry['alignment_score_per_class_and_state'] #(T, C_S, B)
-        new_carry = {'cache_for_prev_diagonal': cache_at_curr_k,
-                     'cache_two_diags_prior': cache_for_prev_diagonal,
-                     'alignment_score_per_class_and_state': new_alignment_score}
-        
+        new_carry = {'cache_for_prev_diagonal': cache_at_curr_k, #(W, T, C_S, B)
+                     'cache_two_diags_prior': cache_for_prev_diagonal, #(W, T, C_S, B)
+                     'alignment_score_per_class_and_state': new_alignment_score} #(T, C_S, B)
+         
         return new_carry, cache_at_curr_k
     
     # do scan fn
@@ -278,7 +268,6 @@ def two_dim_forward_with_time_grid(unaligned_seqs,
                                        init = init_carry,
                                        xs = xs,
                                        length = xs.shape[0] )
-        
     
     alignment_score_per_class_and_state = final_carry['alignment_score_per_class_and_state'] #(T, C_S, B)
     del final_carry, joint_logprob_transit_mid_only, init_carry
@@ -287,8 +276,7 @@ def two_dim_forward_with_time_grid(unaligned_seqs,
     #################################
     ### Multiplying by any -> end   #
     #################################
-    # reminder: joint_logprob_transit was 
-    #   (T, C_transit_prev, S_prev, C_transit_curr, S_curr)
+    # reminder: joint_logprob_transit was (T, C_transit_prev, S_prev, C_transit_curr, S_curr)
     mid_to_end = joint_logprob_transit[:, :, :3, -1, -1] #(T, C_transit_prev, (S-1)_prev)
     mid_to_end = jnp.reshape(mid_to_end, (T, C_S ) ) #(T, C_S)
     forward_logprob = nn.logsumexp( mid_to_end[...,None] + alignment_score_per_class_and_state, axis=1 ) #(T, B)

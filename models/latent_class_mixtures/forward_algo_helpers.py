@@ -361,7 +361,7 @@ def joint_loglike_emission_at_k_time_grid( anc_toks,
     # stack all
     emit_if_ins = jnp.broadcast_to( emit_if_ins[None, :, :, :], (T, C, B, W) ) #(T, C_transit, B, W)
     emit_if_del = jnp.broadcast_to( emit_if_del[None, :, :, :], (T, C, B, W) ) #(T, C_transit, B, W)
-
+    
     joint_emissions = jnp.stack([joint_emit_if_match, 
                                  emit_if_ins, 
                                  emit_if_del], axis=2) #(T, C_transit, S-1, B, W)
@@ -832,7 +832,7 @@ def init_first_diagonal(cache_size,
     first_diag_of_cache = first_diag_of_cache.at[1, 
                                                  jnp.arange(T)[:,None], 
                                                  ins_idx_all_classes[None,:], 
-                                                 :].set( logprob_first_ins ) # (2, W, T, C*S, B)
+                                                 :].set( logprob_first_ins ) # (W, T, C*S, B)
     
     return first_diag_of_cache
 
