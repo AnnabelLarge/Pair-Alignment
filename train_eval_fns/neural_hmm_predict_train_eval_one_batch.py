@@ -289,7 +289,6 @@ def train_one_batch(batch,
         # corr: (T,B) or (B,)
         # approx_flags_dict: a dictionary of things (see model code)
         # subs_model_params: a dictionary of things (see model code)
-        #   > most importantly, this contained rate_multiplier!
         # indel_model_params: a dictionary of things (see model code)
         forward_pass_scoring_matrices, pred_sow_dict = out
         del out, mut

@@ -89,39 +89,44 @@ class NeuralCondTKF(ModuleBase):
         ###################
         ### read config   #
         ###################
-        # required
+        ### required
         self.times_from = self.config['times_from']
         self.subst_model_type = self.config['subst_model_type'].lower()
         self.indel_model_type = self.config['indel_model_type'].lower()
         global_or_local_dict = self.config['global_or_local']
         times_from = self.config['times_from'].lower()
         
-        # optional: for regularization
-        # self.rate_multiplier_regularization_rate = self.config.get('rate_mult_regular_rate', 0.0)
+        
+        ### optional: for regularization
         default_reg = {'equl_dist': 0,
                        'rate_mult': 0,
-                       'tkf_insert': 0,
-                       'tkf_delete': 0,
-                       'tkf_frag_size': 0}
+                       'tkf_lambda': 0,
+                       'tkf_mu': 0,
+                       'tkf92_frag_size': 0}
         
         # these priors come from standard F81-TKF92 model fit on same training set
-        default_priors = {'equl_dist': self.config['training_dset_emit_counts'],
+        default_pi = self.config['training_dset_emit_counts'] / ( self.config['training_dset_emit_counts'].sum() )
+        default_priors = {'equl_dist': default_pi,
                           'rate_mult': 1,
-                          'tkf_insert': 0.029351761429568933,
-                          'tkf_delete': 0.03000306870475785,
-                          'tkf_frag_size': 0.6843917135902318}
+                          'tkf_lambda': 0.029351761429568933,
+                          'tkf_mu': 0.03000306870475785,
+                          'tkf92_frag_size': 0.6843917135902318}
+        
         regularization_rates = self.config.get('regularization_rates', default_reg)
         regularization_rates = {k: float(v) for k,v in regularization_rates.items()}
         
         regularization_priors = self.config.get('regularization_priors', default_priors)
-        regularization_priors = {k: float(v) for k,v in regularization_priors.items()}
+        regularization_priors = {k: float(regularization_priors[k]) for k in 
+                                 ['rate_mult','tkf_lambda','tkf_mu','tkf92_frag_size']}
+        regularization_priors['equl_dist'] = jnp.array( [float(v) for v in regularization_priors['equl_dist']] )
         
         self.regularization_rates = regularization_rates
         self.regularization_priors = regularization_priors
         self.skip_regularization = all([v==0.0 for v in regularization_rates.values()])
-        del default_reg, default_priors
+        del default_reg, default_priors, default_pi
         
-        # other optional dictionaries
+        
+        ### other optional dictionaries
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1.)
         self.transitions_postproc_config = self.config.get('transitions_postproc_config', dict() )
         self.emissions_postproc_config = self.config.get('emissions_postproc_config', dict() )
@@ -255,6 +260,7 @@ class NeuralCondTKF(ModuleBase):
                  **kwargs):
         """
         unlike pairHMM implementation, this ONLY generates scoring matrices
+        don't feed times here; they get incorporated during scoring only!
         """
         # elements of datamat_lst are:
         # anc_embeddings: (B, L, H)
@@ -262,7 +268,6 @@ class NeuralCondTKF(ModuleBase):
         # prev_align_one_hot_vec: (B, L, 5)
 
         ### equilibrium distribution; used to score emissions from indel sites
-        # don't feed times here; they get incorporated during scoring only!
         equl_feats = self.postproc_equl(anc_emb = datamat_lst[0],
                                         desc_causal_emb = datamat_lst[1],
                                         prev_align_one_hot_vec = datamat_lst[2],
@@ -274,16 +279,35 @@ class NeuralCondTKF(ModuleBase):
         logprob_emit_indel = self.equl_module(datamat = equl_feats,
                                               sow_intermediates = sow_intermediates) #(B, L, A)
         
+        # add "pseudo-frequencies" by mixing with observed counts
+        if self.regularization_rates['equl_dist'] > 0:
+            """
+            p_{corrected} = ( p_{model} + \lambda * p_{observed} ) / (1 + \lambda)
+            """
+            reg_rate = self.regularization_rates['equl_dist']
+            log_observed_freq = jnp.where( self.regularization_priors['equl_dist'] > 0,
+                                           jnp.log(),
+                                           jnp.finfo(jnp.float32).min
+                                           ) #(A,)
+            log_observed_freq = log_observed_freq[None, None, :] #(1, 1, A)
+            
+            #  p_{model} + \lambda * p_{observed}
+            log_num = jnp.logaddexp(logprob_emit_indel,
+                                    jnp.log(self.regularization_rates['equl_dist']) + log_observed_freq) #(B, L, A)
+            
+            # ( p_{model} + \lambda * p_{observed} ) / (1 + \lambda)
+            logprob_emit_indel = log_num - jnp.log1p( self.regularization_rates['equl_dist'] ) #(B, L, A)
+        
         
         ### substitution model; used to score emissions from match sites
         # don't feed times here; they get incorporated during scoring only!
-        sub_feats = self.postproc_subs(anc_emb = datamat_lst[0],
+        sub_feats = self.postproc_subs( anc_emb = datamat_lst[0],
                                         desc_causal_emb = datamat_lst[1],
                                         prev_align_one_hot_vec = datamat_lst[2],
                                         padding_mask = padding_mask,
                                         training = training,
                                         sow_intermediates = sow_intermediates,
-                                        t_array = None)  #(B, L, H_out)
+                                        t_array = None )  #(B, L, H_out)
         
         # logprob_emit_match is either (T, B, L, A, A) or (B, L, A, A)
         # subs_model_params is a dictionary of parameters; see module for more details
@@ -495,10 +519,10 @@ class NeuralCondTKF(ModuleBase):
         
         else:
             return {'total_seen_toks': 0,
-                   'rate_multiplier_sum': 0,
-                   'tkf_lambda_sum': 0,
-                   'tkf_mu_sum': 0,
-                   'tkf92_frag_size_sum': 0}
+                    'rate_multiplier_sum': 0,
+                    'tkf_lambda_sum': 0,
+                    'tkf_mu_sum': 0,
+                    'tkf92_frag_size_sum': 0}
         
     def evaluate_loss_after_scan(self, 
                                  loss_dict: dict,
