@@ -279,14 +279,13 @@ class NeuralCondTKF(ModuleBase):
         logprob_emit_indel = self.equl_module(datamat = equl_feats,
                                               sow_intermediates = sow_intermediates) #(B, L, A)
         
-        # add "pseudo-frequencies" by mixing with observed counts
+        # add pseudocounts (via pseudo-frequencies)
         if self.regularization_rates['equl_dist'] > 0:
             """
-            p_{corrected} = ( p_{model} + \lambda * p_{observed} ) / (1 + \lambda)
+            p_{corrected} = ( p_{model} + rate * p_{observed} ) / (1 + rate)
             """
-            reg_rate = self.regularization_rates['equl_dist']
             log_observed_freq = jnp.where( self.regularization_priors['equl_dist'] > 0,
-                                           jnp.log(),
+                                           jnp.log(self.regularization_priors['equl_dist']),
                                            jnp.finfo(jnp.float32).min
                                            ) #(A,)
             log_observed_freq = log_observed_freq[None, None, :] #(1, 1, A)
