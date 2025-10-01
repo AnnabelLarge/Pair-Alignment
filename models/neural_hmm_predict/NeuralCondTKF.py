@@ -56,7 +56,6 @@ class NeuralCondTKF(ModuleBase):
         self.times_from : str
         self.subst_model_type : str
         self.exponential_dist_param : float
-        self.rate_multiplier_regularization_rate : float
         self.transitions_postproc_config : dict
         self.emissions_postproc_config : dict
         
@@ -94,12 +93,36 @@ class NeuralCondTKF(ModuleBase):
         self.times_from = self.config['times_from']
         self.subst_model_type = self.config['subst_model_type'].lower()
         self.indel_model_type = self.config['indel_model_type'].lower()
-        times_from = self.config['times_from'].lower()
         global_or_local_dict = self.config['global_or_local']
+        times_from = self.config['times_from'].lower()
         
-        # optional
+        # optional: for regularization
+        # self.rate_multiplier_regularization_rate = self.config.get('rate_mult_regular_rate', 0.0)
+        default_reg = {'equl_dist': 0,
+                       'rate_mult': 0,
+                       'tkf_insert': 0,
+                       'tkf_delete': 0,
+                       'tkf_frag_size': 0}
+        
+        # these priors come from standard F81-TKF92 model fit on same training set
+        default_priors = {'equl_dist': self.config['training_dset_emit_counts'],
+                          'rate_mult': 1,
+                          'tkf_insert': 0.029351761429568933,
+                          'tkf_delete': 0.03000306870475785,
+                          'tkf_frag_size': 0.6843917135902318}
+        regularization_rates = self.config.get('regularization_rates', default_reg)
+        regularization_rates = {k: float(v) for k,v in regularization_rates.items()}
+        
+        regularization_priors = self.config.get('regularization_priors', default_priors)
+        regularization_priors = {k: float(v) for k,v in regularization_priors.items()}
+        
+        self.regularization_rates = regularization_rates
+        self.regularization_priors = regularization_priors
+        self.skip_regularization = all([v==0.0 for v in regularization_rates.values()])
+        del default_reg, default_priors
+        
+        # other optional dictionaries
         self.exponential_dist_param = self.config.get('exponential_dist_param', 1.)
-        self.rate_multiplier_regularization_rate = self.config.get('rate_mult_regular_rate', 0.0)
         self.transitions_postproc_config = self.config.get('transitions_postproc_config', dict() )
         self.emissions_postproc_config = self.config.get('emissions_postproc_config', dict() )
         self.transitions_postproc_model_type = self.config.get('transitions_postproc_model_type', None)
@@ -288,7 +311,7 @@ class NeuralCondTKF(ModuleBase):
                                 sow_intermediates = sow_intermediates) 
         
         # logprob_transits is either (T, B, L, S, S) or (B, L, S, S)
-        # approx_flags_dict and indel_model_params are dictionaroes; 
+        # approx_flags_dict and indel_model_params are dictionaries; 
         # see module for more details
         logprob_transits, approx_flags_dict, indel_model_params = out
         del out
@@ -331,7 +354,6 @@ class NeuralCondTKF(ModuleBase):
                               logprob_emit_match: jnp.array, 
                               logprob_emit_indel: jnp.array,
                               logprob_transits: jnp.array,
-                              rate_multiplier: jnp.array,
                               corr: jnp.array,
                               true_out: jnp.array,
                               gap_idx: int=43,
@@ -444,18 +466,40 @@ class NeuralCondTKF(ModuleBase):
             logprob_perSamp_perTime = logprob_perSamp_perPos_perTime.sum(axis=-1) #(T,B) or (B,)
             out = {'logprob_perSamp_perTime': logprob_perSamp_perTime} #(T,B) or (B,)
         
-        # accumulate sum of rate multipliers (for later regularization)
-        out['rate_multiplier_sum'] = jnp.multiply( rate_multiplier, (curr_state != 0) ).sum() #float
-        out['total_seen_toks'] = (curr_state != 0).sum() #float
-        
         # possible return intermediate scores (for debugging)
         if return_transit_emit:
             out['tr'] = tr
             out['e'] = e
         
         return out
-        
     
+    def accumulate_parameter_sums_in_scan_fn(self,
+                                             true_out,
+                                             subs_model_params,
+                                             indel_model_params):
+        if not self.skip_regularization:
+            curr_state = true_out[...,3] #(B,length_for_scan)
+            valid_alignment_cols = (curr_state != 0)
+            rate_multiplier_sum = jnp.multiply( subs_model_params['rate_multiplier'], valid_alignment_cols ).sum()
+            tkf_lambda_sum = jnp.multiply( indel_model_params['lambda'], valid_alignment_cols ).sum()
+            tkf_mu_sum = jnp.multiply( indel_model_params['mu'], valid_alignment_cols ).sum()
+            tkf92_frag_size_sum = jnp.multiply( indel_model_params.get('r_extend',0), 
+                                                valid_alignment_cols ).sum()
+            
+            out = {'total_seen_toks': valid_alignment_cols.sum(),
+                   'rate_multiplier_sum': rate_multiplier_sum,
+                   'tkf_lambda_sum': tkf_lambda_sum,
+                   'tkf_mu_sum': tkf_mu_sum,
+                   'tkf92_frag_size_sum': tkf92_frag_size_sum}
+            return out
+        
+        else:
+            return {'total_seen_toks': 0,
+                   'rate_multiplier_sum': 0,
+                   'tkf_lambda_sum': 0,
+                   'tkf_mu_sum': 0,
+                   'tkf92_frag_size_sum': 0}
+        
     def evaluate_loss_after_scan(self, 
                                  loss_dict: dict,
                                  length_for_normalization_for_reporting: jnp.array,
@@ -493,23 +537,82 @@ class NeuralCondTKF(ModuleBase):
         elif self.unique_time_per_sample:
             logprob_perSamp = logprob_perSamp_perTime
         
-        
-        ### calculate loss, possibly regularize
+        # calculate loss
         loss = -jnp.mean(logprob_perSamp)
-        
-        # regularization: encourage mean rate multiplier to be close to 1
-        rate_multiplier_sum = loss_dict['rate_multiplier_sum'] #float
-        total_seen_toks = loss_dict['total_seen_toks'] #float
-        mean_rate_mult = rate_multiplier_sum / total_seen_toks #float
-        loss = loss + self.rate_multiplier_regularization_rate * jnp.square( 1 - mean_rate_mult )
-        
         
         ### collect loss and intermediate values
         intermediate_vals = { 'sum_neg_logP': -logprob_perSamp,
-                              'neg_logP_length_normed': -logprob_perSamp/length_for_normalization_for_reporting,
-                              'mean_rate_mult': mean_rate_mult}
+                              'neg_logP_length_normed': -logprob_perSamp/length_for_normalization_for_reporting}
         
         return loss, intermediate_vals
+    
+    def regularize_loss_using_mean_evoparams( self,
+                                              raw_loss,
+                                              sums_dict ):
+        if not self.skip_regularization:
+            ### unpack dictionary
+            total_seen_toks = sums_dict['total_seen_toks']
+            rate_multiplier_sum = sums_dict['rate_multiplier_sum']
+            tkf_lambda_sum = sums_dict['tkf_lambda_sum']
+            tkf_mu_sum = sums_dict['tkf_mu_sum']
+            tkf92_frag_size_sum = sums_dict['tkf92_frag_size_sum']
+            
+            # push mean rate multiplier to be close to rate_mult prior
+            out = self._regularize_based_on_mean_params( prev_loss = raw_loss,
+                                                         observed_sum = rate_multiplier_sum,
+                                                         total_aligned_toks = total_seen_toks,
+                                                         key_for_reg_dicts = 'rate_mult' )
+            loss, mean_rate_mult = out
+            del out, raw_loss
+            
+            # push mean tkf insert rate to be close to tkf_insert prior
+            out = self._regularize_based_on_mean_params( prev_loss = loss,
+                                                         observed_sum = tkf_lambda_sum,
+                                                         total_aligned_toks = total_seen_toks,
+                                                         key_for_reg_dicts = 'tkf_lambda' )
+            loss, mean_tkf_lambda = out
+            del out
+            
+            # push mean tkf delete rate to be close to tkf_insert prior
+            out = self._regularize_based_on_mean_params( prev_loss = loss,
+                                                         observed_sum = tkf_mu_sum,
+                                                         total_aligned_toks = total_seen_toks,
+                                                         key_for_reg_dicts = 'tkf_mu' )
+            loss, mean_tkf_mu = out
+            del out
+            
+            # push mean tkf fragment extension prob to be close to tkf92_frag_size prior
+            out = self._regularize_based_on_mean_params( prev_loss = loss,
+                                                         observed_sum = tkf92_frag_size_sum,
+                                                         total_aligned_toks = total_seen_toks,
+                                                         key_for_reg_dicts = 'tkf92_frag_size' )
+            loss, mean_tkf92_frag_size = out
+            del out
+            
+            all_means = {'mean_rate_mult': mean_rate_mult,
+                         'mean_tkf_lambda': mean_tkf_lambda,
+                         'mean_tkf_mu': mean_tkf_mu,
+                         'mean_tkf92_frag_size': mean_tkf92_frag_size}
+            return loss, all_means
+        
+        
+        elif self.skip_regularization:
+            # return -1 to indicate that this step was skipped
+            all_means = {'mean_rate_mult': -1,
+                         'mean_tkf_lambda': -1,
+                         'mean_tkf_mu': -1,
+                         'mean_tkf92_frag_size': -1}
+            return raw_loss, all_means
+        
+    def _regularize_based_on_mean_params( self, 
+                                          prev_loss,
+                                          observed_sum, 
+                                          total_aligned_toks, 
+                                          key_for_reg_dicts ):
+        mean = observed_sum / total_aligned_toks
+        distance = jnp.square( self.regularization_priors[key_for_reg_dicts] - mean )
+        reg_loss = prev_loss + ( self.regularization_rates[key_for_reg_dicts] * distance )
+        return reg_loss, mean
     
     def get_perplexity_per_sample(self,
                                   loss_fn_dict):
