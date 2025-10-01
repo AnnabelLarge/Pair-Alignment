@@ -116,13 +116,18 @@ class NeuralCondTKF(ModuleBase):
         regularization_rates = {k: float(v) for k,v in regularization_rates.items()}
         
         regularization_priors = self.config.get('regularization_priors', default_priors)
-        regularization_priors = {k: float(regularization_priors[k]) for k in 
-                                 ['rate_mult','tkf_lambda','tkf_mu','tkf92_frag_size']}
-        regularization_priors['equl_dist'] = jnp.array( [float(v) for v in regularization_priors['equl_dist']] )
-        
+        for k in regularization_priors.keys():
+            if k == 'equl_dist':
+                regularization_priors[k] = jnp.array( [float(v) for v in regularization_priors[k]] )
+            else:
+                regularization_priors[k] = float( regularization_priors[k] )     
+                
         self.regularization_rates = regularization_rates
         self.regularization_priors = regularization_priors
         self.skip_regularization = all([v==0.0 for v in regularization_rates.values()])
+        
+        if self.skip_regularization:
+            print('No regularization on evolutionary parameters: \pi, \rho, \lambda, \mu, r')
         del default_reg, default_priors, default_pi
         
         
@@ -502,12 +507,17 @@ class NeuralCondTKF(ModuleBase):
                                              indel_model_params):
         if not self.skip_regularization:
             curr_state = true_out[...,3] #(B,length_for_scan)
-            valid_alignment_cols = (curr_state != 0)
-            rate_multiplier_sum = jnp.multiply( subs_model_params['rate_multiplier'], valid_alignment_cols ).sum()
-            tkf_lambda_sum = jnp.multiply( indel_model_params['lambda'], valid_alignment_cols ).sum()
-            tkf_mu_sum = jnp.multiply( indel_model_params['mu'], valid_alignment_cols ).sum()
+            valid_alignment_cols = (curr_state != 0) #(B,length_for_scan)
+            
+            # mask and sum
+            rate_multiplier_sum = jnp.multiply( subs_model_params['rate_multiplier'], 
+                                                valid_alignment_cols ).sum() #(B,length_for_scan)
+            tkf_lambda_sum = jnp.multiply( indel_model_params['lambda'], 
+                                           valid_alignment_cols ).sum() #(B,length_for_scan)
+            tkf_mu_sum = jnp.multiply( indel_model_params['mu'], 
+                                       valid_alignment_cols ).sum() #(B,length_for_scan)
             tkf92_frag_size_sum = jnp.multiply( indel_model_params.get('r_extend',0), 
-                                                valid_alignment_cols ).sum()
+                                                valid_alignment_cols ).sum() #(B,length_for_scan)
             
             out = {'total_seen_toks': valid_alignment_cols.sum(),
                    'rate_multiplier_sum': rate_multiplier_sum,

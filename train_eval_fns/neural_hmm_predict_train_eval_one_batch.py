@@ -743,7 +743,7 @@ def eval_one_batch(batch,
     loss, all_means = out
     del out
     
-    aux_dict = {**aux_dict, **all_means}
+    loss_fn_dict = {**loss_fn_dict, **all_means}
     
     
     ### evaluate metrics
