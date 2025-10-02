@@ -51,44 +51,44 @@ def main():
                    'batched_eval',
                    'prep_datasets']
     
-    # parser.add_argument('-task',
-    #                     type=str,
-    #                     required=True,
-    #                     choices = valid_tasks,
-    #                     help=f'What do you want to do? Pick from: {valid_tasks}')
+    parser.add_argument('-task',
+                        type=str,
+                        required=True,
+                        choices = valid_tasks,
+                        help=f'What do you want to do? Pick from: {valid_tasks}')
     
-    # parser.add_argument('-configs',
-    #                     type = str,
-    #                     required=True,
-    #                     help='Load configs from file or folder of files, in json format.')
+    parser.add_argument('-configs',
+                        type = str,
+                        required=True,
+                        help='Load configs from file or folder of files, in json format.')
     
-    # # optional: might have pre-processed some dataloaders
-    # parser.add_argument('-load_dset_pkl',
-    #                     type = str,
-    #                     default=None,
-    #                     help='name of the pre-computed pytorch dataset pickle object')
+    # optional: might have pre-processed some dataloaders
+    parser.add_argument('-load_dset_pkl',
+                        type = str,
+                        default=None,
+                        help='name of the pre-computed pytorch dataset pickle object')
     
-    # # only needed when continuing training
-    # parser.add_argument('-new_training_wkdir',
-    #                     type = str,
-    #                     help='FOR CONTINUE_TRAIN OPTION; Name for a new training working dir')
+    # only needed when continuing training
+    parser.add_argument('-new_training_wkdir',
+                        type = str,
+                        help='FOR CONTINUE_TRAIN OPTION; Name for a new training working dir')
     
-    # parser.add_argument('-prev_model_ckpts_dir',
-    #                     type = str,
-    #                     help='FOR CONTINUE_TRAIN OPTION; Path to previous trainstate, argparse object')
+    parser.add_argument('-prev_model_ckpts_dir',
+                        type = str,
+                        help='FOR CONTINUE_TRAIN OPTION; Path to previous trainstate, argparse object')
     
-    # parser.add_argument('-tstate_to_load',
-    #                     type = str,
-    #                     help='FOR CONTINUE_TRAIN OPTION; The suffix (not including file extension) of the tstate object to load')
+    parser.add_argument('-tstate_to_load',
+                        type = str,
+                        help='FOR CONTINUE_TRAIN OPTION; The suffix (not including file extension) of the tstate object to load')
   
     # parse the arguments
     top_level_args = parser.parse_args()
     
     
-    # UNCOMMENT TO RUN IN SPYDER IDE
-    top_level_args.task = 'count_neural_params'
-    top_level_args.configs = 'CONFIG_transf.json'
-    top_level_args.load_dset_pkl = None
+    # # UNCOMMENT TO RUN IN SPYDER IDE
+    # top_level_args.task = 'count_neural_params'
+    # top_level_args.configs = 'CONFIG_transf.json'
+    # top_level_args.load_dset_pkl = None
     
     
     
