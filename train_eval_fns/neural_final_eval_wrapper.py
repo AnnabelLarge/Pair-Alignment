@@ -169,12 +169,15 @@ def final_eval_wrapper(dataloader,
                                                        dict_of_values = eval_metrics, 
                                                        interms_for_tboard = interms_for_tboard,
                                                        top_level_tag = outfile_prefix)
+        ### uncomment if you'd like, but I never look at these
+        """                                            
         if len(stats_to_record) > 0:
             out_file = ( f'{out_arrs_dir}/'+
                          f'{outfile_prefix}_pt{batch_idx}_BATCH-STATS.tsv.gz' )
             with pgzip.open(out_file, 'wt') as g:
                 for key, val in stats_to_record.items():
                     g.write(f'{key}\t{val}\n')
+        """
         
         # add them to collection at end for tensorboard
         if tboard_writer:

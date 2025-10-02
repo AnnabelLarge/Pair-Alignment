@@ -125,9 +125,6 @@ class NeuralCondTKF(ModuleBase):
         self.regularization_rates = regularization_rates
         self.regularization_priors = regularization_priors
         self.skip_regularization = all([v==0.0 for v in regularization_rates.values()])
-        
-        if self.skip_regularization:
-            print('No regularization on evolutionary parameters: \pi, \rho, \lambda, \mu, r')
         del default_reg, default_priors, default_pi
         
         

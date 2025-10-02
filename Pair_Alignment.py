@@ -86,8 +86,8 @@ def main():
     
     
     # # UNCOMMENT TO RUN IN SPYDER IDE
-    # top_level_args.task = 'count_neural_params'
-    # top_level_args.configs = 'CONFIG_transf.json'
+    # top_level_args.task = 'train'
+    # top_level_args.configs = 'example_config_neural_hmm_transf.json'
     # top_level_args.load_dset_pkl = None
     
     

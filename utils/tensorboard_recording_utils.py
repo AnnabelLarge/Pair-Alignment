@@ -19,7 +19,12 @@ def flatten_convert(dictionary,
                     separator = '/'):
     items = []
     for key, value in dictionary.items():
-        new_key = parent_key + separator + key if parent_key else key
+        if (parent_key is None) or (parent_key in key):
+            new_key = key
+        
+        else:
+            new_key = parent_key + separator + key
+        
         if isinstance(value, MutableMapping):
             items.extend(flatten_convert(value, 
                                           new_key, 
@@ -210,7 +215,7 @@ def weight_summary_stats(all_trainstates,
             
             # add l2 norm
             l2_norm = np.linalg.norm(param_mat.reshape(-1), ord=2)
-            out_dict[f'{tag_prefix}/WEIGHTS/L2_norm'] = l2_norm
+            out_dict[f'{layer_for_tag}/L2_norm'] = l2_norm
     
     return out_dict
             
@@ -591,9 +596,20 @@ def calc_stats_during_final_eval(all_trainstates,
     # check final outputs from forward pass separately
     if interms_for_tboard.get('forward_pass_outputs',False):
         for keyname in dict_of_values.keys():
-            if keyname.startswith('FPO_'):
-                to_add = calc_stats(mat = dict_of_values[keyname],
-                                    name = f'FINAL-EVAL/{top_level_tag}/{keyname.replace("FPO_","")}')
+            if keyname.startswith('scormat_'):
+                # if value is actually also a dictionary
+                if isinstance( dict_of_values[keyname], dict ):
+                    subdict = flatten_convert(dict_of_values[keyname])
+                    for key, mat in subdict.items():
+                        to_add = calc_stats(mat = mat,
+                                            name = f'FINAL-EVAL/{top_level_tag}/{keyname.replace("scoremat_","")}')
+                
+                # if value is a flat matrix
+                else:
+                    mat = dict_of_values[keyname]
+                
+                to_add = calc_stats(mat = mat,
+                                    name = f'FINAL-EVAL/{top_level_tag}/{keyname.replace("scoremat_","")}')
     
     # stats for sowed intermediates are already calculated, so just flatten
     #   and add

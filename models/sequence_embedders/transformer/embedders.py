@@ -142,7 +142,7 @@ class TransfSeqEmb(SeqEmbBase):
         # record final result to tensorboard 
         if sow_intermediates:
             self.sow_histograms_scalars(mat = datamat, 
-                                        label = f'{self.name} Transf Block {block_idx}/after block', 
+                                        label = f'{self.name} 1/Transf Block {block_idx}/after block', 
                                         which=['scalars'])
         
         # output is (B, L, H)
