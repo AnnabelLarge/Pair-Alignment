@@ -274,23 +274,27 @@ class ConvAndSelectiveSSM(ModuleBase):
                      name=f"shift_conv", 
                      kernel_init=nn.initializers.lecun_normal()) (x)  # (B, L, E*D)
         
+        """
         # (output diagnostics)
         if sow_intermediates:
             self.sow_histograms_scalars(mat = u, 
                                         label = f'{self.name}/conv', 
                                         which=['scalars'])
+        """
             
             
         ### 4: first activation after convolution
         u = nn.silu(u)
+
+        """
         # (output diagnostics)
         if sow_intermediates:
             self.sow_histograms_scalars(mat = u, 
                                         label = f'{self.name}/u; after conv and activation', 
                                         which=['scalars'])
+        """
         
         # mask out padding tokens before passing input to ssm
-        # TODO: does this kill gradients..?
         u = jnp.multiply(u, padding_mat)
 
 
@@ -331,11 +335,13 @@ class ConvAndSelectiveSSM(ModuleBase):
                        kernel_init=nn.initializers.lecun_normal(),
                        bias_init=nn.initializers.zeros if self.dt_proj else dt_bias_init) (u)  # (B, L, dt_rank)
         
+        """
         # (output diagnostics)
         if sow_intermediates:
             self.sow_histograms_scalars(mat = dt, 
                                         label = f'{self.name}/dt_lowrank', 
                                         which=['scalars'])
+        """
             
         # after linear layer, get final dt; could have this be learnable, if desired
         if self.dt_proj:
@@ -351,6 +357,7 @@ class ConvAndSelectiveSSM(ModuleBase):
                 dt = jnp.repeat (dt, D // dt_rank, axis=-1)  # (B, L, E*D)
         dt = nn.activation.softplus (dt)  # (B, L, E*D) 
 
+        """
         # (output diagnostics)
         if sow_intermediates:
             self.sow_histograms_scalars(mat = dt, 
@@ -368,7 +375,7 @@ class ConvAndSelectiveSSM(ModuleBase):
             self.sow_histograms_scalars(mat = Ccoeff, 
                                         label = f'{self.name}/C', 
                                         which=['scalars'])
-            
+        """
             
         ### 6: Perform SSM scan, using scan function above
         y = ssm_chunked_scan (x, Acoeff, Bcoeff, Ccoeff, dt, 
@@ -385,13 +392,14 @@ class ConvAndSelectiveSSM(ModuleBase):
         if self.reverse:
             y = jnp.flip (y, axis=(-2,-1) if self.complement else -2)
 
+        """
         # (output diagnostics)
         if sow_intermediates:
             self.sow_histograms_scalars(mat = y, 
                                         label = f'{self.name}/ssm_residual', 
                                         which=['scalars'])
-            
-            
+        """
+
         ### 8: Add in the skip connection term, D
         y = y + jnp.einsum ('bld,d->bld', x, Dcoeff)
         
@@ -478,11 +486,13 @@ class UnidirecMambaModule(ModuleBase):
                                                    kernel_init=nn.initializers.lecun_normal()) (datamat), 
                                          2, 
                                          axis=-1)
+        """
         # (output diagnostics)
         if sow_intermediates:
             self.sow_histograms_scalars(mat = x_branch, 
                                         label = f'{self.name}/x_branch before ConvAndSelectiveSSM', 
                                         which=['scalars'])
+        """
         
         # expand padding matrix as well
         padding_mat_expanded = jnp.repeat(padding_mat, 
@@ -501,6 +511,7 @@ class UnidirecMambaModule(ModuleBase):
         # z_branch just gets activated
         z_branch = self.act_fn(z_branch)
         
+        """
         # (output diagnostics)
         if sow_intermediates:
             self.sow_histograms_scalars(mat = x_branch, 
@@ -510,6 +521,7 @@ class UnidirecMambaModule(ModuleBase):
             self.sow_histograms_scalars(mat = z_branch, 
                                         label = f'{self.name}/z_branch after {self.act_type}', 
                                         which=['scalars'])
+        """
         
         
         ### 3: element-wise multiplicative gating
@@ -517,12 +529,13 @@ class UnidirecMambaModule(ModuleBase):
         #   have zeros at padding positions
         datamat = x_branch * z_branch
         
+        """
         # (output diagnostics)
         if sow_intermediates:
             self.sow_histograms_scalars(mat = datamat, 
                                         label = f'{self.name}/after multipl. gating', 
                                         which=['scalars'])
-        
+        """
         
         ### 4: project back down to original hidden_dim
         # (B, L, E*D) -> (B,L,D)
@@ -627,7 +640,7 @@ class BidirecMambaModule(ModuleBase):
                                           self.expansion_factor,
                                           -1)
         
-        
+        """
         # (output diagnostics)
         if sow_intermediates:
             self.sow_histograms_scalars(mat = forw_x_branch, 
@@ -637,7 +650,7 @@ class BidirecMambaModule(ModuleBase):
             self.sow_histograms_scalars(mat = rev_x_branch, 
                                         label = f'{self.name}/REV x_branch before ConvAndSelectiveSSM', 
                                         which=['scalars'])
-        
+        """
         
         ### 2: separate functions on x and z branches
         # both x_branch-es goes through convolution and selective SSM
@@ -657,7 +670,7 @@ class BidirecMambaModule(ModuleBase):
         # both z_branch-es just get activated
         forw_z_branch = self.act_fn(forw_z_branch)
         rev_z_branch = self.act_fn(rev_z_branch)
-        
+        """
         # (output diagnostics)
         if sow_intermediates:
             mats_to_write = [forw_x_branch, 
@@ -673,19 +686,19 @@ class BidirecMambaModule(ModuleBase):
                 self.sow_histograms_scalars(mat = mats_to_write[i], 
                                             label = f'{self.name}/{suffix_lst[i]}', 
                                             which=['scalars'])
-        
+        """
         
         ### 3: element-wise multiplicative gating; combine inputs
         forward_x = forw_x_branch * forw_z_branch
         reverse_x = rev_x_branch * rev_z_branch
         datamat = self.merge_fn( forward_x, reverse_x )
-        
+        """
         # (output diagnostics)
         if sow_intermediates:
             self.sow_histograms_scalars(mat = datamat, 
                                         label = f'{self.name}/after multipl. gating, merging', 
                                         which=['scalars'])
-        
+        """
         
         ### 4: project back down to original hidden_dim
         # (B, L, E*D) -> (B,L,D)
