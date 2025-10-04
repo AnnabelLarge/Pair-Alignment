@@ -61,10 +61,8 @@ class metrics_for_epoch:
     def update_after_batch(self,
                             batch_weight,
                             batch_loss,
-                            batch_perpl,
                             batch_acc = None):
         self.epoch_ave_loss += batch_loss * batch_weight
-        self.epoch_ave_perpl += batch_perpl * batch_weight
         if self.have_acc and (batch_acc is not None):
             self.epoch_ave_acc += batch_acc * batch_weight
     
@@ -74,10 +72,6 @@ class metrics_for_epoch:
         writer.add_scalar(tag = f'Loss/{tag}', 
                           scalar_value = self.epoch_ave_loss.item(), 
                           global_step = self.epoch_idx)
-        
-        writer.add_scalar(tag=f'Perplexity/{tag}',
-                          scalar_value=self.epoch_ave_perpl.item(), 
-                          global_step=self.epoch_idx)
         
         if self.have_acc:
             writer.add_scalar(tag=f'Accuracy/{tag}',

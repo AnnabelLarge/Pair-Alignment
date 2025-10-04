@@ -22,139 +22,168 @@ from dloaders.init_dataloader import init_dataloader
 from dloaders.init_time_array import init_time_array
 
 
-def init_full_len_dset( args: Namespace, 
+
+
+def _determine_emission_alphabet_size(argparse_obj, 
+                                      pred_model_type):
+    if pred_model_type == "feedforward":
+        return 20
+    else: 
+        return 4 if (argparse_obj.pred_config.get("subst_model_type") == "hky85") else 20
+
+def _init_time_grid(argparse_obj):
+    """
+    returns grid of times if desired, otherwise None
+    t_per_sample is True if this returns None, False otherwise
+    """
+    # if either of these are true, return None
+    cond1 = argparse_obj.pred_config['times_from'] is None
+    cond2 = argparse_obj.pred_config['times_from'] == 't_per_sample'
+    t_per_sample = cond1 or cond2
+    
+    if t_per_sample:
+        return None
+        
+    # init a grid if t_per_sample is False
+    elif not t_per_sample:
+        return init_time_array( argparse_obj )
+
+def _make_dataset(args, 
+                  splitname,
+                  split_prefixes, 
+                  pred_model_type, 
+                  use_scan_fns, 
+                  t_per_sample,
+                  emission_alphabet_size, 
+                  gap_idx,
+                  seq_padding_idx=0,
+                  align_padding_idx=-9):
+    
+    # make sure this is a list of names
+    assert isinstance(split_prefixes, list)
+    print(f'{splitname} dset:')
+    for s in split_prefixes:
+        print(s)
+    print()
+    
+    # init
+    return FullLenDset( data_dir = args.data_dir,
+                        split_prefixes = split_prefixes,
+                        pred_model_type = pred_model_type,
+                        use_scan_fns = use_scan_fns,
+                        t_per_sample = t_per_sample,
+                        emission_alphabet_size = emission_alphabet_size,
+                        chunk_length = args.chunk_length,
+                        toss_alignments_longer_than = args.toss_alignments_longer_than,
+                        seq_padding_idx = seq_padding_idx,
+                        align_padding_idx = align_padding_idx,
+                        gap_idx = gap_idx )
+
+
+def init_full_len_dset( args: Namespace,
                         task: str,
                         training_argparse = None,
                         include_dataloader: bool = True ):
-    """
-    initialize the pytorch datasets and dataloaders (optional)
-    """
-    
-    
-    ### behavior that depends on task
-    if task in ['train', 'resume_train']:
+    # Determine context (train vs eval)
+    if task in ["train", "resume_train"]:
         argparse_obj = args
         only_test = False
-    
-    elif task == 'eval':
+    elif task == "eval":
         argparse_obj = training_argparse
         only_test = True
-    
+
     pred_model_type = argparse_obj.pred_model_type
     gap_idx = argparse_obj.gap_idx
     
-    
-    ### enforce defaults: feedforward to alignment-augmented alphabet
-    if pred_model_type == 'feedforward':
-        # only protein model implemented for now
-        emission_alphabet_size = 20
+    # determine if classical mixture or neural model
+    is_neural = pred_model_type in ['feedforward', 'neural_hmm']
+
+
+    ### Special defaults for model types
+    if ~is_neural:
+        argparse_obj.use_scan_fns = False
         
-        # remap values
-        if argparse_obj.pred_config['t_per_sample']:
-            argparse_obj.pred_config['times_from'] = 't_per_sample'
-        
-        elif not argparse_obj.pred_config['t_per_sample']:
-            argparse_obj.pred_config['times_from'] = None
-            
-            
-    ### enforce defaults: markovian alignment algorithms
-    elif pred_model_type in ['pairhmm_frag_and_site_classes',
-                             'pairhmm_nested_tkf',
-                             'neural_hmm']:
-        # enforce defaults about emission alphabet size
-        if argparse_obj.pred_config['subst_model_type'] == 'hky85':
-            emission_alphabet_size = 4
+    elif is_neural and pred_model_type == "feedforward":
+        # enforce feedforward defaults
+        if argparse_obj.pred_config["t_per_sample"]:
+            argparse_obj.pred_config["times_from"] = "t_per_sample"
         else:
-            emission_alphabet_size = 20
-        
-        # regular pairhmm doesn't use scan functions
-        if pred_model_type in ['pairhmm_frag_and_site_classes',
-                               'pairhmm_nested_tkf']:
-            argparse_obj.use_scan_fns = False
-    
-    
-    ### handle times: either a grid of times for all samples (T,) or a unique
-    ###   branch length for every sample (B,)
-    cond1 = argparse_obj.pred_config['times_from'] is None
-    cond2 = ( argparse_obj.pred_config['times_from'] == 't_per_sample' )
-    t_per_sample = cond1 or cond2
-    del cond1, cond2
-    
-    # init a grid if t_per_sample is False
-    if t_per_sample:
-        t_array_for_all_samples = None
-        
-    elif not t_per_sample:
-        t_array_for_all_samples = init_time_array( argparse_obj )
-    
-    # no longer need this
-    del argparse_obj
-    
-    
-    #################
-    ### LOAD DATA   #
-    #################
-    # test data
-    assert isinstance(args.test_dset_splits, list)
+            argparse_obj.pred_config["times_from"] = None
 
-    print('Test dset:')
-    for s in args.test_dset_splits:
-        print(s)
-    print()
-
-    test_dset = FullLenDset( data_dir = args.data_dir, 
-                             split_prefixes = args.test_dset_splits,
-                             pred_model_type = pred_model_type,
-                             use_scan_fns = args.use_scan_fns,
-                             t_per_sample = t_per_sample,
-                             emission_alphabet_size=emission_alphabet_size,
-                             chunk_length = args.chunk_length,
-                             toss_alignments_longer_than = args.toss_alignments_longer_than,
-                             seq_padding_idx = 0,
-                             align_padding_idx = -9,
-                             gap_idx = gap_idx
-                             )
-    out = {'test_dset': test_dset,
-           't_array_for_all_samples': t_array_for_all_samples}
+    # other defaults: out alphabet size
+    emission_alphabet_size = _determine_emission_alphabet_size(argparse_obj = argparse_obj, 
+                                                               pred_model_type = pred_model_type) 
     
-    # training data
-    if not only_test:
-        print('Training dset:')
-        for s in args.train_dset_splits:
-            print(s)
-        print()
-        
-        assert isinstance(args.train_dset_splits, list)
-        training_dset = FullLenDset( data_dir = args.data_dir, 
-                                     split_prefixes = args.train_dset_splits,
-                                     pred_model_type = pred_model_type,
+    # other defaults: grid of times (could be either (T,) array, or none)
+    t_array_for_all_samples = _init_time_grid(argparse_obj = argparse_obj)
+    
+    # if t_array_for_all_samples is None, then there's no time grid; use one
+    # branch length per sample
+    t_per_sample = t_array_for_all_samples is None
+
+
+    ### Build dataset objects
+    out = {"t_array_for_all_samples": t_array_for_all_samples}
+
+    # Test dataset
+    out["test_dset"] = _make_dataset(args = args, 
+                                     splitname = 'Test',
+                                     split_prefixes = args.test_dset_splits,
+                                     pred_model_type = pred_model_type, 
                                      use_scan_fns = args.use_scan_fns,
-                                     t_per_sample = t_per_sample,
-                                     emission_alphabet_size=emission_alphabet_size,
-                                     chunk_length = args.chunk_length,
-                                     toss_alignments_longer_than = args.toss_alignments_longer_than,
+                                     t_per_sample = t_per_sample, 
+                                     emission_alphabet_size = emission_alphabet_size, 
+                                     gap_idx = gap_idx,
                                      seq_padding_idx = 0,
-                                     align_padding_idx = -9,
-                                     gap_idx = gap_idx
-                                     )
-        out['training_dset'] = training_dset
-        
-        
-    ############################################
-    ### create dataloaders, output dictionary  #
-    ############################################
+                                     align_padding_idx = -9)
+
+    # Dev dataset: if training a neural model, use this for early stopping criteria
+    if is_neural and not only_test:
+        out["dev_dset"] = _make_dataset(args = args, 
+                                        splitname = 'Dev',
+                                        split_prefixes = args.dev_dset_splits,
+                                        pred_model_type = pred_model_type, 
+                                        use_scan_fns = args.use_scan_fns,
+                                        t_per_sample = t_per_sample, 
+                                        emission_alphabet_size = emission_alphabet_size, 
+                                        gap_idx = gap_idx,
+                                        seq_padding_idx = 0,
+                                        align_padding_idx = -9)
+
+    # Training set: if training any model
+    if not only_test:
+        out["training_dset"] = _make_dataset(args = args, 
+                                             splitname = 'Train',
+                                             split_prefixes = args.train_dset_splits,
+                                             pred_model_type = pred_model_type, 
+                                             use_scan_fns = args.use_scan_fns,
+                                             t_per_sample = t_per_sample, 
+                                             emission_alphabet_size = emission_alphabet_size, 
+                                             gap_idx = gap_idx,
+                                             seq_padding_idx = 0,
+                                             align_padding_idx = -9)
+    
+    
+    ### Dataloaders
     if include_dataloader:
-        test_dl = init_dataloader(args = args, 
-                                  pytorch_custom_dset = test_dset,
+        # Test dataset
+        out["test_dl"] = init_dataloader(args = args, 
+                                  pytorch_custom_dset = out["test_dset"],
                                   shuffle = False,
                                   collate_fn = collator)
-        out['test_dl'] = test_dl
         
+        # Dev dataset: if training a neural model, use this for early stopping criteria
+        if is_neural and not only_test:
+            out["dev_dl"] = init_dataloader(args = args, 
+                                            pytorch_custom_dset = out["dev_dset"],
+                                            shuffle = False,
+                                            collate_fn = collator)
+            
+        # Training set: if training any model
         if not only_test:
-            training_dl = init_dataloader(args = args, 
-                                          pytorch_custom_dset = training_dset,
-                                          shuffle = True,
-                                          collate_fn = collator)
-            out['training_dl'] = training_dl
-    
+            out["training_dl"] = init_dataloader(args = args, 
+                                                 pytorch_custom_dset = out["training_dset"],
+                                                 shuffle = True,
+                                                 collate_fn = collator)
+
     return out

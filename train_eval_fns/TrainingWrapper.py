@@ -8,12 +8,13 @@ Created on Wed Jul 23 17:42:19 2025
 import jax
 from jax import numpy as jnp
 import flax
-import numpy 
+import numpy as np
 import pickle
 import sys
 from tqdm import tqdm
 from functools import partial
 from copy import copy
+from datetime import datetime
 
 from utils.train_eval_utils import ( timers,
                                      write_timing_file,
@@ -54,8 +55,6 @@ class TrainingWrapper:
         # unpack dataloader dict
         self.training_dset = dataloader_dict['training_dset']
         self.training_dl = dataloader_dict['training_dl']
-        self.test_dset = dataloader_dict['test_dset']
-        self.test_dl = dataloader_dict['test_dl']
         
         
         ### smaller classes with memory
@@ -72,7 +71,7 @@ class TrainingWrapper:
         
         
         ### model-specific initializations
-        self._model_specific_inits()
+        self._model_specific_inits(dataloader_dict = dataloader_dict)
 
 
     ###########################################################################
@@ -82,23 +81,46 @@ class TrainingWrapper:
                         all_trainstates ):
         # keep track of best model; need to know initial trainstate object
         best_epoch = -1
-        best_test_loss = jnp.finfo(jnp.float32).max
         best_trainstates = copy(all_trainstates)
-        prev_test_loss = jnp.finfo(jnp.float32).max
+        prev_dev_loss = jnp.finfo(jnp.float32).max
+        best_dev_loss = jnp.finfo(jnp.float32).max
+        
+        # record loss trajectory to a flat text file too
+        loss_file = f'{self.args.logfile_dir}/losses_flat.tsv'
+        with open(loss_file,'w') as g:
+            g.write( ('time\t' + 
+                      'epoch\t' + 
+                      'ave_train_loss\t' + 
+                      'ave_dev_loss\t' + 
+                      'best_model\n') )
         
         for epoch_idx in tqdm(self.epoch_arr): 
             ### train and update gradients
-            all_trainstates, epoch_test_loss = self.train_and_eval_one_epoch( all_trainstates,
-                                                                              epoch_idx )
+            out = self.train_and_eval_one_epoch( all_trainstates, epoch_idx )
+            all_trainstates = out['tstates']
+            epoch_train_loss = out['train_loss']
+            epoch_dev_loss = out['dev_loss']
+            del out
             
+            # update loss text file
+            with open(loss_file,'a') as g:
+                best_so_far = epoch_dev_loss < best_dev_loss
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                g.write( (f'{now}\t'+
+                          f'{epoch_idx}\t'+
+                          f'{epoch_train_loss}\t'+
+                          f'{epoch_dev_loss}\t' +
+                          f'{best_so_far}\n') )
+                del now
+                
             
             ### if this is the best model, save it
-            if epoch_test_loss < best_test_loss:
+            if best_so_far:
                 with open(self.args.logfile_name,'a') as g:
-                    g.write( f'New best test loss at epoch {epoch_idx}: {epoch_test_loss}\n' )
+                    g.write( f'New best dev loss at epoch {epoch_idx}: {epoch_dev_loss}\n' )
                 
                 # update "best" recordings
-                best_test_loss = epoch_test_loss
+                best_dev_loss = epoch_dev_loss
                 best_trainstates = copy(all_trainstates)
                 best_epoch = epoch_idx
                 
@@ -109,9 +131,9 @@ class TrainingWrapper:
             
             
             ### check if early stopping conditions are met
-            early_stop = self._maybe_early_stop(prev_loss = prev_test_loss,
-                                                curr_loss = epoch_test_loss,
-                                                best_loss = best_test_loss)
+            early_stop = self._maybe_early_stop(prev_loss = prev_dev_loss,
+                                                curr_loss = epoch_dev_loss,
+                                                best_loss = best_dev_loss)
             
             if early_stop:
                 # record in the raw ascii logfile
@@ -121,7 +143,7 @@ class TrainingWrapper:
                 break
 
             # remember this epoch's loss for next iteration
-            prev_test_loss = epoch_test_loss
+            prev_dev_loss = epoch_dev_loss
         
         
         ### record timing at the end of all this
@@ -145,7 +167,7 @@ class TrainingWrapper:
         ###   start of every epoch
         train_metrics_recorder = metrics_for_epoch( have_acc = self.have_acc,
                                                  epoch_idx = epoch_idx )  
-        eval_metrics_recorder = metrics_for_epoch( have_acc = self.have_acc,
+        dev_metrics_recorder = metrics_for_epoch( have_acc = self.have_acc,
                                                  epoch_idx = epoch_idx ) 
         self.whole_epoch_timer.start_timer()
         
@@ -168,8 +190,8 @@ class TrainingWrapper:
             del train_batch_size, train_metrics
             
         
-        ### test set: just evaluate
-        for batch_idx, batch in enumerate(self.test_dl):
+        ### dev set: just evaluate
+        for batch_idx, batch in enumerate(self.dev_dl):
             out = self.eval_one_batch( all_trainstates = all_trainstates,
                                        batch = batch,
                                        epoch_idx = epoch_idx,
@@ -178,7 +200,7 @@ class TrainingWrapper:
             del out
             
             self.save_eval_metrics( metrics = eval_metrics,
-                                     metrics_recorder = eval_metrics_recorder,
+                                     metrics_recorder = dev_metrics_recorder,
                                      all_trainstates = all_trainstates,
                                      this_batch_size = eval_batch_size,
                                      epoch_idx = epoch_idx,
@@ -191,15 +213,17 @@ class TrainingWrapper:
         train_metrics_recorder.write_epoch_metrics_to_tensorboard( writer = self.writer,
                                                                    tag = 'training set')
         
-        eval_metrics_recorder.write_epoch_metrics_to_tensorboard( writer = self.writer,
-                                                                  tag = 'test set')
+        dev_metrics_recorder.write_epoch_metrics_to_tensorboard( writer = self.writer,
+                                                                  tag = 'dev set')
             
         # record time spent at this epoch
         self.whole_epoch_timer.end_timer_and_write_to_tboard( epoch_idx = epoch_idx,
                                                               writer = self.writer,
                                                               tag = 'Process one epoch' )
         
-        return (all_trainstates, eval_metrics_recorder.epoch_ave_loss)
+        return {'tstates': all_trainstates,
+                'train_loss': train_metrics_recorder.epoch_ave_loss, 
+                'dev_loss': dev_metrics_recorder.epoch_ave_loss}
     
 
     ###########################################################################
@@ -278,13 +302,9 @@ class TrainingWrapper:
                                 batch_loss = metrics['batch_loss'],
                                 trainstate_objs = updated_trainstates )
         
-        # two possible keys for perplexity: batch_ave_perpl or batch_ave_joint_perpl
-        batch_perpl = metrics.get('batch_ave_perpl', None) or metrics.get('batch_ave_joint_perpl', None) 
-        
         # record metrics
         metrics_recorder.update_after_batch( batch_weight = this_batch_size / len(self.training_dset),
                                     batch_loss = metrics['batch_loss'],
-                                    batch_perpl = batch_perpl,
                                     batch_acc = metrics.get('batch_ave_acc', None) )
         
         self.optional_outputs_writer(writer_obj = self.writer, 
@@ -328,7 +348,7 @@ class TrainingWrapper:
         # end timer
         self.eval_loop_timer.end_timer_and_write_to_tboard( epoch_idx = epoch_idx,
                                                              writer = self.writer,
-                                                             tag = 'Process test data' )
+                                                             tag = 'Process dev data' )
         return (eval_metrics, this_batch_size)
     
     def save_eval_metrics( self, 
@@ -338,14 +358,10 @@ class TrainingWrapper:
                             this_batch_size,
                             epoch_idx,
                             batch_idx):
-        batch_epoch_idx = epoch_idx * len(self.test_dl) + batch_idx
+        batch_epoch_idx = epoch_idx * len(self.dev_dl) + batch_idx
         
-        # two possible keys for perplexity: batch_ave_perpl or batch_ave_joint_perpl
-        batch_perpl = metrics.get('batch_ave_perpl', None) or metrics.get('batch_ave_joint_perpl', None) 
-        
-        metrics_recorder.update_after_batch( batch_weight = this_batch_size / len(self.test_dset),
+        metrics_recorder.update_after_batch( batch_weight = this_batch_size / len(self.dev_dset),
                                     batch_loss = metrics['batch_loss'],
-                                    batch_perpl = batch_perpl,
                                     batch_acc = metrics.get('batch_ave_acc', None) )
         
         no_returns = {k: False for k in self.args.interms_for_tboard.keys()}
@@ -409,14 +425,14 @@ class TrainingWrapper:
                           prev_loss,
                           curr_loss,
                           best_loss):
-        # condition 1: if test loss stagnates or starts to go up, compared
-        #              to previous epoch's test loss
+        # condition 1: if dev loss stagnates or starts to go up, compared
+        #              to previous epoch's dev loss
         cond1 = jnp.allclose( prev_loss, 
                               jnp.minimum (prev_loss, curr_loss), 
                               atol=self.args.early_stop_cond1_atol,
                               rtol=0 )
 
-        # condition 2: if test loss is substatially worse than best test loss
+        # condition 2: if dev loss is substatially worse than best dev loss
         cond2 = (curr_loss - best_loss) > self.args.early_stop_cond2_gap
 
         if cond1 or cond2:
@@ -483,6 +499,10 @@ class NeuralTKFTrainingWrapper(TrainingWrapper):
         # check model type again
         assert self.args.pred_model_type == 'neural_hmm'
         
+        # add dev set
+        self.dev_dset = dataloader_dict['dev_dset']
+        self.dev_dl = dataloader_dict['dev_dl']
+        
         # continue init
         self.seqlen_bin_fn = jit_compile_determine_seqlen_bin(self.args)
         self.alignlen_bin_fn = jit_compile_determine_alignlen_bin(self.args)
@@ -495,9 +515,13 @@ class NeuralTKFTrainingWrapper(TrainingWrapper):
         self.optional_outputs_writer = write_optional_outputs_during_training
 
 class FeedforwardTrainingWrapper(TrainingWrapper):
-    def _model_specific_inits(self):
+    def _model_specific_inits(self, dataloader_dict):
         # check model type again
         assert self.args.pred_model_type == 'feedforward'
+        
+        # add dev set
+        self.dev_dset = dataloader_dict['dev_dset']
+        self.dev_dl = dataloader_dict['dev_dl']
         
         # continue init
         self.seqlen_bin_fn = jit_compile_determine_seqlen_bin(self.args)
@@ -507,11 +531,16 @@ class FeedforwardTrainingWrapper(TrainingWrapper):
         self.write_approx_dict_fn = lambda *args, **kwargs: None
         self.optional_outputs_writer = write_optional_outputs_during_training
 
+
 class TransitMixesTrainingWrapper(TrainingWrapper):
-    def _model_specific_inits(self):
+    def _model_specific_inits(self, dataloader_dict):
         # check model type again
         assert self.args.pred_model_type in ['pairhmm_frag_and_site_classes',
                                              'pairhmm_nested_tkf']
+        
+        # replace "dev set" with a copy of the test set
+        self.dev_dset = dataloader_dict['test_dset']
+        self.dev_dl = dataloader_dict['test_dl']
         
         # continue init
         self.seqlen_bin_fn = lambda *args, **kwargs: None
@@ -525,9 +554,13 @@ class TransitMixesTrainingWrapper(TrainingWrapper):
         self.optional_outputs_writer = write_optional_outputs_during_training_hmms
 
 class IndpSitesTrainingWrapper(TrainingWrapper):
-    def _model_specific_inits(self):
+    def _model_specific_inits(self, dataloader_dict):
         # check model type again
         assert self.args.pred_model_type == 'pairhmm_indp_sites'
+        
+        # replace "dev set" with a copy of the test set
+        self.dev_dset = dataloader_dict['test_dset']
+        self.dev_dl = dataloader_dict['test_dl']
         
         # continue init
         self.seqlen_bin_fn = lambda *args, **kwargs: None

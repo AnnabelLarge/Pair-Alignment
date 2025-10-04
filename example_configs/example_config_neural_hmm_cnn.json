@@ -4,7 +4,8 @@
 
     "data_dir": "example_data",
     "train_dset_splits": ["sevenSamp"],
-    "test_dset_splits": ["sevenSamp"],
+    "dev_dset_splits": ["twoSamp"],
+    "test_dset_splits": ["eightSamp"],
     "toss_alignments_longer_than": null,
     "batch_size": 7,
     "chunk_length": 512,
@@ -83,14 +84,7 @@
                                         "dropout": 0.20,
                                         "normalize_seq_embeddings_before_block": true},
 
-        "times_from": "geometric",
-        "t_grid_center": 0.03,
-        "t_grid_step": 1.1,
-        "t_grid_num_steps": 5,
-        "exponential_dist_param": 1.1,
-
-        "rate_multiplier_regularization_rate": 0.01
-
+        "times_from": "t_per_sample"
     }
     
 }

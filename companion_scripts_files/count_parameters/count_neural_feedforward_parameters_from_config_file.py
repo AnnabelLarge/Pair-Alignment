@@ -31,8 +31,8 @@ from train_eval_fns.build_optimizer import build_optimizer
 from models.neural_shared.neural_initializer import create_all_tstates 
 
 from utils.edit_argparse import enforce_valid_defaults
-from utils.edit_argparse import neural_hmm_fill_with_default_values as fill_with_default_values
-from utils.edit_argparse import neural_hmm_share_top_level_args as share_top_level_args
+from utils.edit_argparse import feedforward_fill_with_default_values as fill_with_default_values
+from utils.edit_argparse import feedforward_share_top_level_args as share_top_level_args
 
 def main(args): 
     fill_with_default_values(args)
@@ -40,7 +40,7 @@ def main(args):
     share_top_level_args(args)
     
     args.pred_config['training_dset_emit_counts'] = jnp.array( [1/20]*20 )
-    args.pred_config['emissions_postproc_config']['training_dset_emit_counts'] = jnp.array( [1/20]*20 )
+    # args.pred_config['emissions_postproc_config']['training_dset_emit_counts'] = jnp.array( [1/20]*20 )
     
     # init the optimizer, split a new rng key
     tx = build_optimizer(args)
@@ -110,7 +110,7 @@ def main(args):
 
 
 if __name__ == '__main__':
-    config_file = 'CONFIG_lstm.json'
+    config_file = 'CONFIG_ffwd_lstm.json'
     
     parser = argparse.ArgumentParser()
     top_level_args = parser.parse_args()

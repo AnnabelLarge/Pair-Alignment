@@ -134,10 +134,17 @@ def cont_training_feedforward(args,
     
     
     ### extract data from dataloader_dict
+    # use this to update model parameters
     training_dset = dataloader_dict['training_dset']
     training_dl = dataloader_dict['training_dl']
-    test_dset = dataloader_dict['test_dset']
-    test_dl = dataloader_dict['test_dl']
+    
+    # use this to decide early stopping
+    dev_dset = dataloader_dict['dev_dset']
+    dev_dl = dataloader_dict['dev_dl']
+    
+    # use this as final held-out test set
+    final_test_dset = dataloader_dict['test_dset']
+    final_test_dl = dataloader_dict['test_dl']
     
     
     ###########################################################################
@@ -156,6 +163,7 @@ def cont_training_feedforward(args,
     ### determine shapes for init
     # unaligned sequences sizes
     global_seq_max_length = max([training_dset.global_seq_max_length,
+                                 dev_dset.global_seq_max_length,
                                  test_dset.global_seq_max_length])
     largest_seqs = (args.batch_size, global_seq_max_length)
     
@@ -165,6 +173,7 @@ def cont_training_feedforward(args,
     
     elif not args.use_scan_fns:
         max_dim1 = max([training_dset.global_align_max_length,
+                        dev_dset.global_align_max_length,
                         test_dset.global_align_max_length]) - 1
       
     largest_aligns = (args.batch_size, max_dim1)
@@ -314,7 +323,7 @@ def cont_training_feedforward(args,
             g.write(f'Regular stopping after {args.num_epochs} full epochs:\n\n')
         
         # finish up logfile, regardless of early stopping or not
-        g.write(f'Epoch with lowest average test loss ("best epoch"): {best_epoch}\n')
+        g.write(f'Epoch with lowest average dev set loss ("best epoch"): {best_epoch}\n')
         g.write(f'RE-EVALUATING ALL DATA WITH BEST PARAMS\n\n')
 
 
@@ -353,20 +362,43 @@ def cont_training_feedforward(args,
         g.write(f'SCORING ALL TRAIN SEQS\n')
         
     # DON'T save arrays yet; takes up too much memory
-    train_summary_stats = final_eval_wrapper(dataloader = training_dl, 
-                                             dataset = training_dset, 
-                                             best_trainstates = best_trainstates, 
-                                             jitted_determine_seqlen_bin = training_wrapper.seqlen_bin_fn,
-                                             jitted_determine_alignlen_bin = training_wrapper.alignlen_bin_fn,
-                                             eval_fn_jitted = eval_fn_jitted,
-                                             out_alph_size = args.out_alph_size,
-                                             save_arrs = False,
-                                             save_per_sample_losses = args.save_per_sample_losses,
-                                             interms_for_tboard = args.interms_for_tboard, 
-                                             logfile_dir = args.logfile_dir,
-                                             out_arrs_dir = args.out_arrs_dir,
-                                             outfile_prefix = f'train-set',
-                                             tboard_writer = writer)
+    train_summary_stats = final_eval_wrapper( dataloader = training_dl, 
+                                              dataset = training_dset, 
+                                              best_trainstates = best_trainstates, 
+                                              jitted_determine_seqlen_bin = training_wrapper.seqlen_bin_fn,
+                                              jitted_determine_alignlen_bin = training_wrapper.alignlen_bin_fn,
+                                              eval_fn_jitted = eval_fn_jitted,
+                                              out_alph_size = args.out_alph_size,
+                                              save_arrs = False,
+                                              save_per_sample_losses = args.save_per_sample_losses,
+                                              interms_for_tboard = args.interms_for_tboard, 
+                                              logfile_dir = args.logfile_dir,
+                                              out_arrs_dir = args.out_arrs_dir,
+                                              outfile_prefix = f'train-set',
+                                              tboard_writer = writer )
+    
+    ##########################################
+    ### loop through dev set dataloader and  #
+    ### score with best params               #
+    ##########################################
+    with open(args.logfile_name,'a') as g:
+        g.write(f'SCORING ALL DEV SEQS\n')
+        
+    # DON'T save arrays yet; takes up too much memory
+    dev_summary_stats = final_eval_wrapper( dataloader = dev_dl, 
+                                            dataset = dev_dset, 
+                                            best_trainstates = best_trainstates, 
+                                            jitted_determine_seqlen_bin = training_wrapper.seqlen_bin_fn,
+                                            jitted_determine_alignlen_bin = training_wrapper.alignlen_bin_fn,
+                                            eval_fn_jitted = eval_fn_jitted,
+                                            out_alph_size = args.out_alph_size,
+                                            save_arrs = False,
+                                            save_per_sample_losses = args.save_per_sample_losses,
+                                            interms_for_tboard = args.interms_for_tboard, 
+                                            logfile_dir = args.logfile_dir,
+                                            out_arrs_dir = args.out_arrs_dir,
+                                            outfile_prefix = f'dev-set',
+                                            tboard_writer = writer )
 
 
     ###########################################
@@ -374,23 +406,23 @@ def cont_training_feedforward(args,
     ### score with best params                #
     ###########################################
     with open(args.logfile_name,'a') as g:
-        g.write(f'SCORING ALL TEST SEQS\n')
+        g.write(f'SCORING ALL HELD-OUT TEST SEQS\n')
         
     # output_attn_weights also controlled by cond1 and cond2
-    test_summary_stats = final_eval_wrapper(dataloader = test_dl, 
-                                             dataset = test_dset, 
-                                             best_trainstates = best_trainstates, 
-                                             jitted_determine_seqlen_bin = training_wrapper.seqlen_bin_fn,
-                                             jitted_determine_alignlen_bin = training_wrapper.alignlen_bin_fn,
-                                             eval_fn_jitted = eval_fn_jitted,
-                                             out_alph_size = args.out_alph_size, 
-                                             save_arrs = args.save_arrs,
-                                             save_per_sample_losses = args.save_per_sample_losses,
-                                             interms_for_tboard = args.interms_for_tboard, 
-                                             logfile_dir = args.logfile_dir,
-                                             out_arrs_dir = args.out_arrs_dir,
-                                             outfile_prefix = f'test-set',
-                                             tboard_writer = writer)
+    final_test_summary_stats = final_eval_wrapper( dataloader = final_test_dl, 
+                                                   dataset = final_test_dset, 
+                                                   best_trainstates = best_trainstates, 
+                                                   jitted_determine_seqlen_bin = training_wrapper.seqlen_bin_fn,
+                                                   jitted_determine_alignlen_bin = training_wrapper.alignlen_bin_fn,
+                                                   eval_fn_jitted = eval_fn_jitted,
+                                                   out_alph_size = args.out_alph_size, 
+                                                   save_arrs = args.save_arrs,
+                                                   save_per_sample_losses = args.save_per_sample_losses,
+                                                   interms_for_tboard = args.interms_for_tboard, 
+                                                   logfile_dir = args.logfile_dir,
+                                                   out_arrs_dir = args.out_arrs_dir,
+                                                   outfile_prefix = f'final-test-set',
+                                                   tboard_writer = writer )
 
 
     ###########################################
@@ -398,11 +430,15 @@ def cont_training_feedforward(args,
     ###########################################
     write_final_eval_results(args = args, 
                              summary_stats = train_summary_stats,
-                             filename = 'TRAIN-AVE-LOSSES.tsv')
+                             filename = 'TRAIN_AVE-LOSSES.tsv')
+    
+    write_final_eval_results(args = args, 
+                             summary_stats = dev_summary_stats,
+                             filename = 'DEV_AVE-LOSSES.tsv')
 
     write_final_eval_results(args = args, 
-                             summary_stats = test_summary_stats,
-                             filename = 'TEST-AVE-LOSSES.tsv')
+                             summary_stats = final_test_summary_stats,
+                             filename = 'FINAL-TEST_AVE-LOSSES.tsv')
 
     # record total time spent on post-training actions; write this to a table
     #   instead of a scalar collection
@@ -413,7 +449,7 @@ def cont_training_feedforward(args,
     #   compress the output file
     writer.close()
     pigz_compress_tensorboard_file( args )
-    
+
     # clean up intermediates
     for file_path in glob.glob(f"{args.model_ckpts_dir}/*_INPROGRESS.pkl"):
         try:
