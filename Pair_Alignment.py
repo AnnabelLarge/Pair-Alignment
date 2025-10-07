@@ -88,7 +88,7 @@ def main():
     
     # # UNCOMMENT TO RUN IN SPYDER IDE
     # top_level_args.task = 'train'
-    # top_level_args.configs = 'example_config_indp_sites_model.json'
+    # top_level_args.configs = 'CONFIG.json'
     # top_level_args.load_dset_pkl = None
     
     

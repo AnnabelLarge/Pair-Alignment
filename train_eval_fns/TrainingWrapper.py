@@ -495,7 +495,7 @@ class TrainingWrapper:
 ### Model-specific subclasses  ################################################
 ###############################################################################
 class NeuralTKFTrainingWrapper(TrainingWrapper):
-    def _model_specific_inits(self):
+    def _model_specific_inits(self, dataloader_dict):
         # check model type again
         assert self.args.pred_model_type == 'neural_hmm'
         

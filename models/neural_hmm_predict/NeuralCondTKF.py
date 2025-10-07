@@ -8,6 +8,7 @@ Created on Wed Jun 18 17:11:33 2025
 import sys
 
 from flax import linen as nn
+from flax.core import FrozenDict, copy
 import jax
 import jax.numpy as jnp
 from jax.scipy.linalg import expm as matrix_exp
@@ -104,6 +105,8 @@ class NeuralCondTKF(ModuleBase):
                        'tkf_mu': 0,
                        'tkf92_frag_size': 0}
         
+        regularization_rates = self.config.get('regularization_rates', default_reg)
+
         # these priors come from standard F81-TKF92 model fit on same training set
         default_pi = self.config['training_dset_emit_counts'] / ( self.config['training_dset_emit_counts'].sum() )
         default_priors = {'equl_dist': default_pi,
@@ -112,16 +115,11 @@ class NeuralCondTKF(ModuleBase):
                           'tkf_mu': 0.03000306870475785,
                           'tkf92_frag_size': 0.6843917135902318}
         
-        regularization_rates = self.config.get('regularization_rates', default_reg)
-        regularization_rates = {k: float(v) for k,v in regularization_rates.items()}
-        
         regularization_priors = self.config.get('regularization_priors', default_priors)
-        for k in regularization_priors.keys():
-            if k == 'equl_dist':
-                regularization_priors[k] = jnp.array( [float(v) for v in regularization_priors[k]] )
-            else:
-                regularization_priors[k] = float( regularization_priors[k] )     
-                
+        if isinstance( regularization_priors['equl_dist'], tuple):
+            regularization_priors = copy( regularization_priors, 
+                                          {'equl_dist': jnp.array(regularization_priors['equl_dist'])} )
+            
         self.regularization_rates = regularization_rates
         self.regularization_priors = regularization_priors
         self.skip_regularization = all([v==0.0 for v in regularization_rates.values()])
@@ -287,7 +285,7 @@ class NeuralCondTKF(ModuleBase):
             p_{corrected} = ( p_{model} + rate * p_{observed} ) / (1 + rate)
             """
             log_observed_freq = jnp.where( self.regularization_priors['equl_dist'] > 0,
-                                           jnp.log(self.regularization_priors['equl_dist']),
+                                           jnp.log( self.regularization_priors['equl_dist'] ),
                                            jnp.finfo(jnp.float32).min
                                            ) #(A,)
             log_observed_freq = log_observed_freq[None, None, :] #(1, 1, A)
