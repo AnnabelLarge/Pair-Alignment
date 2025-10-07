@@ -184,7 +184,7 @@ def cont_training_neural_hmm(args,
     # unaligned sequences sizes
     global_seq_max_length = max([training_dset.global_seq_max_length,
                                  dev_dset.global_seq_max_length,
-                                 test_dset.global_seq_max_length])
+                                 final_test_dset.global_seq_max_length])
     largest_seqs = (args.batch_size, global_seq_max_length)
     
     # aligned datasets sizes
@@ -194,7 +194,7 @@ def cont_training_neural_hmm(args,
     elif not args.use_scan_fns:
         max_dim1 = max([training_dset.global_align_max_length,
                         dev_dset.global_align_max_length,
-                        test_dset.global_align_max_length]) - 1
+                        final_test_dset.global_align_max_length]) - 1
       
     largest_aligns = (args.batch_size, max_dim1)
     del max_dim1
