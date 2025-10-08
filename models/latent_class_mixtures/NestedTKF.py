@@ -1212,24 +1212,6 @@ class NestedTKF(FragAndSiteClasses):
             maybe_write_matrix_to_ascii( out_folder, mat, new_key )
             del mat, new_key
         
-        # P(c_dom)
-        log_domain_class_probs = out['log_domain_class_probs'] #(C_dom)
-        if log_domain_class_probs.shape[0] > 1:
-            mat = np.exp( log_domain_class_probs )
-            key = f'{prefix}_domain_class_probs'
-            write_matrix_to_npy( out_folder, mat, key )
-            maybe_write_matrix_to_ascii( out_folder, mat, key )
-            del key, mat, log_domain_class_probs
-            
-        # P(c_frag | c_dom)
-        log_frag_class_probs = out['log_frag_class_probs'] #(C_dom, C_frag,)
-        if log_frag_class_probs.shape[1] > 1:
-            mat = np.exp( log_frag_class_probs )
-            key = f'{prefix}_frag_class_probs'
-            write_matrix_to_npy( out_folder, mat, key )
-            maybe_write_matrix_to_ascii( out_folder, mat, key )
-            del key, mat, log_frag_class_probs
-            
         
         #####################################################################
         ### only write once: parameters, things that don't depend on time   #
@@ -1238,6 +1220,34 @@ class NestedTKF(FragAndSiteClasses):
             ###############################
             ### these are always returned #
             ###############################
+            ### class probs
+            # site class probs (if num_mixtures > 1); P(c_sites | c_frag, c_dom)
+            if (self.num_transit_mixtures * self.num_site_mixtures) > 1:
+                site_class_probs = np.exp(out['log_site_class_probs']) #(C_tr, C_sites)
+                key = f'{prefix}_site_class_probs'
+                write_matrix_to_npy( out_folder, site_class_probs, key )
+                maybe_write_matrix_to_ascii( out_folder, site_class_probs, key )
+                del key, site_class_probs
+                
+            # domain class probs; P(c_dom)
+            log_domain_class_probs = out['log_domain_class_probs'] #(C_dom)
+            if log_domain_class_probs.shape[0] > 1:
+                mat = np.exp( log_domain_class_probs )
+                key = f'{prefix}_domain_class_probs'
+                write_matrix_to_npy( out_folder, mat, key )
+                maybe_write_matrix_to_ascii( out_folder, mat, key )
+                del key, mat, log_domain_class_probs
+                
+            # fragment class probs; P(c_frag | c_dom)
+            log_frag_class_probs = out['log_frag_class_probs'] #(C_dom, C_frag,)
+            if log_frag_class_probs.shape[1] > 1:
+                mat = np.exp( log_frag_class_probs )
+                key = f'{prefix}_frag_class_probs'
+                write_matrix_to_npy( out_folder, mat, key )
+                maybe_write_matrix_to_ascii( out_folder, mat, key )
+                del key, mat, log_frag_class_probs
+            
+            
             ### substitution rate matrix
             rate_matrix = out['rate_matrix'] #(C_tr, C_sites, A, A) or None
             if rate_matrix is not None:
@@ -1253,23 +1263,22 @@ class NestedTKF(FragAndSiteClasses):
                         del mat_to_save, key
                         
                         
-            ### logprob_emit_at_indel AFTER marginalizing out site and rate mixtures
+            ### equilibrium distribution
+            # (BEFORE marginalizing over site clases)
+            equl_dist = np.exp(out['log_equl_dist_per_mixture']) #(C_tr, C_sites, A)
+            key = f'{prefix}_equilibriums-per-site-class'
+            write_matrix_to_npy( out_folder, equl_dist, key )
+            maybe_write_matrix_to_ascii( out_folder, equl_dist, key )
+            del key, equl_dist
+            
+            # AFTER marginalizing out site and rate mixtures
             mat = np.exp( out['logprob_emit_at_indel'] ) #(C_tr, A)
             new_key = f'{prefix}_logprob_emit_at_indel'.replace('log','')
             write_matrix_to_npy( out_folder, mat, new_key )
             maybe_write_matrix_to_ascii( out_folder, mat, new_key )
             del mat, new_key
 
-
-            ### site class probs (if num_mixtures > 1)
-            if (self.num_transit_mixtures * self.num_site_mixtures) > 1:
-                site_class_probs = np.exp(out['log_site_class_probs']) #(C_tr, C_sites)
-                key = f'{prefix}_site_class_probs'
-                write_matrix_to_npy( out_folder, site_class_probs, key )
-                maybe_write_matrix_to_ascii( out_folder, site_class_probs, key )
-                del key, site_class_probs
-                
-        
+            
             ### rate multipliers 
             # P(K|C) or P(K), if not 1
             if not self.rate_mult_module.prob_rate_mult_is_one:

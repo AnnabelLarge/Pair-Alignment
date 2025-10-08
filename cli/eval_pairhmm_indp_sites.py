@@ -197,29 +197,23 @@ def eval_pairhmm_indp_sites(args,
     
     ### write the parameters again
     if args.save_arrs:
+        # if using a set grid, write for all values in the grid
         if t_array_for_all_samples is not None:
             best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
                                               t_array = t_array_for_all_samples,
-                                              prefix = '',
+                                              prefix = 't_grid',
                                               out_folder = args.out_arrs_dir,
                                               write_time_static_objs = True,
                                               method = pairhmm_instance.write_params )
             
+        # if using one branch length per sample, write parameters at t=1.0
         elif t_array_for_all_samples is None:
-            t_arr = test_dset.times
-            
-            pt_id = 0
-            for i in tqdm( range(0, t_arr.shape[0], args.batch_size) ):
-                batch_t = jnp.array( t_arr[i : (i + args.batch_size)] )
-                batch_prefix = f'test-set_pt{pt_id}'
-                best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
-                                                  t_array = batch_t,
-                                                  prefix = batch_prefix,
-                                                  out_folder = args.out_arrs_dir,
-                                                  write_time_static_objs = (pt_id==0),
-                                                  method = pairhmm_instance.write_params )
-                
-                pt_id += 1
+            best_pairhmm_trainstate.apply_fn( variables = best_pairhmm_trainstate.params,
+                                              t_array = jnp.array([1.0]),
+                                              prefix = 't=1',
+                                              out_folder = args.out_arrs_dir,
+                                              write_time_static_objs = True,
+                                              method = pairhmm_instance.write_params )
     
     
     ###########################################################################

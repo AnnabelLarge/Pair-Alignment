@@ -1,6 +1,6 @@
 Status:
 =======
-8/6/25: all pass
+10/8/25: all pass
 
 
 Summary: 
@@ -56,6 +56,20 @@ ABOUT: with one fragment mixture, FragAndSiteClasses strictly reduces to IndpSit
 
 functions tested:
   - FragAndSiteClasses.calculate_all_loglikes
+
+
+test_tkf92_domain_and_frag_mix_joint_cond_marg
+-----------------------------------------------
+CALCULATION TESTED: TKF92 solution, but with different fragment and domain mixtures
+
+ABOUT: compare my implementation of mixture of TKF92 fragments against hand-done calculations
+
+functions tested:
+  - get_tkf92_single_seq_marginal_transition_logprobs
+  - get_cond_transition_logprobs
+
+flax modules tested:
+  - transition_models.TKF91TransitionLogprobs.fill_joint_tkf92
 
 
 

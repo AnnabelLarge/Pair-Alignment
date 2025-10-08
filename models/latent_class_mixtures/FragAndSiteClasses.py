@@ -700,6 +700,7 @@ class FragAndSiteClasses(ModuleBase):
         out_dict['used_approx'] = approx_flags_dict
         
         if return_intermeds:
+            out_dict['tkf_param_dict'] = out[3]
             out_dict['log_frag_class_probs'] = log_frag_class_probs #(C_frag,)
         
         return out_dict
@@ -755,16 +756,6 @@ class FragAndSiteClasses(ModuleBase):
             maybe_write_matrix_to_ascii( out_folder, mat, new_key )
             del mat, new_key
         
-        # P(c_frag | c_dom)
-        log_frag_class_probs = out['log_frag_class_probs'] #(C_frag,)
-        if log_frag_class_probs.shape[0] > 1:
-            mat = np.exp( log_frag_class_probs )
-            key = f'{prefix}_frag_class_probs'
-            write_matrix_to_npy( out_folder, mat, key )
-            maybe_write_matrix_to_ascii( out_folder, mat, key )
-            del key, mat, log_frag_class_probs
-            
-        
         #####################################################################
         ### only write once: parameters, things that don't depend on time   #
         #####################################################################
@@ -772,6 +763,16 @@ class FragAndSiteClasses(ModuleBase):
             ###############################
             ### these are always returned #
             ###############################
+            ### fragment probabilities; P(c_frag | c_dom)
+            log_frag_class_probs = out['log_frag_class_probs'] #(C_frag, 1)
+            if log_frag_class_probs.shape[0] > 1:
+                mat = np.exp( log_frag_class_probs )
+                key = f'{prefix}_frag_class_probs'
+                write_matrix_to_npy( out_folder, mat, key )
+                maybe_write_matrix_to_ascii( out_folder, mat, key )
+                del key, mat, log_frag_class_probs
+                
+                
             ### substitution rate matrix
             rate_matrix = out['rate_matrix'] #(C_frag, C_sites, A, A) or None
             if rate_matrix is not None:
@@ -786,14 +787,22 @@ class FragAndSiteClasses(ModuleBase):
                         maybe_write_matrix_to_ascii( out_folder, mat_to_save, key )
                         del mat_to_save, key
                         
-                        
-            ### logprob_emit_at_indel AFTER marginalizing out site and rate mixtures
+            
+            ### equilibrium distribution
+            # (BEFORE marginalizing over site clases)
+            equl_dist = np.exp(out['log_equl_dist_per_mixture']) #(C_tr, C_sites, A)
+            key = f'{prefix}_equilibriums-per-site-class'
+            write_matrix_to_npy( out_folder, equl_dist, key )
+            maybe_write_matrix_to_ascii( out_folder, equl_dist, key )
+            del key, equl_dist
+            
+            # AFTER marginalizing out site and rate mixtures
             mat = np.exp( out['logprob_emit_at_indel'] ) #(C_frag, A)
             new_key = f'{prefix}_logprob_emit_at_indel'.replace('log','')
             write_matrix_to_npy( out_folder, mat, new_key )
             maybe_write_matrix_to_ascii( out_folder, mat, new_key )
             del mat, new_key
-
+            
 
             ### site class probs (if num_mixtures > 1)
             if (self.num_transit_mixtures * self.num_site_mixtures) > 1:
@@ -842,13 +851,7 @@ class FragAndSiteClasses(ModuleBase):
                     g.write(f'transition rate, ti: {ti}\n')
                     g.write(f'transition rate, tv: {tv}')
                 del key, arr
-                
-            ### equilibrium distribution (BEFORE marginalizing over site clases)
-            equl_dist = np.exp(out['log_equl_dist_per_mixture']) #(C_tr, C_sites, A)
-            key = f'{prefix}_equilibriums-per-site-class'
-            write_matrix_to_npy( out_folder, equl_dist, key )
-            maybe_write_matrix_to_ascii( out_folder, equl_dist, key )
-            del key
+              
                 
             ####################################################
             ### extract transition paramaters, intermediates   # 

@@ -67,21 +67,6 @@ functions tested:
 flax modules tested:
   - transition_models.TKF91TransitionLogprobs.fill_joint_tkf92
   
-
-test_tkf92_frag_mix_joint_cond_marg
--------------------------------------
-CALCULATION TESTED: TKF92 solution, but with different fragment mixtures
-
-ABOUT: compare my implementation of mixture of TKF92 fragments against hand-done calculations
-
-functions tested:
-  - get_tkf92_single_seq_marginal_transition_logprobs
-  - get_cond_transition_logprobs
-
-flax modules tested:
-  - transition_models.TKF91TransitionLogprobs.fill_joint_tkf92
-
-
 test_tkf92_reduction_to_tkf91
 ---------------------------------
 CALCULATION TESTED: TKF92 model reduction (with different domain and fragment mixtures, but all mixtures should be TKF91)
