@@ -26,7 +26,6 @@ functions:
 'get_cond_transition_logprobs',
 'get_tkf91_single_seq_marginal_transition_logprobs',
 'get_tkf92_single_seq_marginal_transition_logprobs',
-'joint_logprob_emit_at_match_per_mixture',
 'joint_prob_from_counts',
 'log_one_minus_x',
 'log_x_minus_one',
