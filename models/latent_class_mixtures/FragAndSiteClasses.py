@@ -42,12 +42,14 @@ from models.latent_class_mixtures.model_functions import (bound_sigmoid,
                                                               joint_logprob_emit_at_match_per_mixture,
                                                               lse_over_equl_logprobs_per_mixture,
                                                               lse_over_match_logprobs_per_mixture,
-                                                              joint_only_forward,
-                                                              all_loglikes_forward,
+                                                              # joint_only_forward,
+                                                              # all_loglikes_forward,
                                                               marginalize_over_times,
                                                               write_matrix_to_npy,
                                                               maybe_write_matrix_to_ascii)
 
+from models.latent_class_mixtures.one_dim_forward_joint_loglikes import joint_only_one_dim_forward as joint_only_forward
+from models.latent_class_mixtures.one_dim_forward_all_loglikes import all_loglikes_one_dim_forward as all_loglikes_forward
 
 class FragAndSiteClasses(ModuleBase):
     """
