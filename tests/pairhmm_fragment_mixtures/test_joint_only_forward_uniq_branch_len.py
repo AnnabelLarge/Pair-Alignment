@@ -8,6 +8,7 @@ Created on Tue May 27 13:33:56 2025
 import pickle
 import numpy as np
 from itertools import product
+from tqdm import tqdm
 
 import numpy.testing as npt
 import unittest
@@ -25,8 +26,8 @@ from tests.data_processing import (str_aligns_to_tensor,
                                    summarize_alignment)
 
 from models.latent_class_mixtures.transition_models import TKF92TransitionLogprobs
-from models.latent_class_mixtures.model_functions import (regular_tkf,
-                                                              joint_only_forward)
+from models.latent_class_mixtures.model_functions import regular_tkf
+from models.latent_class_mixtures.INPROGRESS import joint_only_forward     
 
 THRESHOLD = 1e-6
 
@@ -123,7 +124,7 @@ class TestJointOnlyForwardUniqBranchLen(unittest.TestCase):
         
         
         ### true
-        for b in range(self.B):
+        for b in tqdm(range(self.B)):
             sample_seq = self.fake_aligns[b,:,:]
             
             # all possible path combinations

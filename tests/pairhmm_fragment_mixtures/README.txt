@@ -72,6 +72,14 @@ flax modules tested:
   - transition_models.TKF91TransitionLogprobs.fill_joint_tkf92
 
 
+Other tests:
+=============
+test_joint_transit_matrix_from_model_obj.py
+--------------------------------------------
+same as test_tkf92_domain_and_frag_mix_joint_cond_marg, but use FragAndSiteClasses
+  object instead
+
+kind of useless, but I already made this, so...
 
 
 TODO:

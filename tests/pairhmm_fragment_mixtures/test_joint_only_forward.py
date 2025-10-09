@@ -26,8 +26,8 @@ from tests.data_processing import (str_aligns_to_tensor,
                                    summarize_alignment)
 
 from models.latent_class_mixtures.transition_models import TKF92TransitionLogprobs
-from models.latent_class_mixtures.model_functions import (switch_tkf,
-                                                              joint_only_forward)
+from models.latent_class_mixtures.model_functions import switch_tkf
+from models.latent_class_mixtures.INPROGRESS import joint_only_forward                                                           
 
 THRESHOLD = 1e-6
 
@@ -43,11 +43,11 @@ class TestJointOnlyForward(unittest.TestCase):
     """
     def setUp(self):
         # fake inputs
-        self.fake_aligns = [ ('T','T')
-                             # ('AC-A','D-ED'),
-                             # ('D-ED','AC-A'),
-                             # ('-C-A-','ECDAD'),
-                             # ('-C-A-AA','ECDADAA'),
+        self.fake_aligns = [ ('T','T'),
+                              ('AC-A','D-ED'),
+                              ('D-ED','AC-A'),
+                              ('-C-A-','ECDAD'),
+                              ('-C-A-AA','ECDADAA'),
                              ]
         
         self.fake_aligns =  str_aligns_to_tensor(self.fake_aligns) #(B, L, 3)
