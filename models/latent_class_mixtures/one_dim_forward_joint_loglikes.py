@@ -148,8 +148,7 @@ def joint_only_one_dim_forward_len_per_samp(aligned_inputs,
                                       xs = idx_arr,
                                       length = idx_arr.shape[0] )  #(C, B)
         
-        loglike = logsumexp(last_alpha,  # (C, B)
-                            axis = 1 if not unique_time_per_sample else 0)
+        loglike = logsumexp(last_alpha,  axis = 0)# (C, B)
         
         return loglike #(B,)
 
@@ -295,8 +294,7 @@ def joint_only_one_dim_forward_time_grid(aligned_inputs,
                                       xs = idx_arr,
                                       length = idx_arr.shape[0] )  #(T, C, B) 
         
-        loglike = logsumexp(last_alpha,  # (T, C, B)  or (C, B)
-                            axis = 1 if not unique_time_per_sample else 0)
+        loglike = logsumexp(last_alpha, axis = 1) #(T, C, B) 
         
         return loglike #(T, B)
 

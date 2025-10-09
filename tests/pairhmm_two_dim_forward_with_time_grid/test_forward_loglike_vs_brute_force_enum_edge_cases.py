@@ -18,8 +18,7 @@ from scipy.special import logsumexp
 from tqdm import tqdm
 
 from models.latent_class_mixtures.transition_models import TKF92TransitionLogprobs
-from models.latent_class_mixtures.model_functions import joint_only_forward as one_dim_forward
-
+from models.latent_class_mixtures.one_dim_forward_joint_loglikes import joint_only_one_dim_forward as one_dim_forward
 from models.latent_class_mixtures.two_dim_forward_with_time_grid import two_dim_forward_with_time_grid as forward_fn
 
 
