@@ -14,7 +14,7 @@ import numpy.testing as npt
 import unittest
 
 from models.latent_class_mixtures.transition_models import (TKF92TransitionLogprobs)
-from models.latent_class_mixtures.forward_algo_helpers import (index_all_classes_one_state,
+from models.latent_class_mixtures.two_dim_forward_algo_helpers import (index_all_classes_one_state,
                                                                                compute_forward_messages_for_state)
 
 

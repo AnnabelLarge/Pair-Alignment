@@ -12,10 +12,10 @@ import numpy as np
 
 import numpy.testing as npt
 import unittest
-from models.latent_class_mixtures.INPROGRESS import (joint_loglike_emission_time_grid,
-                                                     joint_loglike_emission_len_per_samp,
-                                                     init_fw_len_time_grid,
-                                                     init_fw_len_per_samp)
+from models.latent_class_mixtures.one_dim_fwd_bkwd_helpers import (joint_loglike_emission_time_grid,
+                                                                   joint_loglike_emission_len_per_samp,
+                                                                   init_fw_time_grid,
+                                                                   init_fw_len_per_samp)
 
 class TestFwInitFns(unittest.TestCase):
     def setUp(self):
@@ -75,7 +75,7 @@ class TestFwInitFns(unittest.TestCase):
         logprob_emit_at_indel = nn.log_softmax(indel_emit_logits, axis=-1) #(C_trans, A)
         del indel_emit_logits
         
-        pred_out = init_fw_len_time_grid( aligned_inputs = self.aligned_inputs,
+        pred_out = init_fw_time_grid( aligned_inputs = self.aligned_inputs,
                                           joint_logprob_emit_at_match = joint_logprob_emit_at_match,
                                           logprob_emit_at_indel = logprob_emit_at_indel,
                                           joint_logprob_transit = joint_logprob_transit ) #(T,C,B)

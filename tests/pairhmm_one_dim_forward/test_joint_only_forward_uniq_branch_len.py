@@ -27,7 +27,7 @@ from tests.data_processing import (str_aligns_to_tensor,
 
 from models.latent_class_mixtures.transition_models import TKF92TransitionLogprobs
 from models.latent_class_mixtures.model_functions import regular_tkf
-from models.latent_class_mixtures.INPROGRESS import joint_only_forward     
+from models.latent_class_mixtures.one_dim_forward_joint_loglikes import joint_only_one_dim_forward as joint_only_forward  
 
 THRESHOLD = 1e-6
 

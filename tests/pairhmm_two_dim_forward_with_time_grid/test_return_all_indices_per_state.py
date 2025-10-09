@@ -12,7 +12,7 @@ import numpy as np
 import numpy.testing as npt
 import unittest
 
-from models.latent_class_mixtures.forward_algo_helpers import index_all_classes_one_state
+from models.latent_class_mixtures.two_dim_forward_algo_helpers import index_all_classes_one_state
                                                                              
 
 class TestReturnAllIndicesPerState(unittest.TestCase):

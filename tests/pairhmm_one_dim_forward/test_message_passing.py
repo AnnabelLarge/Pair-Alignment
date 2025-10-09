@@ -12,8 +12,8 @@ import numpy as np
 
 import numpy.testing as npt
 import unittest
-from models.latent_class_mixtures.INPROGRESS import (message_passing_time_grid,
-                                                     message_passing_len_per_samp)
+from models.latent_class_mixtures.one_dim_fwd_bkwd_helpers import (joint_message_passing_time_grid,
+                                                                   joint_message_passing_len_per_samp)
 
 class TestMessagePassing(unittest.TestCase):
     def setUp(self):
@@ -41,7 +41,7 @@ class TestMessagePassing(unittest.TestCase):
         prev_message_logprobs = jnp.log(prev_message_probs)
         
         # pred value in LOG space
-        pred_out = message_passing_time_grid( prev_message = prev_message_logprobs, 
+        pred_out = joint_message_passing_time_grid( prev_message = prev_message_logprobs, 
                                               ps = self.prev_states, 
                                               cs = self.curr_states, 
                                               joint_logprob_transit = joint_logprob_transit ) #(T,C,B)
@@ -78,7 +78,7 @@ class TestMessagePassing(unittest.TestCase):
         prev_message_logprobs = jnp.log(prev_message_probs)
         
         # pred value in LOG space
-        pred_out = message_passing_len_per_samp( prev_message = prev_message_logprobs, 
+        pred_out = joint_message_passing_len_per_samp( prev_message = prev_message_logprobs, 
                                                  ps = self.prev_states, 
                                                  cs = self.curr_states, 
                                                  joint_logprob_transit = joint_logprob_transit ) #(C,B)

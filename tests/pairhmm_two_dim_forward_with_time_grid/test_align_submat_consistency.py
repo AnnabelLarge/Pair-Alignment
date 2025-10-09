@@ -18,7 +18,7 @@ import unittest
 
 from models.latent_class_mixtures.transition_models import TKF92TransitionLogprobs
 from models.latent_class_mixtures.two_dim_forward_with_time_grid import two_dim_forward_with_time_grid as forward_fn
-from models.latent_class_mixtures.forward_algo_helpers import (generate_ij_coords_at_diagonal_k,
+from models.latent_class_mixtures.two_dim_forward_algo_helpers import (generate_ij_coords_at_diagonal_k,
                                                                ij_coords_to_wavefront_pos_at_diagonal_k,
                                                                index_all_classes_one_state,
                                                                wavefront_cache_lookup,

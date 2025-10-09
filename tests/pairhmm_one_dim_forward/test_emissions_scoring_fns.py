@@ -12,8 +12,8 @@ import numpy as np
 
 import numpy.testing as npt
 import unittest
-from models.latent_class_mixtures.INPROGRESS import (joint_loglike_emission_time_grid,
-                                                          joint_loglike_emission_len_per_samp)
+from models.latent_class_mixtures.one_dim_fwd_bkwd_helpers import (joint_loglike_emission_time_grid,
+                                                                   joint_loglike_emission_len_per_samp)
 
 
 
