@@ -30,6 +30,7 @@ import flax
 from torch.utils.data import DataLoader
 
 # custom function/classes imports (in order of appearance)
+from utils.train_eval_utils import write_final_eval_results
 from utils.edit_argparse import enforce_valid_defaults
 from train_eval_fns.build_optimizer import build_optimizer
                                  

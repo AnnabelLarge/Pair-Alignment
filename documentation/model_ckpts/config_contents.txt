@@ -1,0 +1,94 @@
+config file needs:
+==================
+
+general setup:
+--------------
+- rng_seednum: INT    
+- training_wkdir: STR
+
+
+dataset:
+---------
+- data_dir: STR
+- test_dset_splits: STR
+- train_dset_splits: STR
+- toss_alignments_longer_than: INT or None
+- batch_size: INT
+
+
+optimization, loss function:
+-----------------------------
+- norm_loss_by: STR in ('desc_len', 'align_len')
+- loss_type: STR in ('conditional', 'joint') (not implemented yet, but do so)
+- optimizer_config: dict containing
+   > init_value
+   > peak_value
+   > end_value
+   > warmup_steps
+   > weight_decay
+   > every_k_schedule
+- early_stop_cond1_atol: FLOAT
+- early_stop_cond2_gap: FLOAT
+- patience: INT
+
+
+times:
+------
+- times_from: STR in ("geometric", "t_array_from_file", "one_time_per_sample_from_file")
+
+  if times_from == geometric:
+    t_grid_center: FLOAT
+    t_grid_step: FLOAT
+    t_grid_num_steps: INT
+
+  if times_from == 't_array_from_file':
+    times_file: STR
+    constant_for_time_marg: FLOAT
+
+
+tensorboard/housekeeping:
+--------------------------
+- histogram_output_freq: INT
+- interms_for_tboard: dict with BOOL entries
+  > encoder_sow_outputs
+  > decoder_sow_outputs
+  > finalpred_sow_outputs
+  > gradients
+  > weights
+  > ancestor_embeddings
+  > descendant_embeddings
+  > forward_pass_outputs
+  > final_logprobs
+- save_arrs: BOOL
+
+
+building models:
+----------------
+(more info in "config_content_per_model_type")
+
+- anc_model_type: STR in ("", None)
+- desc_model_type: STR in ("", None)
+- pred_model_type: STR in ("feedforward", "neural_pairhmm", "pairhmm")
+- anc_enc_config: dict
+- desc_dec_config: dict
+- pred_config: dict
+
+
+
+
+added automatically:
+=====================
+tboard_dir
+model_ckpts_dir
+logfile_dir
+logfile_name
+out_arrs_dir
+
+
+optional inputs (won't change though):
+=======================================
+seq_padding_idx
+align_padding_idx
+in_alph_size
+out_alph_size
+
