@@ -274,7 +274,7 @@ def joint_only_one_dim_backward_len_per_samp(aligned_inputs,
     ### flip this along L_align
     # padding posititions will have same value as l=0
     flipped_stacked_outputs = flip_backward_outputs_len_per_samp( inputs = flipped_aligned_inputs
-                                                                     bkw_stacked_outputs = stacked_outputs ) #(L_align, C, B) 
+                                                                  bkw_stacked_outputs = stacked_outputs ) #(L_align, C, B) 
     
     return flipped_stacked_outputs
 

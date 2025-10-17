@@ -119,7 +119,7 @@ def joint_only_one_dim_forward_len_per_samp(aligned_inputs,
                                                       joint_logprob_transit = joint_logprob_transit ) #(C_curr, B)
             return accum_sum + e  #(C_curr, B)
             
-        def end(in_carry, ps, arg_not_used):
+        def end(in_carry, ps, cs_not_used):
             # replace padding idx with 1 to prevent NaN gradients; this doesn't
             #   affect the actual calculated loglike
             ps = jnp.maximum(ps, 1) #(B,)
