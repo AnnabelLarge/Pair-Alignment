@@ -401,7 +401,7 @@ def marginal_message_passing(prev_message,
 
 
 ###############################################################################
-### BACKWARDS HELPERS   #######################################################
+### BACKWARD HELPERS   ########################################################
 ###############################################################################
 def flip_alignments(inputs):
     """
@@ -459,7 +459,7 @@ def flip_alignments(inputs):
     
     return outputs
 
-def flip_backwards_outputs_with_time_grid( inputs,
+def flip_backward_outputs_with_time_grid( inputs,
                                            bkw_stacked_outputs ):
     """
     adapted from flax.linen.recurrent.flip_sequences
@@ -492,7 +492,7 @@ def flip_backwards_outputs_with_time_grid( inputs,
         used to determine indexes
     
     bkw_stacked_outputs : ArrayLike, (L, T, C, B) 
-        outputs from running backwards algorithm
+        outputs from running backward algorithm
        
     Returns:
     ---------
@@ -517,7 +517,7 @@ def flip_backwards_outputs_with_time_grid( inputs,
     
     return outputs
 
-def flip_backwards_outputs_with_len_per_samp( inputs,
+def flip_backward_outputs_with_len_per_samp( inputs,
                                               bkw_stacked_outputs ):
     """
     adapted from flax.linen.recurrent.flip_sequences
@@ -550,7 +550,7 @@ def flip_backwards_outputs_with_len_per_samp( inputs,
         used to determine indexes
     
     bkw_stacked_outputs : ArrayLike, (L, C, B) 
-        outputs from running backwards algorithm
+        outputs from running backward algorithm
        
     Returns:
     ---------

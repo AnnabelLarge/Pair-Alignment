@@ -19,8 +19,8 @@ from models.latent_class_mixtures.one_dim_fwd_bkwd_helpers import (init_recurs_w
                                                                    joint_loglike_emission_time_grid,
                                                                    joint_message_passing_len_per_samp,
                                                                    joint_message_passing_time_grid,
-                                                                   flip_backwards_outputs_with_time_grid)
-                                                                   flip_backwards_outputs_with_len_per_samp)
+                                                                   flip_backward_outputs_with_time_grid)
+                                                                   flip_backward_outputs_with_len_per_samp)
 
 def joint_only_one_dim_backward_time_grid(aligned_inputs,
                                           joint_logprob_emit_at_match,
@@ -29,7 +29,7 @@ def joint_only_one_dim_backward_time_grid(aligned_inputs,
     """
     unique_time_per_sample = False
     
-    backwards algo ONLY to find joint loglike
+    backward algo ONLY to find joint loglike
     
     L_align: length of pairwise alignment
     T: number of timepoints
@@ -60,7 +60,7 @@ def joint_only_one_dim_backward_time_grid(aligned_inputs,
     Returns:
     ---------
     stacked_outputs : ArrayLike, (L_align, T, C, B) 
-        the cache from the backwards algorithm
+        the cache from the backward algorithm
     """
     # fliip inputs
     flipped_aligned_inputs = flip_alignments(aligned_inputs)  #(B, L, 3)
@@ -144,7 +144,7 @@ def joint_only_one_dim_backward_time_grid(aligned_inputs,
     
     ### flip this along L_align
     # padding posititions will have same value as l=0
-    flipped_stacked_outputs = flip_backwards_outputs_with_time_grid( inputs = flipped_aligned_inputs
+    flipped_stacked_outputs = flip_backward_outputs_with_time_grid( inputs = flipped_aligned_inputs
                                                                      bkw_stacked_outputs = stacked_outputs ) #(L_align, T, C, B) 
     
     return flipped_stacked_outputs
@@ -157,7 +157,7 @@ def joint_only_one_dim_backward_len_per_samp(aligned_inputs,
     """
     unique_time_per_sample = False
     
-    backwards algo ONLY to find joint loglike
+    backward algo ONLY to find joint loglike
     
     L_align: length of pairwise alignment
     B: batch size
@@ -187,7 +187,7 @@ def joint_only_one_dim_backward_len_per_samp(aligned_inputs,
     Returns:
     ---------
     stacked_outputs : ArrayLike, (L_align, T, C, B) 
-        the cache from the backwards algorithm
+        the cache from the backward algorithm
     """
     # flip inputs
     flipped_aligned_inputs = flip_alignments(aligned_inputs)  #(B, L, 3)
@@ -273,7 +273,32 @@ def joint_only_one_dim_backward_len_per_samp(aligned_inputs,
     
     ### flip this along L_align
     # padding posititions will have same value as l=0
-    flipped_stacked_outputs = flip_backwards_outputs_len_per_samp( inputs = flipped_aligned_inputs
+    flipped_stacked_outputs = flip_backward_outputs_len_per_samp( inputs = flipped_aligned_inputs
                                                                      bkw_stacked_outputs = stacked_outputs ) #(L_align, C, B) 
     
     return flipped_stacked_outputs
+
+
+def joint_only_one_dim_backward(aligned_inputs,
+                       joint_logprob_emit_at_match,
+                       logprob_emit_at_indel,
+                       joint_logprob_transit,
+                       unique_time_per_sample: bool, 
+                       return_all_intermeds: bool = False):
+    """
+    Wrapper; see individual functions for more details
+    """
+    if unique_time_per_sample:
+        return joint_only_one_dim_backward_len_per_samp(aligned_inputs,
+                                                        joint_logprob_emit_at_match,
+                                                        logprob_emit_at_indel,
+                                                        joint_logprob_transit,
+                                                        return_all_intermeds)
+
+    elif not unique_time_per_sample:  
+        return joint_only_one_dim_backward_time_grid(aligned_inputs,
+                                                     joint_logprob_emit_at_match,
+                                                     logprob_emit_at_indel,
+                                                     joint_logprob_transit,
+                                                     return_all_intermeds)
+    
