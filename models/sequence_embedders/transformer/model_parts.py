@@ -192,8 +192,10 @@ class RotaryEmbeddingSelfAttention(nn.Module):
 
     def __call__(self, inputs_q, mask, deterministic: bool, sow_weights: bool):
         # alias my trace to the arguments from original implementation
-        hidden_states = inputs_q
-        attention_mask = mask # padding and causal mask has ALREADY BEEN PREPARED HERE
+        hidden_states = inputs_q #(B, L, H)
+        
+        # padding and causal mask has ALREADY BEEN PREPARED HERE
+        attention_mask = mask  #(B, 1, L, L)
         
         # need to make position_ids for rotary embeddings
         position_ids = jnp.array( range(0, inputs_q.shape[1]) )[None, :] #(1,L)
@@ -204,14 +206,12 @@ class RotaryEmbeddingSelfAttention(nn.Module):
         
         # probably won't use these arguments
         init_cache = False
-        
     
-        #(B,L,H)
         query = self.q_proj(hidden_states) 
         key = self.k_proj(hidden_states)
         value = self.v_proj(hidden_states)
         
-        query = self._split_heads(query, self.num_heads)
+        query = self._split_heads(query, self.num_heads) #(B, L, num_heads, H/num_heads)
         key = self._split_heads(key, self.num_key_value_heads) #(B, L, num_heads, H/num_heads)
         value = self._split_heads(value, self.num_key_value_heads) #(B, L, num_heads, H/num_heads)
 

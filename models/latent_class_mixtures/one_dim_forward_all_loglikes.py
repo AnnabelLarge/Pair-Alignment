@@ -14,8 +14,8 @@ from jax._src.typing import Array, ArrayLike
 from functools import partial
 import numpy as np
 
-from models.latent_class_mixtures.one_dim_fwd_bkwd_helpers import (init_fw_len_per_samp,
-                                                                   init_fw_time_grid,
+from models.latent_class_mixtures.one_dim_fwd_bkwd_helpers import (init_recurs_with_len_per_samp,
+                                                                   init_recurs_with_time_grid,
                                                                    init_marginals,
                                                                    joint_loglike_emission_len_per_samp,
                                                                    joint_loglike_emission_time_grid,
@@ -78,10 +78,11 @@ def all_loglikes_one_dim_forward_len_per_samp(aligned_inputs,
     
     ### initialize with <start> -> any
     # joint: P(anc, desc, align)
-    init_joint_alpha = init_fw_len_per_samp( aligned_inputs,
-                                        joint_logprob_emit_at_match,
-                                        logprob_emit_at_indel,
-                                        joint_logprob_transit) #(C, B)
+    init_joint_alpha = init_recurs_with_len_per_samp( aligned_inputs,
+                                                      joint_logprob_emit_at_match,
+                                                      logprob_emit_at_indel,
+                                                      joint_logprob_transit,
+                                                      which = 'fw' ) #(C, B)
     # logP(anc), logP(desc)
     first_tr = marginal_logprob_transit[0,:,1,0][...,None] #(C, 1)
     out = init_marginals(aligned_inputs = aligned_inputs,
@@ -317,10 +318,11 @@ def all_loglikes_one_dim_forward_time_grid(aligned_inputs,
     
     ### initialize with <start> -> any
     # joint: P(anc, desc, align)
-    init_joint_alpha = init_fw_time_grid( aligned_inputs,
-                                        joint_logprob_emit_at_match,
-                                        logprob_emit_at_indel,
-                                        joint_logprob_transit) #(C, B)
+    init_joint_alpha = init_recurs_with_time_grid( aligned_inputs,
+                                       joint_logprob_emit_at_match,
+                                       logprob_emit_at_indel,
+                                       joint_logprob_transit,
+                                       which = 'fw' ) #(C, B)
     
     
     # logP(anc), logP(desc)

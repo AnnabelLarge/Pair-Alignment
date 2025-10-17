@@ -11,11 +11,10 @@ from jax.scipy.special import logsumexp
 from jax.scipy.linalg import expm
 from jax._src.typing import Array, ArrayLike
 
-from functools import partial
 import numpy as np
 
-from models.latent_class_mixtures.one_dim_fwd_bkwd_helpers import (init_fw_len_per_samp,
-                                                                   init_fw_time_grid,
+from models.latent_class_mixtures.one_dim_fwd_bkwd_helpers import (init_recurs_with_len_per_samp,
+                                                                   init_recurs_with_time_grid,
                                                                    joint_loglike_emission_len_per_samp,
                                                                    joint_loglike_emission_time_grid,
                                                                    joint_message_passing_len_per_samp,
@@ -60,6 +59,8 @@ def joint_only_one_dim_forward_len_per_samp(aligned_inputs,
     
     Returns:
     ---------
+    loglike : ArrayLike, (B,)
+    
     stacked_outputs : ArrayLike, (L_align, C, B)
         the cache from the forward algorithm; this is the total log-probability 
         of ending at a given alignment column (l \in L_align) in class C, given
@@ -75,10 +76,11 @@ def joint_only_one_dim_forward_len_per_samp(aligned_inputs,
     L_align = aligned_inputs.shape[1]
     
     ### initialize with <start> -> any 
-    init_alpha = init_fw_len_per_samp( aligned_inputs,
-                                        joint_logprob_emit_at_match,
-                                        logprob_emit_at_indel,
-                                        joint_logprob_transit) #(C, B)
+    init_alpha = init_recurs_with_len_per_samp( aligned_inputs,
+                                                joint_logprob_emit_at_match,
+                                                logprob_emit_at_indel,
+                                                joint_logprob_transit,
+                                                which = 'fw' ) #(C, B)
     
     
     ######################################################
@@ -205,6 +207,8 @@ def joint_only_one_dim_forward_time_grid(aligned_inputs,
     
     Returns:
     ---------
+    loglike : ArrayLike, (T, B)
+    
     stacked_outputs : ArrayLike, (L_align, T, C, B) 
         the cache from the forward algorithm; this is the total log-probability 
         of ending at a given alignment column (l \in L_align) in class C, given
@@ -220,10 +224,11 @@ def joint_only_one_dim_forward_time_grid(aligned_inputs,
     L_align = aligned_inputs.shape[1]
     
     ### initialize with <start> -> any 
-    init_alpha = init_fw_time_grid( aligned_inputs,
-                                    joint_logprob_emit_at_match,
-                                    logprob_emit_at_indel,
-                                    joint_logprob_transit) #(T, C, B)
+    init_alpha = init_recurs_with_time_grid( aligned_inputs,
+                                 joint_logprob_emit_at_match,
+                                 logprob_emit_at_indel,
+                                 joint_logprob_transit,
+                                 which = 'fw' ) #(T, C, B)
     
     ######################################################
     ### scan down length dimension to end of alignment   #
@@ -272,7 +277,7 @@ def joint_only_one_dim_forward_time_grid(aligned_inputs,
             # simple indexing to get end state
             final_tr = joint_logprob_transit[:, :, -1, ps-1, -1] #(T, C_prev, B)    
             
-            return final_tr + in_carry #(T, C, B) or (C, B)
+            return final_tr + in_carry #(T, C, B) 
         
         
         ### alpha update, in log space ONLY if curr_state is not pad
@@ -280,7 +285,7 @@ def joint_only_one_dim_forward_time_grid(aligned_inputs,
                               jnp.where( curr_state != 4,
                                           main_body(prev_alpha, prev_state, curr_state),
                                           end(prev_alpha, prev_state, curr_state) ),
-                              prev_alpha) #(T, C, B) or (C, B)
+                              prev_alpha) #(T, C, B) 
         
         return (new_alpha, new_alpha)
     

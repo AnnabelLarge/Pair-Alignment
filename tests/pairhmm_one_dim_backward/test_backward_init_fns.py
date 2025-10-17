@@ -15,7 +15,8 @@ import unittest
 from models.latent_class_mixtures.one_dim_fwd_bkwd_helpers import (joint_loglike_emission_time_grid,
                                                                    joint_loglike_emission_len_per_samp,
                                                                    init_recurs_with_time_grid,
-                                                                   init_recurs_with_len_per_samp)
+                                                                   init_recurs_with_len_per_samp,
+                                                                   flip_alignments)
 
 class TestFwInitFns(unittest.TestCase):
     def setUp(self):
@@ -43,10 +44,11 @@ class TestFwInitFns(unittest.TestCase):
                           [ 4, 43, 3],
                           [ 2,  2, 5]] ) #(L, 3)
         
-        self.aligned_inputs = jnp.stack([all_match,
-                                         all_ins,
-                                         all_del,
-                                         mix]) #(B, L, 3)
+        aligned_inputs = jnp.stack([all_match,
+                                    all_ins,
+                                    all_del,
+                                    mix]) #(B, L, 3)
+        self.aligned_inputs = flip_alignments(aligned_inputs) #(B, L, 3)
         
         self.B = self.aligned_inputs.shape[0]
         self.L = self.aligned_inputs.shape[1]
@@ -79,7 +81,7 @@ class TestFwInitFns(unittest.TestCase):
                                    joint_logprob_emit_at_match = joint_logprob_emit_at_match,
                                    logprob_emit_at_indel = logprob_emit_at_indel,
                                    joint_logprob_transit = joint_logprob_transit,
-                                   which = 'fw' ) #(T,C,B)
+                                   which = 'bkw' ) #(T,C,B)
         
         for b in range(B):
             a = self.aligned_inputs[b,1,0]
@@ -89,11 +91,11 @@ class TestFwInitFns(unittest.TestCase):
             e = joint_loglike_emission_time_grid( aligned_inputs = self.aligned_inputs[b,...][None,...],
                                                   pos = 1,
                                                   joint_logprob_emit_at_match = joint_logprob_emit_at_match,
-                                                  logprob_emit_at_indel = logprob_emit_at_indel ) #(T, C, 1)
-            e = e[...,0] #(T, C)
+                                                  logprob_emit_at_indel = logprob_emit_at_indel ) #(T, C_prev, 1)
+            e = e[...,0] #(T, C_prev)
             
             assert s in [1,2,3]
-            true = e + joint_logprob_transit[:, 0, :, -1, s-1] #(T, C)
+            true = e + joint_logprob_transit[:, :, -1, s-1, -1] #(T, C_prev)
             
             npt.assert_allclose( pred_out[...,b], true )
                 
@@ -123,18 +125,18 @@ class TestFwInitFns(unittest.TestCase):
                                           joint_logprob_emit_at_match = joint_logprob_emit_at_match,
                                           logprob_emit_at_indel = logprob_emit_at_indel,
                                           joint_logprob_transit = joint_logprob_transit,
-                                          which = 'fw') #(C,B)
+                                          which = 'bkw') #(C,B)
         
         e = joint_loglike_emission_len_per_samp( aligned_inputs = self.aligned_inputs,
                                                  pos = 1,
                                                  joint_logprob_emit_at_match = joint_logprob_emit_at_match,
-                                                 logprob_emit_at_indel = logprob_emit_at_indel ) #(C, B)
+                                                 logprob_emit_at_indel = logprob_emit_at_indel ) #(C_prev, B)
         
         for b in range(B):
             s = self.aligned_inputs[b,1,2]
             
             assert s in [1,2,3]
-            true = e[...,b] + joint_logprob_transit[b, 0, :, -1, s-1] #(C,)
+            true = e[...,b] + joint_logprob_transit[b, :, -1, s-1, -1] #(C_prev,)
             
             npt.assert_allclose( pred_out[...,b], true )
                     

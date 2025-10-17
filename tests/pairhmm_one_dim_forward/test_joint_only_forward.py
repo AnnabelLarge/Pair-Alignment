@@ -56,7 +56,7 @@ class TestJointOnlyForward(unittest.TestCase):
         rngkey = jax.random.key(0) # note: reusing this rngkey over and over
         t_array = jnp.array([1.0])
         self.T = t_array.shape[0]
-        self.C_frag = 1
+        self.C_frag = 2
         self.A = 20
         lam = jnp.array([0.3])
         mu = jnp.array([0.5])

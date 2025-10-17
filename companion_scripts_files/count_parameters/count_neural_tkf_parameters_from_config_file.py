@@ -102,16 +102,17 @@ def main(args):
         param_count += val.size
         final_count += val.size
 
-    print(f'anc seq embedder: {anc_count}')
-    print(f'desc seq embedder: {desc_count}')
-    print(f'prediction head: {final_count}')
-    print(f'TOTAL: {param_count}')
+    print(f' anc seq embedder: {anc_count:,}')
+    print(f'desc seq embedder: {desc_count:,}')
+    print(f'  prediction head: {final_count:,}')
+    print(f'            TOTAL: {param_count:,}')
     
 
 
 if __name__ == '__main__':
-    config_file = 'CONFIG_ffwd_lstm.json'
-    
+    config_file = 'CONFIG_big-transf_big_out_network.json'
+    print(config_file)
+
     parser = argparse.ArgumentParser()
     top_level_args = parser.parse_args()
     
@@ -131,3 +132,5 @@ if __name__ == '__main__':
     
     # count
     main( args )
+    print()
+    print()

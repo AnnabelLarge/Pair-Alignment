@@ -31,7 +31,7 @@ def _determine_emission_alphabet_size(argparse_obj,
     else: 
         return 4 if (argparse_obj.pred_config.get("subst_model_type") == "hky85") else 20
 
-def _init_time_grid(argparse_obj):
+def _init_recurs_with_time_grid(argparse_obj):
     """
     returns grid of times if desired, otherwise None
     t_per_sample is True if this returns None, False otherwise
@@ -115,7 +115,7 @@ def init_full_len_dset( args: Namespace,
                                                                pred_model_type = pred_model_type) 
     
     # other defaults: grid of times (could be either (T,) array, or none)
-    t_array_for_all_samples = _init_time_grid(argparse_obj = argparse_obj)
+    t_array_for_all_samples = _init_recurs_with_time_grid(argparse_obj = argparse_obj)
     
     # if t_array_for_all_samples is None, then there's no time grid; use one
     # branch length per sample

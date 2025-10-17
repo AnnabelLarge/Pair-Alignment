@@ -5,14 +5,6 @@ Created on Wed Oct  8 17:18:45 2025
 
 @author: annabel
 
-'init_fw_len_per_samp',
-'init_fw_time_grid',
-'init_marginals',
-'joint_loglike_emission_len_per_samp',
-'joint_loglike_emission_time_grid',
-'joint_message_passing_len_per_samp',
-'joint_message_passing_time_grid',
-'marginal_message_passing',
 
 """
 import jax
@@ -150,7 +142,7 @@ def joint_loglike_emission_len_per_samp(aligned_inputs,
     # Indels: (C, B)
     emit_if_indel_desc = logprob_emit_at_indel[:, desc_toks] #(C, B)
     emit_if_indel_anc = logprob_emit_at_indel[:, anc_toks] # (C, B)
-    
+
     joint_emissions = jnp.stack( [joint_emit_if_match,
                                   emit_if_indel_desc,
                                   emit_if_indel_anc], axis=0)  # (3, C, B)
@@ -162,16 +154,17 @@ def joint_loglike_emission_len_per_samp(aligned_inputs,
 
 
 ###############################################################################
-### FORWARD INIT FUNCTIONS   ##################################################
+### INIT FUNCTIONS   ##########################################################
 ###############################################################################
-def init_fw_time_grid(aligned_inputs,
-                         joint_logprob_emit_at_match,
-                         logprob_emit_at_indel,
-                         joint_logprob_transit):
+def init_recurs_with_time_grid(aligned_inputs,
+                               joint_logprob_emit_at_match,
+                               logprob_emit_at_indel,
+                               joint_logprob_transit,
+                               which):
     """
-    L: length of pairwise alignment
     T: number of timepoints
     B: batch size
+    L: length of pairwise alignment
     C: number of latent site clases
     S: number of transitions, 4 (M, I, D, S/E)
     A: alphabet size (20 for proteins, 4 for amino acids)
@@ -183,6 +176,7 @@ def init_fw_time_grid(aligned_inputs,
         dim2=0: ancestor
         dim2=1: descendant
         dim2=2: alignment state; M=1, I=2, D=3, S=4, E=5
+        already reversed, if doing backward algo
     
     joint_logprob_emit_at_match : ArrayLike, (T, C, A, A)
         logP(anc, desc | c, t); log-probability of emission at match site
@@ -194,39 +188,56 @@ def init_fw_time_grid(aligned_inputs,
         logP(new state, new class | prev state, prev class, t); the joint 
         transition matrix for finding logP(anc, desc, align | c, t)
     
+    which : str
+        if "fw", then moving from prev -> curr; return logprob 
+        start -> first class and first emission
+            
+        if "bkw", then moving from curr -> prev; return logprob 
+        end -> last class and last emission
     
     Returns
     -------
     ArrayLike, (T, C, B)
-        logprob of start -> first class and first emission
+        initial value for forward or backward algo
     """
-    # emissions
+    ### emissions
     e = joint_loglike_emission_time_grid( aligned_inputs=aligned_inputs,
                                           pos=1,
                                           joint_logprob_emit_at_match=joint_logprob_emit_at_match,
-                                          logprob_emit_at_indel=logprob_emit_at_indel ) # (T, C_curr, B)
+                                          logprob_emit_at_indel=logprob_emit_at_indel ) # (T, C, B)
     
-    # transitions; assume there's never start -> end
+    
+    ### transitions
+    state_idx = aligned_inputs[:, 1, 2]-1 #(B,)
+    
     # joint_logprob_transit is (T, C_prev, C_curr, S_prev, S_curr)
-    # initial state is 4 (<start>); take the last row
-    # use C_prev=0 for start class (but it doesn't matter, because the 
-    # transition probability is the same for all C_prev)
-    first_state_idx = aligned_inputs[:, 1, 2]-1 #(B,)
-    start_any = joint_logprob_transit[:, 0, :, -1, :] #(T, C_curr, S_curr)
-    tr = start_any[:, :, first_state_idx] #(T, C_curr, B)
+    if which == 'fw':    
+        # initial state is 4 (<start>); take the last row
+        # use C_prev=0 for start class (but it doesn't matter, because the 
+        # transition probability is the same for all C_prev)
+        start_any = joint_logprob_transit[:, 0, :, -1, :] #(T, C_curr, S_curr)
+        tr = start_any[:, :, state_idx] #(T, C_curr, B)
     
+    elif which == 'bkw':
+        # initial state is 5 (<end>); take the last column
+        # use C_prev=-1 for end class (but it doesn't matter, because the 
+        # transition probability is the same for all C_prev)
+        end_any = joint_logprob_transit[:, :, -1, :, -1] #(T, C_prev, S_prev)
+        tr = end_any[:, :, state_idx] #(T, C_prev, B)
+        
     # carry value
-    init_alpha = e + tr #(T, C_curr, B)
+    init_alpha = e + tr #(T, C, B)
     return e + tr
 
-def init_fw_len_per_samp(aligned_inputs,
-                         joint_logprob_emit_at_match,
-                         logprob_emit_at_indel,
-                         joint_logprob_transit):
+
+def init_recurs_with_len_per_samp(aligned_inputs,
+                                  joint_logprob_emit_at_match,
+                                  logprob_emit_at_indel,
+                                  joint_logprob_transit,
+                                  which):
     """
-    L: length of pairwise alignment
-    T: number of timepoints
     B: batch size
+    L: length of pairwise alignment
     C: number of latent site clases
     S: number of transitions, 4 (M, I, D, S/E)
     A: alphabet size (20 for proteins, 4 for amino acids)
@@ -238,6 +249,7 @@ def init_fw_len_per_samp(aligned_inputs,
         dim2=0: ancestor
         dim2=1: descendant
         dim2=2: alignment state; M=1, I=2, D=3, S=4, E=5
+        already reversed, if doing backward algo
     
     joint_logprob_emit_at_match : ArrayLike, (B, C, A, A)
         logP(anc, desc | c, t); log-probability of emission at match site
@@ -249,33 +261,58 @@ def init_fw_len_per_samp(aligned_inputs,
         logP(new state, new class | prev state, prev class, t); the joint 
         transition matrix for finding logP(anc, desc, align | c, t)
     
+    which : str
+        if "fw", then algo is moving from prev -> curr; return logprob 
+        start -> first class and first emission
+            
+        if "bkw", then algo is moving from curr -> prev; return logprob 
+        end -> last class and last emission
+        
     
     Returns
     -------
     ArrayLike, (C, B)
-        logprob of start -> first class and first emission
+        initial value for forward or backward algo
     """
     B = aligned_inputs.shape[0]
     
-    # emissions
+    ### emissions
     e = joint_loglike_emission_len_per_samp( aligned_inputs=aligned_inputs,
                                              pos=1,
                                              joint_logprob_emit_at_match=joint_logprob_emit_at_match,
                                              logprob_emit_at_indel=logprob_emit_at_indel ) # (C_curr, B)
     
-    # transitions; assume there's never start -> end
-    # joint_logprob_transit is (T, C_prev, C_curr, S_prev, S_curr)
-    # initial state is 4 (<start>); take the last row
-    # use C_prev=0 for start class (but it doesn't matter, because the 
-    # transition probability is the same for all C_prev)
-    first_state_idx = aligned_inputs[:, 1, 2] #(B,)
-    start_any = joint_logprob_transit[:, 0, :, -1, :] #(B, C_curr, S_curr)
-    tr = start_any[jnp.arange(B), :, first_state_idx-1] #(B, C_curr)
-    tr = tr.T #(C_curr, B)
+    ### transitions
+    state_idx = aligned_inputs[:, 1, 2]-1 #(B,)
     
+    # joint_logprob_transit is (B, C_prev, C_curr, S_prev, S_curr)
+    if which == 'fw':
+        # prev = start
+        # curr = first alignment column
+        # prev -> curr
+        #
+        # initial state is 4 (<start>); take the last row
+        # use C_prev=0 for start class (but it doesn't matter, because the 
+        # transition probability is the same for all C_prev)
+        start_any = joint_logprob_transit[:, 0, :, -1, :] #(B, C_curr, S_curr)
+        tr = start_any[jnp.arange(B), :, state_idx] #(B, C_curr)
+        
+    elif which == 'bkw':
+        # prev = end
+        # curr = last alignment column
+        # curr -> prev
+        #
+        # initial state is 5 (<end>); take the last column
+        # use C_curr=-1 for end class (but it doesn't matter, because the 
+        # transition probability is the same for all C_curr)
+        end_any = joint_logprob_transit[:, :, -1, :, -1] #(B, C_prev, S_prev)
+        tr = end_any[jnp.arange(B), :, state_idx] #(B, C_prev)
+        
     # carry value
-    init_alpha = e + tr #(C_curr, B)
-    return e + tr
+    tr = tr.T #(C, B)
+    init_alpha = e + tr #(C, B)
+    return e + tr    
+
 
 def init_marginals(aligned_inputs,
                    logprob_emit_at_indel,
@@ -315,7 +352,7 @@ def init_marginals(aligned_inputs,
 
 
 ###############################################################################
-### FORWARD MESSAGE PASSING   #################################################
+### MESSAGE PASSING   #########################################################
 ###############################################################################
 def joint_message_passing_len_per_samp(prev_message, 
                                  ps, 
@@ -360,3 +397,180 @@ def marginal_message_passing(prev_message,
     marginal_logprob_transit_reshaped = marginal_logprob_transit[...,0,0][...,None] #(C_prev, C_curr, 1)
     to_logsumexp = prev_message_reshaped + marginal_logprob_transit_reshaped #(C_prev, C_curr, B)
     return logsumexp(to_logsumexp, axis=0) # (C_curr, B)
+
+
+
+###############################################################################
+### BACKWARDS HELPERS   #######################################################
+###############################################################################
+def flip_alignments(inputs):
+    """
+    adapted from flax.linen.recurrent.flip_sequences
+    https://github.com/google/flax/blob/ \
+        c0ea12d3ecae1b87982131dbb637547b9f4eb43a/flax/linen/recurrent.py#L1180
+    
+    flips along axis 1, but keeps padding at the end!
+    
+    example:
+        
+        [[1, 1, 4],
+         [3, 4, 1],
+         [2, 2, 5],
+         [0, 0, 0],
+         [0, 0, 0]]
+        
+             |
+             v
+             
+        [[2, 2, 5],
+         [3, 4, 1],
+         [1, 1, 4],
+         [0, 0, 0],
+         [0, 0, 0]]
+        
+    
+    Arguments:
+    ------------
+    inputs : ArrayLike, (B, L, 3)
+        aligned inputs
+        dim0 = aligned ancestor
+        dim1 = aligned descendant
+        dim2 = state
+       
+    Returns:
+    ---------
+    outputs : ArrayLike, (B, L, 3)
+        inputs, flipped along length axis
+        
+    """
+    B = inputs.shape[0]
+    L = inputs.shape[1]
+    
+    seq_lengths = (inputs[...,0] != 0).sum(axis=1) #(B,)
+    max_steps = inputs.shape[1]
+    seq_lengths = seq_lengths[:,None,None] #(B, 1, 1)
+    
+    idxs = jnp.arange(max_steps - 1, -1, -1)  # (L,)
+    idxs = jnp.reshape( idxs, (1, max_steps, 1) ) #(1, L, 1)
+    idxs = (idxs + seq_lengths) % max_steps  # (B, L, 1)
+    idxs = jnp.broadcast_to( idxs, (B, L, 3) ) #(B, L, 3)
+    
+    outputs = jnp.take_along_axis( inputs, idxs, axis=1 )
+    
+    return outputs
+
+def flip_backwards_outputs_with_time_grid( inputs,
+                                           bkw_stacked_outputs ):
+    """
+    adapted from flax.linen.recurrent.flip_sequences
+    https://github.com/google/flax/blob/ \
+        c0ea12d3ecae1b87982131dbb637547b9f4eb43a/flax/linen/recurrent.py#L1180
+    
+    flips along axis 1, but keeps padding at the end!
+    
+    example:
+        
+        [[1, 1, 4],
+         [3, 4, 1],
+         [2, 2, 5],
+         [0, 0, 0],
+         [0, 0, 0]]
+        
+             |
+             v
+             
+        [[2, 2, 5],
+         [3, 4, 1],
+         [1, 1, 4],
+         [0, 0, 0],
+         [0, 0, 0]]
+        
+    
+    Arguments:
+    ------------
+    inputs : ArrayLike, (B, L, 3)
+        used to determine indexes
+    
+    bkw_stacked_outputs : ArrayLike, (L, T, C, B) 
+        outputs from running backwards algorithm
+       
+    Returns:
+    ---------
+    outputs : ArrayLike, (L, T, C, B) 
+        bkw_stacked_outputs, flipped along length axis
+        
+    """
+    B = inputs.shape[0]
+    L = inputs.shape[1]
+    T = bkw_stacked_outputs.shape[1]
+    C = bkw_stacked_outputs.shape[2]
+    
+    seq_lengths = (inputs[...,0] != 0).sum(axis=1) #(B,)
+    seq_lengths = seq_lengths[None,None,None,:] #(1, 1, 1, B)
+    
+    idxs = jnp.arange(L - 1, -1, -1)  # (L_align,)
+    idxs = jnp.reshape( idxs, (L, 1, 1, 1) ) #(L_align, 1, 1, 1)
+    idxs = (idxs + seq_lengths) % L  # (L_align, 1, 1, B)
+    idxs = jnp.broadcast_to( idxs, (L, T, C, B) ) #(L_align, T, C, B) 
+    
+    outputs = jnp.take_along_axis( bkw_stacked_outputs, idxs, axis=0 ) #(L_align, T, C, B) 
+    
+    return outputs
+
+def flip_backwards_outputs_with_len_per_samp( inputs,
+                                              bkw_stacked_outputs ):
+    """
+    adapted from flax.linen.recurrent.flip_sequences
+    https://github.com/google/flax/blob/ \
+        c0ea12d3ecae1b87982131dbb637547b9f4eb43a/flax/linen/recurrent.py#L1180
+    
+    flips along axis 1, but keeps padding at the end!
+    
+    example:
+        
+        [[1, 1, 4],
+         [3, 4, 1],
+         [2, 2, 5],
+         [0, 0, 0],
+         [0, 0, 0]]
+        
+             |
+             v
+             
+        [[2, 2, 5],
+         [3, 4, 1],
+         [1, 1, 4],
+         [0, 0, 0],
+         [0, 0, 0]]
+        
+    
+    Arguments:
+    ------------
+    inputs : ArrayLike, (B, L, 3)
+        used to determine indexes
+    
+    bkw_stacked_outputs : ArrayLike, (L, C, B) 
+        outputs from running backwards algorithm
+       
+    Returns:
+    ---------
+    outputs : ArrayLike, (L, C, B) 
+        bkw_stacked_outputs, flipped along length axis
+        
+    """
+    B = inputs.shape[0]
+    L = inputs.shape[1]
+    C = bkw_stacked_outputs.shape[1]
+    
+    seq_lengths = (inputs[...,0] != 0).sum(axis=1) #(B,)
+    max_steps = inputs.shape[1]
+    seq_lengths = seq_lengths[None,None,:] #(1, 1, B)
+    
+    idxs = jnp.arange(max_steps - 1, -1, -1)  # (L_align,)
+    idxs = jnp.reshape( idxs, (max_steps, 1, 1) ) #(L_align, 1, 1)
+    idxs = (idxs + seq_lengths) % max_steps  # (L_align, 1, B)
+    idxs = jnp.broadcast_to( idxs, (L_align, C_frag, B) ) #(L_align, C, B) 
+    
+    outputs = jnp.take_along_axis( bkw_stacked_outputs, idxs, axis=0 ) #(L_align, C, B) 
+    
+    return outputs
