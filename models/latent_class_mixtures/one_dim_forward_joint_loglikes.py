@@ -61,7 +61,7 @@ def joint_only_one_dim_forward_len_per_samp(aligned_inputs,
     ---------
     loglike : ArrayLike, (B,)
     
-    stacked_outputs : ArrayLike, (L_align, C, B)
+    stacked_outputs : ArrayLike, (L_align-1, C, B)
         the cache from the forward algorithm; this is the total log-probability 
         of ending at a given alignment column (l \in L_align) in class C, given
         the observed alignment
@@ -72,6 +72,7 @@ def joint_only_one_dim_forward_len_per_samp(aligned_inputs,
         classes C. This leaves you with the joint probability of the observed 
         alignment, at all branch lengths in T
     """
+    which = 'fw'
     B = aligned_inputs.shape[0]
     L_align = aligned_inputs.shape[1]
     
@@ -80,7 +81,7 @@ def joint_only_one_dim_forward_len_per_samp(aligned_inputs,
                                                 joint_logprob_emit_at_match,
                                                 logprob_emit_at_indel,
                                                 joint_logprob_transit,
-                                                which = 'fw' ) #(C, B)
+                                                which = which ) #(C, B)
     
     
     ######################################################
@@ -116,7 +117,8 @@ def joint_only_one_dim_forward_len_per_samp(aligned_inputs,
             accum_sum = joint_message_passing_len_per_samp( prev_message = in_carry, 
                                                       ps = ps, 
                                                       cs = cs, 
-                                                      joint_logprob_transit = joint_logprob_transit ) #(C_curr, B)
+                                                      joint_logprob_transit = joint_logprob_transit,
+                                                      which = which ) #(C_curr, B)
             return accum_sum + e  #(C_curr, B)
             
         def end(in_carry, ps, cs_not_used):
@@ -159,14 +161,14 @@ def joint_only_one_dim_forward_len_per_samp(aligned_inputs,
         _, stacked_outputs = jax.lax.scan( f = scan_fn,
                                             init = init_alpha,
                                             xs = idx_arr,
-                                            length = idx_arr.shape[0] )  #(L_align-1, C, B)
+                                            length = idx_arr.shape[0] )  #(L_align-2, C, B)
         
         # append the first return value (from sentinel -> first alignment column)
         stacked_outputs = jnp.concatenate( [ init_alpha[None,...], #(1, C, B)
-                                             stacked_outputs ], #(L_align-1, C, B)
-                                          axis=0) #(L_align, C, B)
+                                             stacked_outputs ], #(L_align-2, C, B)
+                                          axis=0) #(L_align-1, C, B)
         
-        return stacked_outputs #(L_align, C, B)
+        return stacked_outputs #(L_align-1, C, B)
 
 
 def joint_only_one_dim_forward_time_grid(aligned_inputs,
@@ -209,7 +211,7 @@ def joint_only_one_dim_forward_time_grid(aligned_inputs,
     ---------
     loglike : ArrayLike, (T, B)
     
-    stacked_outputs : ArrayLike, (L_align, T, C, B) 
+    stacked_outputs : ArrayLike, (L_align-1, T, C, B) 
         the cache from the forward algorithm; this is the total log-probability 
         of ending at a given alignment column (l \in L_align) in class C, given
         the observed alignment
@@ -220,6 +222,7 @@ def joint_only_one_dim_forward_time_grid(aligned_inputs,
         classes C. This leaves you with the joint probability of the observed 
         alignment, at all branch lengths in T
     """
+    which = 'fw'
     B = aligned_inputs.shape[0]
     L_align = aligned_inputs.shape[1]
     
@@ -228,7 +231,7 @@ def joint_only_one_dim_forward_time_grid(aligned_inputs,
                                  joint_logprob_emit_at_match,
                                  logprob_emit_at_indel,
                                  joint_logprob_transit,
-                                 which = 'fw' ) #(T, C, B)
+                                 which = which ) #(T, C, B)
     
     ######################################################
     ### scan down length dimension to end of alignment   #
@@ -266,7 +269,8 @@ def joint_only_one_dim_forward_time_grid(aligned_inputs,
             accum_sum = joint_message_passing_time_grid( prev_message = in_carry, 
                                                    ps = ps, 
                                                    cs = cs, 
-                                                   joint_logprob_transit = joint_logprob_transit ) #(T, C_curr, B)
+                                                   joint_logprob_transit = joint_logprob_transit,
+                                                   which = which ) #(T, C_curr, B)
             return accum_sum + e  #(T, C_curr, B)
         
         def end(in_carry, ps, cs_not_used):
@@ -308,14 +312,14 @@ def joint_only_one_dim_forward_time_grid(aligned_inputs,
         _, stacked_outputs = jax.lax.scan( f = scan_fn,
                                             init = init_alpha,
                                             xs = idx_arr,
-                                            length = idx_arr.shape[0] )  #(L_align-1, T, C, B) 
+                                            length = idx_arr.shape[0] )  #(L_align-2, T, C, B) 
         
         # append the first return value (from sentinel -> first alignment column)
         stacked_outputs = jnp.concatenate( [ init_alpha[None,...], #(1, T, C, B)
-                                             stacked_outputs ], #(L_align-1, T, C, B)
-                                          axis=0) #(L_align, T, C, B) 
+                                             stacked_outputs ], #(L_align-2, T, C, B)
+                                          axis=0) #(L_align-1, T, C, B) 
         
-        return stacked_outputs #(L_align, T, C, B) 
+        return stacked_outputs #(L_align-1, T, C, B) 
     
 
 def joint_only_one_dim_forward(aligned_inputs,

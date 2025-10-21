@@ -31,7 +31,7 @@ from models.latent_class_mixtures.one_dim_forward_joint_loglikes import joint_on
 
 THRESHOLD = 1e-6
 
-class TestJointOnlyForwardUniqBranchLen(unittest.TestCase):
+class TestJointOnlyForwardSumUniqBranchLen(unittest.TestCase):
     """
     About
     ------

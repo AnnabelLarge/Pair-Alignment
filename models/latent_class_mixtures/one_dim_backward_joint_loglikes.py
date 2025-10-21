@@ -19,8 +19,9 @@ from models.latent_class_mixtures.one_dim_fwd_bkwd_helpers import (init_recurs_w
                                                                    joint_loglike_emission_time_grid,
                                                                    joint_message_passing_len_per_samp,
                                                                    joint_message_passing_time_grid,
-                                                                   flip_backward_outputs_with_time_grid)
-                                                                   flip_backward_outputs_with_len_per_samp)
+                                                                   flip_backward_outputs_with_time_grid,
+                                                                   flip_backward_outputs_with_len_per_samp,
+                                                                   flip_alignments)
 
 def joint_only_one_dim_backward_time_grid(aligned_inputs,
                                           joint_logprob_emit_at_match,
@@ -62,7 +63,11 @@ def joint_only_one_dim_backward_time_grid(aligned_inputs,
     stacked_outputs : ArrayLike, (L_align, T, C, B) 
         the cache from the backward algorithm
     """
-    # fliip inputs
+    which = 'bkw'
+    B = aligned_inputs.shape[0]
+    L_align = aligned_inputs.shape[1]
+    
+    # flip inputs
     flipped_aligned_inputs = flip_alignments(aligned_inputs)  #(B, L, 3)
     del aligned_inputs
 
@@ -71,7 +76,7 @@ def joint_only_one_dim_backward_time_grid(aligned_inputs,
                                              joint_logprob_emit_at_match = joint_logprob_emit_at_match,
                                              logprob_emit_at_indel = logprob_emit_at_indel,
                                              joint_logprob_transit = joint_logprob_transit,
-                                             which = 'bkw' ) #(T, C, B)
+                                             which = which ) #(T, C, B)
     
     ### recursion
     def scan_fn(prev_alpha, pos):
@@ -104,7 +109,8 @@ def joint_only_one_dim_backward_time_grid(aligned_inputs,
             accum_sum = joint_message_passing_time_grid( prev_message = in_carry, 
                                                    ps = ps, 
                                                    cs = cs, 
-                                                   joint_logprob_transit = joint_logprob_transit ) #(T, C_prev, B)
+                                                   joint_logprob_transit = joint_logprob_transit,
+                                                   which = which ) #(T, C_prev, B)
             return accum_sum + e  #(T, C_prev, B)
         
         def end(in_carry, ps_not_used, cs):
@@ -135,18 +141,18 @@ def joint_only_one_dim_backward_time_grid(aligned_inputs,
     _, stacked_outputs = jax.lax.scan( f = scan_fn,
                                         init = init_alpha,
                                         xs = idx_arr,
-                                        length = idx_arr.shape[0] )  #(L_align-1, T, C, B) 
+                                        length = idx_arr.shape[0] )  #(L_align-2, T, C, B) 
     
     # append the first return value (from sentinel -> first alignment column)
     stacked_outputs = jnp.concatenate( [ init_alpha[None,...], #(1, T, C, B)
                                          stacked_outputs ], #(L_align-1, T, C, B)
-                                      axis=0) #(L_align, T, C, B) 
+                                      axis=0) #(L_align-1, T, C, B) 
     
     ### flip this along L_align
     # padding posititions will have same value as l=0
-    flipped_stacked_outputs = flip_backward_outputs_with_time_grid( inputs = flipped_aligned_inputs
+    flipped_stacked_outputs = flip_backward_outputs_with_time_grid( inputs = flipped_aligned_inputs,
                                                                      bkw_stacked_outputs = stacked_outputs ) #(L_align, T, C, B) 
-    
+        
     return flipped_stacked_outputs
 
 
@@ -189,6 +195,10 @@ def joint_only_one_dim_backward_len_per_samp(aligned_inputs,
     stacked_outputs : ArrayLike, (L_align, T, C, B) 
         the cache from the backward algorithm
     """
+    which = 'bkw'
+    B = aligned_inputs.shape[0]
+    L_align = aligned_inputs.shape[1]
+    
     # flip inputs
     flipped_aligned_inputs = flip_alignments(aligned_inputs)  #(B, L, 3)
     del aligned_inputs
@@ -198,7 +208,7 @@ def joint_only_one_dim_backward_len_per_samp(aligned_inputs,
                                              joint_logprob_emit_at_match = joint_logprob_emit_at_match,
                                              logprob_emit_at_indel = logprob_emit_at_indel,
                                              joint_logprob_transit = joint_logprob_transit,
-                                             which = 'bkw' ) #(C, B)
+                                             which = which ) #(C, B)
 
 
     ### recursion
@@ -232,7 +242,8 @@ def joint_only_one_dim_backward_len_per_samp(aligned_inputs,
             accum_sum = joint_message_passing_len_per_samp( prev_message = in_carry, 
                                                       ps = ps, 
                                                       cs = cs, 
-                                                      joint_logprob_transit = joint_logprob_transit ) #(C_prev, B)
+                                                      joint_logprob_transit = joint_logprob_transit,
+                                                      which = which) #(C_prev, B)
             return accum_sum + e  #(C_prev, B)
             
         def end(in_carry, ps_not_used, cs):
@@ -241,7 +252,7 @@ def joint_only_one_dim_backward_len_per_samp(aligned_inputs,
             cs = jnp.maximum(cs, 1) #(B,)
             
             # simple indexing to get end state
-            any_to_start joint_logprob_transit[:, -1, :, -1, :]  # (B, C_prev, S_prev)
+            any_to_start = joint_logprob_transit[:, -1, :, -1, :]  # (B, C_prev, S_prev)
             final_tr = any_to_start[jnp.arange(B), :, cs-1] #(B, C_prev)
             final_tr = final_tr.T  # (C_prev, B)
             return final_tr + in_carry #(C, B)
@@ -273,7 +284,7 @@ def joint_only_one_dim_backward_len_per_samp(aligned_inputs,
     
     ### flip this along L_align
     # padding posititions will have same value as l=0
-    flipped_stacked_outputs = flip_backward_outputs_len_per_samp( inputs = flipped_aligned_inputs
+    flipped_stacked_outputs = flip_backward_outputs_with_len_per_samp( inputs = flipped_aligned_inputs,
                                                                   bkw_stacked_outputs = stacked_outputs ) #(L_align, C, B) 
     
     return flipped_stacked_outputs
@@ -283,8 +294,7 @@ def joint_only_one_dim_backward(aligned_inputs,
                        joint_logprob_emit_at_match,
                        logprob_emit_at_indel,
                        joint_logprob_transit,
-                       unique_time_per_sample: bool, 
-                       return_all_intermeds: bool = False):
+                       unique_time_per_sample: bool):
     """
     Wrapper; see individual functions for more details
     """
@@ -292,13 +302,11 @@ def joint_only_one_dim_backward(aligned_inputs,
         return joint_only_one_dim_backward_len_per_samp(aligned_inputs,
                                                         joint_logprob_emit_at_match,
                                                         logprob_emit_at_indel,
-                                                        joint_logprob_transit,
-                                                        return_all_intermeds)
+                                                        joint_logprob_transit)
 
     elif not unique_time_per_sample:  
         return joint_only_one_dim_backward_time_grid(aligned_inputs,
                                                      joint_logprob_emit_at_match,
                                                      logprob_emit_at_indel,
-                                                     joint_logprob_transit,
-                                                     return_all_intermeds)
+                                                     joint_logprob_transit)
     

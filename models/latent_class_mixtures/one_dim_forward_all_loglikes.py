@@ -67,6 +67,8 @@ def all_loglikes_one_dim_forward_len_per_samp(aligned_inputs,
             transition matrix for finding logP(anc | c, t) or logP(desc | c, t)
     
     """
+    which = 'fw'
+    
     # unpack
     joint_logprob_transit = all_transit_matrices['joint']  # (B, C, C, S, S)
     marginal_logprob_transit = all_transit_matrices['marginal']  # (C, C, 2, 2)
@@ -82,7 +84,7 @@ def all_loglikes_one_dim_forward_len_per_samp(aligned_inputs,
                                                       joint_logprob_emit_at_match,
                                                       logprob_emit_at_indel,
                                                       joint_logprob_transit,
-                                                      which = 'fw' ) #(C, B)
+                                                      which = which ) #(C, B)
     # logP(anc), logP(desc)
     first_tr = marginal_logprob_transit[0,:,1,0][...,None] #(C, 1)
     out = init_marginals(aligned_inputs = aligned_inputs,
@@ -155,7 +157,8 @@ def all_loglikes_one_dim_forward_len_per_samp(aligned_inputs,
             accum_sum = joint_message_passing_len_per_samp( prev_message = joint_carry, 
                                                       ps = ps, 
                                                       cs = cs, 
-                                                      joint_logprob_transit = joint_logprob_transit ) #(C_curr, B)
+                                                      joint_logprob_transit = joint_logprob_transit,
+                                                      which = which ) #(C_curr, B)
             joint_out = accum_sum + joint_e  #(C_curr, B)
             
             
@@ -306,6 +309,8 @@ def all_loglikes_one_dim_forward_time_grid(aligned_inputs,
     ---------
     
     """
+    which = 'fw'
+    
     # unpack
     joint_logprob_transit = all_transit_matrices['joint']  # (T, C, C, S, S)
     marginal_logprob_transit = all_transit_matrices['marginal']  # (C, C, 2, 2)
@@ -322,7 +327,7 @@ def all_loglikes_one_dim_forward_time_grid(aligned_inputs,
                                        joint_logprob_emit_at_match,
                                        logprob_emit_at_indel,
                                        joint_logprob_transit,
-                                       which = 'fw' ) #(C, B)
+                                       which = which ) #(C, B)
     
     
     # logP(anc), logP(desc)
@@ -397,7 +402,8 @@ def all_loglikes_one_dim_forward_time_grid(aligned_inputs,
             accum_sum = joint_message_passing_time_grid( prev_message = joint_carry, 
                                                       ps = ps, 
                                                       cs = cs, 
-                                                      joint_logprob_transit = joint_logprob_transit ) #(T, C_curr, B)
+                                                      joint_logprob_transit = joint_logprob_transit,
+                                                      which = which ) #(T, C_curr, B)
             joint_out = accum_sum + joint_e  #(T, C_curr, B)
             
             

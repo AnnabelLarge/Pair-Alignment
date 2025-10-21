@@ -27,29 +27,19 @@ from tests.data_processing import (str_aligns_to_tensor,
 
 from models.latent_class_mixtures.transition_models import TKF92TransitionLogprobs
 from models.latent_class_mixtures.model_functions import switch_tkf
+from companion_scripts_files.forward_backward_posteriors import forward_backward_posteriors
+from models.latent_class_mixtures.one_dim_backward_joint_loglikes import joint_only_one_dim_backward as joint_only_backward
 from models.latent_class_mixtures.one_dim_forward_joint_loglikes import joint_only_one_dim_forward as joint_only_forward
 
 THRESHOLD = 1e-6
 
-class TestJointOnlyForward(unittest.TestCase):
+class TestPosteriorLabeling(unittest.TestCase):
     """
-    About
-    ------
-    compare forward algo implementation to manual enumeration over all 
-      possible paths, given example alignments
-    
     this is done with a fixed time grid
-    
     """
     def setUp(self):
         # fake inputs
-        self.fake_aligns = [ ('T','T'),
-                              ('AC-A','D-ED'),
-                              ('D-ED','AC-A'),
-                              ('-C-A-','ECDAD'),
-                              ('-C-A-AA','ECDADAA'),
-                             ]
-        
+        self.fake_aligns = [ ('AC','AD') ]
         self.fake_aligns =  str_aligns_to_tensor(self.fake_aligns) #(B, L, 3)
         
         # fake params
@@ -108,68 +98,43 @@ class TestJointOnlyForward(unittest.TestCase):
         del my_tkf_params, my_model, fake_params
     
     
-    def test_forward(self):
-        ### pred
-        forward_intermeds = joint_only_forward(aligned_inputs = self.fake_aligns,
+    def test_fn(self):
+        posteriors = forward_backward_posteriors(aligned_inputs = self.fake_aligns,
                                                joint_logprob_emit_at_match = self.joint_logprob_emit_at_match,
                                                logprob_emit_at_indel = self.logprob_emit_at_indel,
                                                joint_logprob_transit = self.joint_logprob_transit,
-                                               unique_time_per_sample = False,
-                                               return_all_intermeds = True)
+                                               unique_time_per_sample = False) # (L_align, T, C, B)
         
-        # (L_align, T, C, B) -> (T, B)
-        pred = logsumexp(forward_intermeds[-1,...], axis=1)
+        # forward intermeds
+        fwd = joint_only_forward(aligned_inputs = self.fake_aligns,
+                                 joint_logprob_emit_at_match = self.joint_logprob_emit_at_match,
+                                 logprob_emit_at_indel = self.logprob_emit_at_indel,
+                                 joint_logprob_transit = self.joint_logprob_transit,
+                                 unique_time_per_sample = False,
+                                 return_all_intermeds = True) # (L_align-1, T, C, B)
+        
+        # backward intermeds
+        bkw = joint_only_backward(aligned_inputs = self.fake_aligns,
+                                  joint_logprob_emit_at_match = self.joint_logprob_emit_at_match,
+                                  logprob_emit_at_indel = self.logprob_emit_at_indel,
+                                  joint_logprob_transit = self.joint_logprob_transit,
+                                  unique_time_per_sample = False) # (L_align-1, T, C, B)
+        
+        ### manually combine and check
+        # l=0: bkw_0
+        npt.assert_allclose( posteriors[0,...], bkw[0,...] )
+        
+        # l=1: bkw_1 + fwd_0
+        true_post = fwd[0,...] + bkw[1,...]
+        npt.assert_allclose( posteriors[1,...], true_post )
+        
+        # l=2: bkw_2 + fwd_1
+        true_post = fwd[1,...] + bkw[2,...]
+        npt.assert_allclose( posteriors[2,...], true_post )
+        
+        # l=3: fwd_2
+        npt.assert_allclose( posteriors[3,...], fwd[2,...] )
         
         
-        ### true
-        for t in range(self.T):
-            for b in tqdm( range(self.B) ):
-                sample_seq = self.fake_aligns[b,:,:]
-                
-                # all possible path combinations
-                invalid_toks = jnp.array([0,1,2])
-                n = (  ~jnp.isin(sample_seq[:, 0], invalid_toks) ).sum()
-                paths = [list(p) for p in product(range(self.C_frag), repeat= int(n) )]
-                
-                # manually score each possible path
-                score_per_path = []
-                for path in paths:
-                    to_pad = self.L_align - (len(path)+1)
-                    path = [-999] + path + [-999]*to_pad
-                    path_logprob = 0
-                    prev_state = sample_seq[0, -1]
-                    for l in range(1,self.L_align):
-                        prev_site_class = path[l-1]
-                        curr_site_class = path[l]
-                        anc_tok, desc_tok, curr_state = sample_seq[l,:]
-                        
-                        if curr_state == 0:
-                            break
-                        
-                        curr_state = jnp.where(curr_state != 5, curr_state, 4)
-                        
-                        ### emissions
-                        e = 0
-                        
-                        if curr_state == 1:
-                            e = self.joint_logprob_emit_at_match[t, curr_site_class, anc_tok - 3, desc_tok - 3]
-                        
-                        elif curr_state == 2:
-                            e = self.logprob_emit_at_indel[curr_site_class, desc_tok-3]
-                        
-                        elif curr_state == 3:
-                            e = self.logprob_emit_at_indel[curr_site_class, anc_tok-3]
-                        
-                        ### transitions
-                        tr = self.joint_logprob_transit[t, prev_site_class, curr_site_class, prev_state-1, curr_state-1]
-                        path_logprob += (tr + e)
-                        prev_state = curr_state
-                    
-                    score_per_path.append(path_logprob)
-                    
-                true = logsumexp( jnp.array(score_per_path) )
-                npt.assert_allclose(pred[t,b], true, rtol=THRESHOLD)
-
-
 if __name__ == '__main__':
     unittest.main()

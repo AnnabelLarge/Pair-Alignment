@@ -316,7 +316,8 @@ def init_recurs_with_len_per_samp(aligned_inputs,
 
 def init_marginals(aligned_inputs,
                    logprob_emit_at_indel,
-                   first_tr ):
+                   first_tr,
+                   which ):
     # start at pos=1
     anc_toks =   aligned_inputs[:, 1, 0] #(B,)
     desc_toks =  aligned_inputs[:, 1, 1] #(B,)
@@ -357,10 +358,13 @@ def init_marginals(aligned_inputs,
 def joint_message_passing_len_per_samp(prev_message, 
                                  ps, 
                                  cs, 
-                                 joint_logprob_transit):
+                                 joint_logprob_transit,
+                                 which):
     """
     joint_logprob_transit is (B, C_prev, C_curr, S_prev, S_curr)
-    prev_message is (C_prev, B)
+    
+    if which == 'fw', then pass message FORWARD (prev -> curr)
+    if which == 'bwd', then pass message BACKWARDS (curr -> prev)
     """
     ps = ps-1 #(B,)
     cs = cs-1 #(B,)
@@ -368,27 +372,64 @@ def joint_message_passing_len_per_samp(prev_message,
     
     tr_per_class = joint_logprob_transit[jnp.arange(B), :, :, ps, cs] #(B, C_prev, C_curr)
     tr_per_class = jnp.transpose(tr_per_class, (1, 2, 0)) #(C_prev, C_curr, B) 
-    new_message = logsumexp(prev_message[:, None, :] + tr_per_class, axis=0) #(C_curr, B) 
+    
+    if which == 'fw':
+        # prev -> curr
+        # prev_message is (C_prev, B)
+        # new_message should be (C_curr, B)
+        prev_message_expanded = prev_message[:, None, :] #(C_prev, 1, B)
+        to_lse = prev_message_expanded + tr_per_class #(C_prev, C_curr, B)
+        new_message = logsumexp( to_lse, axis=0 ) #(C_curr, B)
+    
+    elif which == 'bkw':
+        # curr -> prev
+        # prev_message is (C_curr, B)
+        # new_message should be (C_prev, B)
+        prev_message_expanded = prev_message[None, :, :] #(1, C_curr, B)
+        to_lse = prev_message_expanded + tr_per_class #(C_prev, C_curr, B)
+        new_message = logsumexp( to_lse, axis=1 ) #(C_prev, B)
+        
     return new_message
 
 
 def joint_message_passing_time_grid(prev_message, 
                               ps, 
                               cs, 
-                              joint_logprob_transit):
+                              joint_logprob_transit,
+                              which):
     """
     joint_logprob_transit is (T, C_prev, C_curr, S_prev, S_curr)
-    prev_message is (T, C_prev, B)
+    
+    if which == 'fw', then pass message FORWARD (prev -> curr)
+    if which == 'bwd', then pass message BACKWARDS (curr -> prev)
     """
     ps = ps-1 #(B,)
     cs = cs-1 #(B,)
     tr_per_class = joint_logprob_transit[..., ps, cs] #(T, C_prev, C_curr, B)   
-    new_message = logsumexp(prev_message[:, :, None, :] + tr_per_class, axis=1) #(T, C_curr, B)
+    
+    
+    if which == 'fw':
+        # prev -> curr
+        # prev_message is (T, C_prev, B)
+        # new_message should be (T, C_curr, B)
+        prev_message_expanded = prev_message[:, :, None, :] #(T, C_prev, 1, B)
+        to_lse = prev_message_expanded + tr_per_class #(T, C_prev, C_curr, B)
+        new_message = logsumexp( to_lse, axis=1 ) #(T, C_curr, B)
+    
+    elif which == 'bkw':
+        # curr -> prev
+        # prev_message is (C_curr, B)
+        # new_message should be (C_prev, B)
+        prev_message_expanded = prev_message[:, None, :, :] #(T, 1, C_curr, B)
+        to_lse = prev_message_expanded + tr_per_class #(T, C_prev, C_curr, B)
+        new_message = logsumexp( to_lse, axis=2 ) #(T, C_prev, B)
+    
     return new_message
 
     
 def marginal_message_passing(prev_message, 
-                                     marginal_logprob_transit):
+                             marginal_logprob_transit,
+                             which):
     """
     prev_message is (C_prev, B)
     marginal_logprob_transit is (C_prev, C_curr, 2, 2)
@@ -459,6 +500,7 @@ def flip_alignments(inputs):
     
     return outputs
 
+
 def flip_backward_outputs_with_time_grid( inputs,
                                            bkw_stacked_outputs ):
     """
@@ -466,24 +508,9 @@ def flip_backward_outputs_with_time_grid( inputs,
     https://github.com/google/flax/blob/ \
         c0ea12d3ecae1b87982131dbb637547b9f4eb43a/flax/linen/recurrent.py#L1180
     
-    flips along axis 1, but keeps padding at the end!
+    flips along axis 0, but keeps padding at the end!
     
-    example:
-        
-        [[1, 1, 4],
-         [3, 4, 1],
-         [2, 2, 5],
-         [0, 0, 0],
-         [0, 0, 0]]
-        
-             |
-             v
-             
-        [[2, 2, 5],
-         [3, 4, 1],
-         [1, 1, 4],
-         [0, 0, 0],
-         [0, 0, 0]]
+    example: [1,2,3,0,0] -> [3,2,1,0,0]
         
     
     Arguments:
@@ -501,11 +528,11 @@ def flip_backward_outputs_with_time_grid( inputs,
         
     """
     B = inputs.shape[0]
-    L = inputs.shape[1]
+    L = bkw_stacked_outputs.shape[0]
     T = bkw_stacked_outputs.shape[1]
     C = bkw_stacked_outputs.shape[2]
     
-    seq_lengths = (inputs[...,0] != 0).sum(axis=1) #(B,)
+    seq_lengths = (inputs[...,0] != 0).sum(axis=1)-1 #(B,)
     seq_lengths = seq_lengths[None,None,None,:] #(1, 1, 1, B)
     
     idxs = jnp.arange(L - 1, -1, -1)  # (L_align,)
@@ -517,6 +544,7 @@ def flip_backward_outputs_with_time_grid( inputs,
     
     return outputs
 
+
 def flip_backward_outputs_with_len_per_samp( inputs,
                                               bkw_stacked_outputs ):
     """
@@ -524,24 +552,9 @@ def flip_backward_outputs_with_len_per_samp( inputs,
     https://github.com/google/flax/blob/ \
         c0ea12d3ecae1b87982131dbb637547b9f4eb43a/flax/linen/recurrent.py#L1180
     
-    flips along axis 1, but keeps padding at the end!
+    flips along axis 0, but keeps padding at the end!
     
-    example:
-        
-        [[1, 1, 4],
-         [3, 4, 1],
-         [2, 2, 5],
-         [0, 0, 0],
-         [0, 0, 0]]
-        
-             |
-             v
-             
-        [[2, 2, 5],
-         [3, 4, 1],
-         [1, 1, 4],
-         [0, 0, 0],
-         [0, 0, 0]]
+    example: [1,2,3,0,0] -> [3,2,1,0,0]
         
     
     Arguments:
@@ -559,17 +572,17 @@ def flip_backward_outputs_with_len_per_samp( inputs,
         
     """
     B = inputs.shape[0]
-    L = inputs.shape[1]
+    L = bkw_stacked_outputs.shape[0]
     C = bkw_stacked_outputs.shape[1]
     
-    seq_lengths = (inputs[...,0] != 0).sum(axis=1) #(B,)
-    max_steps = inputs.shape[1]
+    seq_lengths = (inputs[...,0] != 0).sum(axis=1)-1 #(B,)
+    max_steps = L
     seq_lengths = seq_lengths[None,None,:] #(1, 1, B)
     
-    idxs = jnp.arange(max_steps - 1, -1, -1)  # (L_align,)
-    idxs = jnp.reshape( idxs, (max_steps, 1, 1) ) #(L_align, 1, 1)
-    idxs = (idxs + seq_lengths) % max_steps  # (L_align, 1, B)
-    idxs = jnp.broadcast_to( idxs, (L_align, C_frag, B) ) #(L_align, C, B) 
+    idxs = jnp.arange(L - 1, -1, -1)  # (L_align,)
+    idxs = jnp.reshape( idxs, (L, 1, 1) ) #(L_align, 1, 1)
+    idxs = (idxs + seq_lengths) % L  # (L_align, 1, B)
+    idxs = jnp.broadcast_to( idxs, (L, C, B) ) #(L_align, C, B) 
     
     outputs = jnp.take_along_axis( bkw_stacked_outputs, idxs, axis=0 ) #(L_align, C, B) 
     
