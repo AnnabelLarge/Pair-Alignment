@@ -110,24 +110,4 @@ def main(args):
 
 
 if __name__ == '__main__':
-    config_file = 'CONFIG_ffwd_lstm.json'
-    
-    parser = argparse.ArgumentParser()
-    top_level_args = parser.parse_args()
-    
-    # open a single config file and extract additional arguments
-    def read_config_file(config_file):
-        with open(config_file, 'r') as f:
-            contents = json.load(f)
-            t_args = argparse.Namespace()
-            t_args.__dict__.update(contents)
-            args = parser.parse_args(namespace=t_args)
-        return args
-    
-    # read argparse
-    assert config_file.endswith('.json'), "input is one JSON file"
-    args = read_config_file(config_file)
-    pred_model_type = args.pred_model_type
-    
-    # count
-    main( args )
+    pass

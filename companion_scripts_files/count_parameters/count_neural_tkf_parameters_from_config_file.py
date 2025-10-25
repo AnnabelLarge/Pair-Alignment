@@ -110,27 +110,31 @@ def main(args):
 
 
 if __name__ == '__main__':
-    config_file = 'CONFIG_big-transf_big_out_network.json'
-    print(config_file)
-
-    parser = argparse.ArgumentParser()
-    top_level_args = parser.parse_args()
-    
-    # open a single config file and extract additional arguments
-    def read_config_file(config_file):
-        with open(config_file, 'r') as f:
-            contents = json.load(f)
-            t_args = argparse.Namespace()
-            t_args.__dict__.update(contents)
-            args = parser.parse_args(namespace=t_args)
-        return args
-    
-    # read argparse
-    assert config_file.endswith('.json'), "input is one JSON file"
-    args = read_config_file(config_file)
-    pred_model_type = args.pred_model_type
-    
-    # count
-    main( args )
-    print()
-    print()
+    for config_file in [
+            "configs_to_size/CONFIG_625_2blocks.json",
+            "configs_to_size/CONFIG_625_4blocks.json",
+            "configs_to_size/CONFIG_625_6blocks.json",
+            "configs_to_size/CONFIG_625_10blocks.json",
+            ]:
+        print(config_file)
+        print('-------------------------------------')
+        parser = argparse.ArgumentParser()
+        top_level_args = parser.parse_args()
+        
+        # open a single config file and extract additional arguments
+        def read_config_file(config_file):
+            with open(config_file, 'r') as f:
+                contents = json.load(f)
+                t_args = argparse.Namespace()
+                t_args.__dict__.update(contents)
+                args = parser.parse_args(namespace=t_args)
+            return args
+        
+        # read argparse
+        assert config_file.endswith('.json'), "input is one JSON file"
+        args = read_config_file(config_file)
+        pred_model_type = args.pred_model_type
+        
+        # count
+        main( args )
+        print()

@@ -316,8 +316,7 @@ def init_recurs_with_len_per_samp(aligned_inputs,
 
 def init_marginals(aligned_inputs,
                    logprob_emit_at_indel,
-                   first_tr,
-                   which ):
+                   first_tr):
     # start at pos=1
     anc_toks =   aligned_inputs[:, 1, 0] #(B,)
     desc_toks =  aligned_inputs[:, 1, 1] #(B,)
@@ -428,8 +427,7 @@ def joint_message_passing_time_grid(prev_message,
 
     
 def marginal_message_passing(prev_message, 
-                             marginal_logprob_transit,
-                             which):
+                             marginal_logprob_transit):
     """
     prev_message is (C_prev, B)
     marginal_logprob_transit is (C_prev, C_curr, 2, 2)

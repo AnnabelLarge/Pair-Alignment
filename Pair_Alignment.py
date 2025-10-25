@@ -87,8 +87,8 @@ def main():
     
     
     # # UNCOMMENT TO RUN IN SPYDER IDE
-    # top_level_args.task = 'eval'
-    # top_level_args.configs = 'CONFIG_eval_extract_params.json'
+    # top_level_args.task = 'train'
+    # top_level_args.configs = 'CONFIG_750_6blocks.json'
     # top_level_args.load_dset_pkl = None
     
     
